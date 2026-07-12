@@ -1,0 +1,25 @@
+* {
+  outline: none;
+  padding: 0;
+  margin: 0;
+}
+
+html, body {
+  background-color: #000;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* The joystick/tiles need touch-action:none above so dragging never
+   triggers a page scroll or pinch-zoom, but form fields still need normal
+   touch handling so typing a nickname and tapping buttons keeps working. */
+input, textarea, button {
+  touch-action: manipulation;
+  -webkit-user-select: auto;
+  user-select: auto;
+}

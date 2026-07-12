@@ -1,0 +1,12 @@
+{
+  "hosting": {
+    "target": "game",
+    "redirects": [
+      {
+        "source": "**",
+        "destination": "https://survival-tile-702017530812.asia-northeast3.run.app",
+        "type": 302
+      }
+    ]
+  }
+}

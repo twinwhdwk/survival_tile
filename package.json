@@ -1,0 +1,44 @@
+{
+  "name": "phaser3-multiplayer-template",
+  "version": "1.0.0",
+  "description": "A light Phaser 3 Multiplayer Game template using Socket IO.",
+  "scripts": {
+    "build": "webpack --config webpack.server.config.js && webpack --config webpack.client.config.js",
+    "start": "node dist/server.bundle.js",
+    "client": "webpack --config webpack.client.config.js --watch",
+    "server": "webpack --config webpack.server.config.js --watch",
+    "lint": "eslint src --ext .js"
+  },
+  "author": {
+    "name": "Brandon Morrissey",
+    "url": "https://github.com/BrandonMorr"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrandonMorr/phaser3-multiplayer-template.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/BrandonMorr/phaser3-multiplayer-template/issues"
+  },
+  "homepage": "https://github.com/BrandonMorr/phaser3-multiplayer-template#readme",
+  "dependencies": {
+    "compression": "^1.7.4",
+    "express": "^4.17.1",
+    "helmet": "^3.22.0",
+    "socket.io": "^2.3.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.9.6",
+    "@babel/preset-env": "^7.9.6",
+    "babel-loader": "^8.1.0",
+    "eslint": "^7.32.0",
+    "nodemon-webpack-plugin": "^4.3.1",
+    "phaser": "^3.23.0",
+    "socket.io-client": "^2.3.0",
+    "webpack": "^4.43.0",
+    "webpack-cli": "^3.3.11",
+    "webpack-dev-server": "^3.11.0",
+    "webpack-node-externals": "^1.7.2"
+  }
+}

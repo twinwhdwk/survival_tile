@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "project-ad2bbfa9-3823-4213-b0e"
+  },
+  "targets": {
+    "project-ad2bbfa9-3823-4213-b0e": {
+      "hosting": {
+        "game": [
+          "survival-tile-game"
+        ]
+      }
+    }
+  }
+}

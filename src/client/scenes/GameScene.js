@@ -1,0 +1,1563 @@
+import Phaser from 'phaser';
+
+import { getSocket } from '../net/socket';
+import { ensureAnimalTexture } from '../utilities/AnimalTextures';
+import { generateTileTextures, generateBackgroundTexture } from '../utilities/EffectTextures';
+import {
+  playWarning,
+  playCollapse,
+  playRevive,
+  playEliminate,
+  playOtherEliminate,
+  playBossHit,
+  playBossDefeat,
+  playBoundaryAlarm,
+  playCountdownTick,
+  playCountdownGo,
+} from '../utilities/SoundFx';
+import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateVictory } from '../utilities/Haptics';
+import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
+import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
+
+// Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
+// for both a tile's click/hover hit area and the ghost-revive highlight, so
+// interaction only triggers inside the actual hexagon rather than its
+// rectangular bounding box.
+function hexPoints(radius) {
+  const points = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 180) * (60 * i);
+    points.push(radius * Math.cos(angle), radius * Math.sin(angle));
+  }
+  return points;
+}
+
+const JOYSTICK_X = 70;
+const JOYSTICK_Y = WORLD_HEIGHT - 70;
+const JOYSTICK_RADIUS = 42;
+const JOYSTICK_DEADZONE = 8;
+
+const BOSS_BAR_WIDTH = 220;
+
+// Time constant (ms) for the exponential smoothing that eases each *other*
+// player's avatar toward its latest server-reported position. Roughly: the
+// avatar closes ~63% of the remaining gap every this-many-ms, so it fully
+// catches up within ~3x this. Tuned to feel like the old 180ms glide while
+// staying continuous — a bot that only steps once per server tick
+// (BOT_MOVE_INTERVAL_MS in server.js) keeps gliding smoothly between steps
+// instead of the previous restart-a-fresh-tween-every-message hitch (which
+// finished its 180ms tween then sat still until the next step re-triggered it).
+const OTHER_PLAYER_LERP_TAU = 70;
+
+export default class GameScene extends Phaser.Scene {
+
+  constructor() {
+    super({
+      key: 'GameScene',
+    });
+  }
+
+  preload() {
+
+  }
+
+  create(data) {
+    generateTileTextures(this);
+    generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
+
+    this.socket = getSocket();
+    this.player = null;
+    this.otherPlayers = {};
+    this.tileSprites = {};
+    this.localTileMap = null;
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    this.roomId = null;
+    this.roundStartTime = null;
+    this.roundDuration = null;
+    this.eliminated = false;
+    this.roomFinished = false;
+    this.isSpectator = false;
+    this.mode = 'SURVIVAL';
+    this.boss = null;
+    this.score = 0;
+    this.bossLowHpTween = null;
+    this.lastTimerSecond = null;
+    this.currentSafeBounds = null;
+    this.countdownActive = false;
+    this.pendingGhostRevives = new Set();
+    this.wasInDanger = false;
+
+    this.createBackground();
+    this.createEffects();
+    this.createHud();
+    this.createJoystick();
+    this.bindSocketEvents();
+    this.applySnapshot(data);
+  }
+
+  createBackground() {
+    this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
+  }
+
+  createEffects() {
+    this.debrisEmitter = this.add.particles('particle_debris').setDepth(2).createEmitter({
+      speed: { min: 60, max: 180 },
+      angle: { min: 0, max: 360 },
+      gravityY: 360,
+      lifespan: { min: 350, max: 550 },
+      scale: { start: 1.2, end: 0 },
+      alpha: { start: 1, end: 0 },
+      quantity: 0,
+      on: false,
+    });
+
+    this.sparkEmitter = this.add.particles('particle_spark').setDepth(2).createEmitter({
+      speed: { min: 30, max: 90 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 300, max: 500 },
+      scale: { start: 0.9, end: 0 },
+      alpha: { start: 1, end: 0 },
+      tint: 0xfff2b0,
+      quantity: 0,
+      on: false,
+    });
+
+    this.hitEmitter = this.add.particles('particle_spark').setDepth(16).createEmitter({
+      speed: { min: 80, max: 200 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 250, max: 400 },
+      scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      tint: 0xff5555,
+      quantity: 0,
+      on: false,
+    });
+
+    this.confettiEmitter = this.add.particles('particle_spark').setDepth(31).createEmitter({
+      speed: { min: 120, max: 320 },
+      angle: { min: 0, max: 360 },
+      gravityY: 250,
+      lifespan: { min: 600, max: 1000 },
+      scale: { start: 1.1, end: 0.2 },
+      alpha: { start: 1, end: 0 },
+      tint: [0xff5555, 0xffd700, 0x55ff88, 0x55aaff, 0xff88ff],
+      quantity: 0,
+      on: false,
+    });
+
+    this.eliminationEmitter = this.add.particles('particle_spark').setDepth(6).createEmitter({
+      speed: { min: 60, max: 160 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 300, max: 500 },
+      scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      tint: 0x99ccff,
+      quantity: 0,
+      on: false,
+    });
+
+    this.add.particles('particle_spark').setDepth(-10).createEmitter({
+      x: { min: 0, max: WORLD_WIDTH },
+      y: WORLD_HEIGHT + 10,
+      speedY: { min: -18, max: -8 },
+      speedX: { min: -6, max: 6 },
+      lifespan: { min: 6000, max: 9000 },
+      scale: { start: 0.4, end: 0.1 },
+      alpha: { start: 0.18, end: 0 },
+      tint: 0x8899ff,
+      frequency: 400,
+      quantity: 1,
+    });
+
+    this.footstepEmitter = this.add.particles('particle_debris').setDepth(2).createEmitter({
+      speed: { min: 5, max: 20 },
+      angle: { min: 200, max: 340 },
+      lifespan: { min: 200, max: 350 },
+      scale: { start: 0.5, end: 0 },
+      alpha: { start: 0.4, end: 0 },
+      tint: 0xdadde8,
+      quantity: 0,
+      on: false,
+    });
+    this.lastFootstepAt = 0;
+  }
+
+  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, boss, score, isSpectator }) {
+    this.roomId = roomId;
+    this.isSpectator = !!isSpectator;
+    this.renderMap(tileMap);
+
+    // A spectator's own socket id is never a key in `players` (the server
+    // never seats an admin into a room — see startTournament/startStage in
+    // server.js), so this loop naturally renders everyone else as
+    // addOtherPlayer() and never calls addPlayer(): this.player stays
+    // null, which already makes update()'s movement handling and the
+    // joystick inert with no further guards needed.
+    Object.keys(players).forEach((id) => {
+      if (id === this.socket.id) {
+        this.addPlayer(players[id]);
+      } else {
+        this.addOtherPlayer(players[id]);
+      }
+    });
+    this.updatePlayerCount();
+
+    if (this.isSpectator) {
+      this.hideJoystick();
+      this.spectatorBadge.setVisible(true);
+      this.spectatorBadgePanel.setVisible(true);
+      this.fitPanelWidth(this.spectatorBadgePanel, this.spectatorBadge, 24);
+
+      if (!this.spectatorBadgePulse) {
+        this.spectatorBadgePulse = this.tweens.add({
+          targets: this.spectatorBadge,
+          alpha: 0.6,
+          duration: 900,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      }
+    }
+
+    this.roundStartTime = roundStartTime;
+    this.roundDuration = roundDuration;
+    this.mode = mode || 'SURVIVAL';
+
+    if (this.mode === 'BOSS' && boss) {
+      this.initBossHud(boss);
+    } else {
+      // SURVIVAL rounds now score teammates by survival time too (see
+      // Room.js addSurvivalScore), so the readout needs to be visible from
+      // the start here as well, not just once a boss fight begins.
+      this.scorePanel.setVisible(true);
+      this.scoreText.setVisible(true);
+    }
+    this.updateScoreText(score || 0);
+
+    this.cameras.main.fadeIn(400, 9, 11, 24);
+    this.showStartCountdown(() => {
+      if (this.mode === 'BOSS') {
+        this.showBanner('보스전 시작!\n협력해서 보스를 물리치세요!', '#ff8888');
+      } else {
+        this.showBanner('생존하라!\n타일이 무너지기 전에 버티세요', '#88ccff');
+      }
+    });
+  }
+
+  // A purely cosmetic 10-second countdown before each round (including
+  // every later bracket stage, not just the very first) — gives players a
+  // moment to get their bearings before movement is allowed. The server's
+  // own timers (mass regen, bots, etc.) keep running underneath this the
+  // whole time; only local input is held back via countdownActive.
+  showStartCountdown(onDone) {
+    this.countdownActive = true;
+    this.setAvatarsFrozenTint(true);
+
+    const countdownText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 20, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '72px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 8,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(35);
+
+    let count = 10;
+
+    const tick = () => {
+      if (count <= 0) {
+        countdownText.setText('시작!');
+        countdownText.setColor('#55ff88');
+        countdownText.setScale(0.6).setAlpha(1);
+        playCountdownGo();
+        this.tweens.add({
+          targets: countdownText,
+          scale: 1.4,
+          alpha: 0,
+          duration: 500,
+          ease: 'Cubic.easeOut',
+          onComplete: () => {
+            countdownText.destroy();
+            this.countdownActive = false;
+            this.setAvatarsFrozenTint(false);
+            if (onDone) {
+              onDone();
+            }
+          },
+        });
+        return;
+      }
+
+      countdownText.setText(String(count));
+      countdownText.setColor(count <= 3 ? '#ff5555' : '#ffffff');
+      countdownText.setScale(1.6).setAlpha(1);
+      playCountdownTick(count <= 3);
+      this.tweens.add({
+        targets: countdownText,
+        scale: 1,
+        duration: 350,
+        ease: 'Back.easeOut',
+      });
+
+      count -= 1;
+      this.time.delayedCall(1000, tick);
+    };
+
+    tick();
+  }
+
+  // A visible confirmation that the countdown freeze is real and applies
+  // to everyone (bots included), not just a local overlay blocking this
+  // one client's input — every avatar gets an icy tint for the duration.
+  setAvatarsFrozenTint(frozen) {
+    const avatars = [this.player, ...Object.values(this.otherPlayers)].filter(Boolean);
+    avatars.forEach((avatar) => {
+      if (avatar.sprite) {
+        if (frozen) {
+          avatar.sprite.setTint(0x99ccff);
+        } else {
+          avatar.sprite.clearTint();
+        }
+      }
+    });
+  }
+
+  createHud() {
+    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 6, 70, 30, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1);
+
+    this.timerText = this.add.text(WORLD_WIDTH / 2, 12, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '20px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
+
+    this.playerCountPanel = this.add.rectangle(WORLD_WIDTH - 6, 8, 90, 24, 0x0b0e1c, 0.55)
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(1);
+
+    this.playerCountText = this.add.text(WORLD_WIDTH - 10, 12, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '14px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
+
+    this.bannerText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '26px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 5,
+      align: 'center',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
+
+    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 28, BOSS_BAR_WIDTH + 24, 44, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false);
+
+    this.bossHpText = this.add.text(WORLD_WIDTH / 2, 40, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '13px',
+      color: '#ff8888',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
+
+    this.bossHpBarBg = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 60, BOSS_BAR_WIDTH, 12, 0x222222)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(29).setVisible(false);
+    this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 60, BOSS_BAR_WIDTH, 8, 0xff4444)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    this.scorePanel = this.add.rectangle(6, 8, 90, 24, 0x0b0e1c, 0.55)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false);
+
+    this.scoreText = this.add.text(10, 12, '', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '14px',
+      color: '#ffd700',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    this.spectatorBadgePanel = this.add.rectangle(WORLD_WIDTH / 2, 40, 10, 24, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false);
+
+    this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 46, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '13px',
+      color: '#ffd700',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false);
+
+    this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요', {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '13px',
+      color: '#88ccff',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    // A whole-screen blue-gray wash so ghost mode reads as "you're now
+    // spectating," not just a slightly-faded version of normal play —
+    // everything else on screen keeps its own colors, just seen through
+    // this tint.
+    this.ghostOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x1a2a44, 0)
+      .setScrollFactor(0)
+      .setDepth(17);
+
+    this.bannerBackdrop = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, 10, 10, 0x000000, 0.45)
+      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false);
+
+    this.reviveHighlight = this.add.polygon(0, 0, hexPoints(HEX_WIDTH / 2 - 2), 0x88ccff, 0.25)
+      .setStrokeStyle(2, 0x88ccff, 0.9)
+      .setDepth(0)
+      .setVisible(false);
+
+    this.boundaryOutline = this.add.graphics().setDepth(2).setVisible(false);
+    this.boundaryOutlineRect = null;
+    this.tweens.add({
+      targets: this.boundaryOutline,
+      alpha: 0.5,
+      duration: 500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    const dimColor = 0x1a0000;
+    this.dimTop = this.add.rectangle(0, 0, 0, 0, dimColor, 0.5).setOrigin(0, 0).setDepth(1.5).setVisible(false);
+    this.dimBottom = this.add.rectangle(0, 0, 0, 0, dimColor, 0.5).setOrigin(0, 0).setDepth(1.5).setVisible(false);
+    this.dimLeft = this.add.rectangle(0, 0, 0, 0, dimColor, 0.5).setOrigin(0, 0).setDepth(1.5).setVisible(false);
+    this.dimRight = this.add.rectangle(0, 0, 0, 0, dimColor, 0.5).setOrigin(0, 0).setDepth(1.5).setVisible(false);
+
+    // Embers drifting up off the burning boundary line itself, so it reads
+    // as fire rather than just a static warning outline.
+    this.boundaryEmberEmitter = this.add.particles('particle_spark').setDepth(2.2).createEmitter({
+      speed: { min: 8, max: 26 },
+      angle: { min: 250, max: 290 },
+      lifespan: { min: 500, max: 950 },
+      scale: { start: 0.7, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      tint: [0xff8844, 0xff5533, 0xffcc55],
+      frequency: 40,
+      quantity: 1,
+      on: false,
+    });
+
+    // A personal alarm, distinct from the shared boundary outline: pulses
+    // around the screen edge specifically when *this* player is currently
+    // standing outside the safe area, so being in danger is unmissable
+    // even if they're not looking at the boundary line itself.
+    this.dangerVignette = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH - 6, WORLD_HEIGHT - 6)
+      .setStrokeStyle(8, 0xff2222, 0.85)
+      .setScrollFactor(0)
+      .setDepth(32)
+      .setVisible(false);
+    this.tweens.add({
+      targets: this.dangerVignette,
+      alpha: 0.35,
+      duration: 350,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // A distinct amber pulse (vs. the red danger vignette above) for "the
+    // clock is almost up" — a shared, whole-round urgency cue rather than
+    // a personal safety warning, so the two never fight for the same
+    // visual language.
+    this.timeUrgencyVignette = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH - 16, WORLD_HEIGHT - 16)
+      .setStrokeStyle(6, 0xffaa00, 0.7)
+      .setScrollFactor(0)
+      .setDepth(31)
+      .setVisible(false);
+    this.tweens.add({
+      targets: this.timeUrgencyVignette,
+      alpha: 0.25,
+      duration: 450,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  // Draws (and, on later calls, smoothly resizes) a glowing rectangle
+  // showing the boundary's current safe area in world coordinates, so
+  // players can see at a glance where's still safe instead of only
+  // discovering it tile-by-tile as each one flashes a warning.
+  updateBoundaryOutline(safeBounds) {
+    if (!safeBounds) {
+      return;
+    }
+    this.currentSafeBounds = safeBounds;
+
+    // Approximate rather than pixel-exact: on a hex grid, a row/col range
+    // isn't a perfect rectangle in pixel space (alternating columns are
+    // vertically offset by up to half a hex-height) — close enough for a
+    // cosmetic boundary outline, using the top-left and bottom-right cells'
+    // centers padded out by half a hex on each side.
+    const topLeft = hexToPixel(safeBounds.rowStart, safeBounds.colStart);
+    const bottomRight = hexToPixel(safeBounds.rowEnd, safeBounds.colEnd);
+    const target = {
+      x: topLeft.x - HEX_WIDTH / 2,
+      y: topLeft.y - HEX_HEIGHT / 2,
+      width: (bottomRight.x - topLeft.x) + HEX_WIDTH,
+      height: (bottomRight.y - topLeft.y) + HEX_HEIGHT,
+    };
+
+    this.boundaryOutline.setVisible(true);
+    this.dimTop.setVisible(true);
+    this.dimBottom.setVisible(true);
+    this.dimLeft.setVisible(true);
+    this.dimRight.setVisible(true);
+    this.boundaryEmberEmitter.on = true;
+
+    if (!this.boundaryOutlineRect) {
+      this.boundaryOutlineRect = target;
+      this.redrawBoundaryOutline();
+      return;
+    }
+
+    this.tweens.killTweensOf(this.boundaryOutlineRect);
+    this.tweens.add({
+      targets: this.boundaryOutlineRect,
+      ...target,
+      duration: 900,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => this.redrawBoundaryOutline(),
+    });
+  }
+
+  redrawBoundaryOutline() {
+    const r = this.boundaryOutlineRect;
+    this.boundaryOutline.clear();
+    this.boundaryOutline.lineStyle(3, 0xff5555, 0.9);
+    this.boundaryOutline.strokeRect(r.x, r.y, r.width, r.height);
+
+    this.dimTop.setPosition(0, 0).setSize(WORLD_WIDTH, r.y);
+    this.dimBottom.setPosition(0, r.y + r.height).setSize(WORLD_WIDTH, WORLD_HEIGHT - r.y - r.height);
+    this.dimLeft.setPosition(0, r.y).setSize(r.x, r.height);
+    this.dimRight.setPosition(r.x + r.width, r.y).setSize(WORLD_WIDTH - r.x - r.width, r.height);
+
+    this.boundaryEmberEmitter.setEmitZone({
+      type: 'edge',
+      source: new Phaser.Geom.Rectangle(r.x, r.y, r.width, r.height),
+      quantity: 64,
+    });
+  }
+
+  fitPanelWidth(panel, text, paddingX) {
+    const bounds = text.getBounds();
+    panel.setSize(bounds.width + paddingX, panel.height);
+  }
+
+  initBossHud(boss) {
+    this.boss = boss;
+    this.bossHpPanel.setVisible(true);
+    this.bossHpBarBg.setVisible(true);
+    this.bossHpBarFill.setVisible(true);
+    this.scorePanel.setVisible(true);
+    this.scoreText.setVisible(true);
+    this.updateBossHpBar();
+
+    const { x, y } = hexToPixel(boss.row, boss.col);
+
+    this.bossTileMarker = this.add.text(x, y, '☄️', { fontSize: '22px' }).setOrigin(0.5).setDepth(5).setScale(3).setAlpha(0);
+
+    this.bossTrailEmitter = this.add.particles('particle_spark').setDepth(4).createEmitter({
+      speed: { min: 10, max: 30 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 400, max: 700 },
+      scale: { start: 0.6, end: 0 },
+      alpha: { start: 0.6, end: 0 },
+      tint: 0xffaa55,
+      frequency: 90,
+      quantity: 1,
+    });
+    this.bossTrailEmitter.startFollow(this.bossTileMarker);
+
+    this.cameras.main.shake(300, 0.007);
+    this.tweens.add({
+      targets: this.bossTileMarker,
+      scale: 1,
+      alpha: 1,
+      duration: 450,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: this.bossTileMarker,
+          scale: 1.15,
+          duration: 500,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      },
+    });
+  }
+
+  updateBossHpBar() {
+    if (!this.boss) {
+      return;
+    }
+    const ratio = Math.max(0, this.boss.hp / this.boss.maxHp);
+    this.bossHpBarFill.setSize(BOSS_BAR_WIDTH * ratio, 8);
+    this.bossHpText.setText(`보스 체력 ${this.boss.hp}/${this.boss.maxHp}`);
+
+    if (ratio <= 0.25 && !this.bossLowHpTween) {
+      this.bossLowHpTween = this.tweens.add({
+        targets: this.bossHpBarFill,
+        alpha: 0.4,
+        duration: 260,
+        yoyo: true,
+        repeat: -1,
+      });
+    } else if (ratio > 0.25 && this.bossLowHpTween) {
+      this.bossLowHpTween.stop();
+      this.bossLowHpTween = null;
+      this.bossHpBarFill.setAlpha(1);
+    }
+  }
+
+  showFloatingDamage(x, y, amount) {
+    const text = this.add.text(x, y - 10, `-${amount}`, {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '16px',
+      color: '#ffdd55',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(25);
+
+    this.tweens.add({
+      targets: text,
+      y: y - 40,
+      alpha: 0,
+      duration: 700,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  showFloatingLabel(x, y, message, color) {
+    const text = this.add.text(x, y - 20, message, {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '15px',
+      color,
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(25).setScale(0.6).setAlpha(0);
+
+    this.tweens.add({
+      targets: text,
+      scale: 1.1,
+      alpha: 1,
+      duration: 180,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          y: y - 50,
+          alpha: 0,
+          duration: 600,
+          delay: 250,
+          ease: 'Cubic.easeOut',
+          onComplete: () => text.destroy(),
+        });
+      },
+    });
+  }
+
+  playBossDefeatCelebration(x, y) {
+    this.confettiEmitter.explode(40, x, y);
+    this.cameras.main.flash(400, 255, 240, 150);
+    this.cameras.main.shake(250, 0.006);
+  }
+
+  updateScoreText(score) {
+    const changed = score !== this.score;
+    this.score = score;
+    this.scoreText.setText(`팀 점수 ${score}`);
+    this.fitPanelWidth(this.scorePanel, this.scoreText, 20);
+
+    if (changed) {
+      this.tweens.killTweensOf(this.scoreText);
+      this.scoreText.setScale(1);
+      this.tweens.add({
+        targets: this.scoreText,
+        scale: 1.25,
+        duration: 140,
+        yoyo: true,
+        ease: 'Quad.easeOut',
+      });
+    }
+  }
+
+  // A small "+N" popup next to the score HUD, distinct from
+  // showFloatingDamage/showFloatingLabel because those are placed in world
+  // space (they follow a tile or avatar); the score readout is a fixed HUD
+  // element (scrollFactor 0), so the popup needs to live in that same space.
+  showScoreGainPopup(amount) {
+    if (!(amount > 0)) {
+      return;
+    }
+    const text = this.add.text(this.scoreText.x + this.scoreText.width + 12, this.scoreText.y + 6, `+${amount}`, {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '13px',
+      color: '#88ff99',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(31).setAlpha(0);
+
+    this.tweens.add({
+      targets: text,
+      y: text.y - 16,
+      alpha: 1,
+      duration: 180,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          y: text.y - 14,
+          alpha: 0,
+          delay: 300,
+          duration: 450,
+          onComplete: () => text.destroy(),
+        });
+      },
+    });
+  }
+
+  createJoystick() {
+    this.joystickVector = { x: 0, y: 0 };
+    this.joystickPointerId = null;
+
+    // A soft, slowly-breathing glow ring behind the base — echoes the
+    // ember particles used elsewhere so the joystick doesn't read as a
+    // leftover generic-template control.
+    this.joystickGlow = this.add.circle(JOYSTICK_X, JOYSTICK_Y, JOYSTICK_RADIUS + 6, 0xffaa44, 0.12)
+      .setScrollFactor(0)
+      .setDepth(19);
+    this.tweens.add({
+      targets: this.joystickGlow,
+      scale: 1.15,
+      alpha: 0.05,
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    this.joystickBase = this.add.circle(JOYSTICK_X, JOYSTICK_Y, JOYSTICK_RADIUS, 0xffaa44, 0.15)
+      .setScrollFactor(0)
+      .setDepth(20)
+      .setStrokeStyle(2, 0xffcc66, 0.5);
+
+    this.joystickThumb = this.add.circle(JOYSTICK_X, JOYSTICK_Y, 18, 0xffcc66, 0.4)
+      .setScrollFactor(0)
+      .setDepth(21);
+
+    this.input.on('pointerdown', (pointer) => {
+      const dist = Phaser.Math.Distance.Between(pointer.x, pointer.y, JOYSTICK_X, JOYSTICK_Y);
+      if (this.joystickPointerId === null && dist <= JOYSTICK_RADIUS * 2) {
+        this.joystickPointerId = pointer.id;
+        this.updateJoystick(pointer);
+        this.tweens.killTweensOf(this.joystickBase);
+        this.tweens.add({ targets: this.joystickBase, scale: 1.12, duration: 120, ease: 'Quad.easeOut' });
+        this.joystickThumb.setFillStyle(0xffcc66, 0.65);
+      }
+    });
+
+    this.input.on('pointermove', (pointer) => {
+      if (pointer.id === this.joystickPointerId) {
+        this.updateJoystick(pointer);
+      }
+    });
+
+    const releaseJoystick = (pointer) => {
+      if (pointer.id === this.joystickPointerId) {
+        this.joystickPointerId = null;
+        this.joystickVector = { x: 0, y: 0 };
+        this.tweens.killTweensOf(this.joystickBase);
+        this.tweens.add({ targets: this.joystickBase, scale: 1, duration: 150, ease: 'Quad.easeOut' });
+        this.tweens.killTweensOf(this.joystickThumb);
+        this.tweens.add({ targets: this.joystickThumb, x: JOYSTICK_X, y: JOYSTICK_Y, duration: 150, ease: 'Back.easeOut' });
+        this.joystickThumb.setFillStyle(0xffffff, 0.35);
+      }
+    };
+
+    this.input.on('pointerup', releaseJoystick);
+    this.input.on('pointerupoutside', releaseJoystick);
+  }
+
+  // A spectator has no avatar to steer, so the joystick would just sit
+  // there doing nothing — hide it rather than leave a dead control on
+  // screen.
+  hideJoystick() {
+    this.joystickGlow.setVisible(false);
+    this.joystickBase.setVisible(false);
+    this.joystickThumb.setVisible(false);
+  }
+
+  updateJoystick(pointer) {
+    const dx = pointer.x - JOYSTICK_X;
+    const dy = pointer.y - JOYSTICK_Y;
+    const dist = Math.min(JOYSTICK_RADIUS, Math.hypot(dx, dy));
+    const angle = Math.atan2(dy, dx);
+
+    this.joystickThumb.setPosition(
+      JOYSTICK_X + Math.cos(angle) * dist,
+      JOYSTICK_Y + Math.sin(angle) * dist
+    );
+
+    if (dist < JOYSTICK_DEADZONE) {
+      this.joystickVector = { x: 0, y: 0 };
+      return;
+    }
+
+    const norm = dist / JOYSTICK_RADIUS;
+    this.joystickVector = {
+      x: Math.cos(angle) * norm,
+      y: Math.sin(angle) * norm,
+    };
+  }
+
+  bindSocketEvents() {
+    this.handlers = {
+      tileWarning: ({ row, col }) => {
+        this.setTileState(row, col, TILE_STATE.WARNING);
+        playWarning();
+      },
+
+      tileCollapsed: ({ row, col }) => {
+        this.setTileState(row, col, TILE_STATE.GONE);
+        playCollapse();
+      },
+
+      tileRevived: ({ row, col }) => {
+        // Auto-regen bursts also fire this same event, so without tracking
+        // which tiles *this* ghost actually clicked, a successful click and
+        // an unrelated ambient regen elsewhere would look identical — this
+        // gives the deliberate action its own distinct payoff.
+        const key = `${row}_${col}`;
+        if (this.pendingGhostRevives.has(key)) {
+          this.pendingGhostRevives.delete(key);
+          const { x: reviveX, y: reviveY } = hexToPixel(row, col);
+          this.showFloatingLabel(reviveX, reviveY, '복구!', '#88ccff');
+        }
+        this.setTileState(row, col, TILE_STATE.SOLID);
+        playRevive();
+      },
+
+      massCollapseStarted: ({ safeBounds }) => {
+        this.cameras.main.shake(400, 0.008);
+        this.cameras.main.flash(250, 255, 60, 60);
+        this.showBanner('경계가 불타오릅니다!\n중앙으로 대피하세요!', '#ff5555');
+        this.updateBoundaryOutline(safeBounds);
+        playBoundaryAlarm();
+        vibrateWarning();
+      },
+
+      // Fired on every later boundary ring after the first (which already
+      // got the full banner/flash treatment above) — a lighter shake so
+      // each step still reads as an event without repeating the same
+      // attention-grabbing flash/banner every 15s.
+      boundaryPulse: ({ safeBounds }) => {
+        this.cameras.main.shake(200, 0.004);
+        this.updateBoundaryOutline(safeBounds);
+        playBoundaryAlarm();
+      },
+
+      bossDamaged: ({ hp, maxHp, row, col, defeated, score }) => {
+        if (!this.boss) {
+          return;
+        }
+        const damage = Math.max(0, this.boss.hp - hp);
+        this.boss.hp = hp;
+        this.boss.maxHp = maxHp;
+        this.updateBossHpBar();
+        this.updateScoreText(score);
+
+        const { x: worldX, y: worldY } = hexToPixel(row, col);
+
+        if (damage > 0) {
+          this.showFloatingDamage(worldX, worldY, damage);
+          this.hitEmitter.explode(10, worldX, worldY);
+          this.cameras.main.shake(90, 0.0035);
+          playBossHit();
+          vibrateBossHit();
+        }
+
+        if (defeated) {
+          if (this.bossTileMarker) {
+            this.bossTileMarker.setVisible(false);
+          }
+          if (this.bossTrailEmitter) {
+            this.bossTrailEmitter.stop();
+          }
+          this.playBossDefeatCelebration(worldX, worldY);
+          this.showBanner('보스를 물리쳤습니다! 🎉', '#55ff88');
+          playBossDefeat();
+          vibrateVictory();
+        } else {
+          this.boss.row = row;
+          this.boss.col = col;
+          if (this.bossTileMarker) {
+            this.bossTileMarker.setPosition(worldX, worldY);
+          }
+        }
+      },
+
+      playerMoved: (playerInfo) => {
+        const avatar = this.otherPlayers[playerInfo.playerId];
+        if (avatar) {
+          // Flip toward travel direction, comparing against the last known
+          // *target* (not the mid-glide rendered x, which lags behind it).
+          if (playerInfo.x < avatar.targetX) {
+            avatar.sprite.setFlipX(true);
+          } else if (playerInfo.x > avatar.targetX) {
+            avatar.sprite.setFlipX(false);
+          }
+
+          // Just record the latest authoritative position; the per-frame
+          // lerp in interpolateOtherPlayers() (driven by update()'s delta)
+          // eases the avatar toward it. This replaced killing and
+          // allocating a fresh Phaser tween on *every* network message —
+          // for a bot stepping every BOT_MOVE_INTERVAL_MS tick that was a
+          // new tween per step, each restarting before the previous one
+          // had settled. A persistent lerp is both cheaper (no per-message
+          // allocation or tween-manager bookkeeping) and smoother
+          // (continuous glide rather than a 180ms tween that completed
+          // then idled until the next step).
+          // Network/round-trip latency is unchanged — nothing client-side
+          // can remove that — but the rendered motion no longer adds jank.
+          avatar.targetX = playerInfo.x;
+          avatar.targetY = playerInfo.y;
+        }
+      },
+
+      playerEliminated: ({ playerId, score }) => {
+        // SURVIVAL rounds score teammates by how long each of them lasted
+        // (see Room.js addSurvivalScore), so every elimination in the room —
+        // not just the local player's own — can bump the shared team score;
+        // BOSS mode eliminations don't change score, so the delta is 0 there
+        // and the popup is skipped.
+        if (Number.isFinite(score) && score !== this.score) {
+          const delta = score - this.score;
+          this.updateScoreText(score);
+          this.showScoreGainPopup(delta);
+        }
+
+        if (playerId === this.socket.id) {
+          this.handleOwnElimination();
+          return;
+        }
+        const avatar = this.otherPlayers[playerId];
+        if (avatar) {
+          this.eliminationEmitter.explode(14, avatar.x, avatar.y);
+          this.showFloatingLabel(avatar.x, avatar.y, '탈락!', '#ff8888');
+          this.tweens.add({ targets: avatar, alpha: 0.35, scale: 0.85, duration: 300 });
+          playOtherEliminate();
+        }
+      },
+
+      roomResult: ({ survivorIds, rankings }) => {
+        if (this.roomFinished) {
+          return;
+        }
+        this.roomFinished = true;
+
+        if (this.isSpectator) {
+          // Never a player, so never "eliminated" — either the tournament
+          // just ended (rankings present, same bundling as the player
+          // path below) or this room's round wrapped and the bracket is
+          // about to advance to the next stage. In the latter case there's
+          // nothing to transition to yet; just wait here for the
+          // 'gameStarting'/'tournamentEnded' handlers below to fire next.
+          if (rankings) {
+            this.scene.start('ResultScene', { status: 'waiting', rankings });
+          } else {
+            this.showBanner('라운드 종료! 다음 라운드를 준비하는 중...', '#ffd700');
+          }
+          return;
+        }
+
+        this.eliminated = true;
+
+        // If the tournament ended in this same moment, the final rankings
+        // ride along right here instead of a separate later event, so we
+        // never risk missing a 'tournamentEnded' broadcast that fires
+        // before ResultScene has finished loading.
+        if (rankings) {
+          this.scene.start('ResultScene', { status: 'eliminated', rankings });
+          return;
+        }
+
+        if (survivorIds.includes(this.socket.id)) {
+          this.scene.start('ResultScene', { status: 'waiting', message: '생존!' });
+        } else {
+          this.scene.start('ResultScene', { status: 'eliminated', message: '탈락했습니다.' });
+        }
+      },
+
+      // Only meaningful for a spectator: a real player is always already
+      // off this scene (ResultScene or LobbyScene, each with their own
+      // 'gameStarting' listener) by the time the next stage's rooms exist,
+      // since their own roomResult above just sent them there. A
+      // spectator instead stays parked in GameScene between rounds, so
+      // this is how they follow the bracket into round 2 (BOSS mode) and
+      // beyond.
+      gameStarting: (payload) => {
+        if (this.isSpectator) {
+          this.scene.start('GameScene', payload);
+        }
+      },
+
+      // Covers the case where the spectator's own watched room already
+      // wrapped its round (no rankings yet) while a *different* room ends
+      // up being the one that finishes the tournament.
+      tournamentEnded: ({ rankings }) => {
+        if (this.isSpectator) {
+          this.scene.start('ResultScene', { status: 'waiting', rankings });
+        }
+      },
+
+    };
+
+    Object.entries(this.handlers).forEach(([event, handler]) => {
+      this.socket.on(event, handler);
+    });
+
+    // Admin-only "balance lever", same C/S keys as DashboardScene — this
+    // covers watching a single BOSS room in full (stage 3+, or any
+    // spectated room) where there's no multi-room grid to click a target
+    // on; the room being spectated *is* the implicit target. No-ops for a
+    // regular player or outside BOSS mode, checked at trigger time so this
+    // can just be registered unconditionally here.
+    this.handleKeyC = () => this.triggerAdminSkill('adminCritical');
+    this.handleKeyS = () => this.triggerAdminSkill('adminShatterTiles');
+    this.input.keyboard.on('keydown-C', this.handleKeyC);
+    this.input.keyboard.on('keydown-S', this.handleKeyS);
+
+    this.events.once('shutdown', () => {
+      Object.entries(this.handlers).forEach(([event, handler]) => {
+        this.socket.off(event, handler);
+      });
+      this.input.keyboard.off('keydown-C', this.handleKeyC);
+      this.input.keyboard.off('keydown-S', this.handleKeyS);
+    });
+  }
+
+  triggerAdminSkill(eventName) {
+    if (!this.isSpectator || this.mode !== 'BOSS' || !this.roomId) {
+      return;
+    }
+    this.socket.emit(eventName, { roomId: this.roomId });
+  }
+
+  handleOwnElimination() {
+    if (this.eliminated) {
+      return;
+    }
+    this.eliminated = true;
+
+    if (this.player) {
+      this.eliminationEmitter.explode(18, this.player.x, this.player.y);
+      this.showFloatingLabel(this.player.x, this.player.y, '탈락!', '#ff5555');
+      this.tweens.add({ targets: this.player, alpha: 0.35, scale: 0.85, duration: 300 });
+      this.startGhostAura(this.player.x, this.player.y);
+    }
+
+    this.cameras.main.flash(300, 255, 80, 80);
+    playEliminate();
+    vibrateEliminate();
+
+    this.ghostHintText.setAlpha(0).setVisible(true);
+    this.ghostHintPanel.setVisible(true);
+    this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+    this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
+
+    this.tweens.add({ targets: this.ghostOverlay, alpha: 0.3, duration: 600 });
+  }
+
+  startGhostAura(x, y) {
+    this.ghostAuraEmitter = this.add.particles('particle_spark').setDepth(4).createEmitter({
+      x,
+      y: y - 10,
+      speedY: { min: -14, max: -6 },
+      speedX: { min: -4, max: 4 },
+      lifespan: { min: 900, max: 1400 },
+      scale: { start: 0.5, end: 0 },
+      alpha: { start: 0.5, end: 0 },
+      tint: 0x99ccff,
+      frequency: 300,
+      quantity: 1,
+    });
+  }
+
+  handleTileClick(row, col) {
+    if (!this.eliminated || this.roomFinished) {
+      return;
+    }
+    if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
+      return;
+    }
+
+    const key = `${row}_${col}`;
+    this.pendingGhostRevives.add(key);
+    this.time.delayedCall(1500, () => this.pendingGhostRevives.delete(key));
+
+    this.socket.emit('reviveTile', { row, col });
+  }
+
+  handleTileHover(row, col, isOver) {
+    if (!isOver || !this.eliminated || this.roomFinished) {
+      this.reviveHighlight.setVisible(false);
+      return;
+    }
+    if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
+      this.reviveHighlight.setVisible(false);
+      return;
+    }
+    const { x: hoverX, y: hoverY } = hexToPixel(row, col);
+    this.reviveHighlight.setPosition(hoverX, hoverY).setVisible(true);
+  }
+
+  showBanner(message, color) {
+    this.bannerText.setText(message);
+    this.bannerText.setColor(color);
+    this.bannerText.setScale(1);
+
+    const bounds = this.bannerText.getBounds();
+    this.bannerBackdrop.setSize(bounds.width + 40, bounds.height + 24);
+    this.bannerBackdrop.setVisible(true).setAlpha(1);
+
+    this.bannerText.setScale(0.6);
+    this.bannerText.setAlpha(1);
+
+    if (this.bannerTimer) {
+      this.bannerTimer.remove();
+    }
+    if (this.bannerTween) {
+      this.bannerTween.stop();
+    }
+
+    this.bannerTween = this.tweens.add({
+      targets: this.bannerText,
+      scale: 1,
+      duration: 260,
+      ease: 'Back.easeOut',
+    });
+
+    this.bannerTimer = this.time.delayedCall(4000, () => {
+      this.tweens.add({ targets: [this.bannerText, this.bannerBackdrop], alpha: 0, duration: 500 });
+    });
+  }
+
+  updatePlayerCount() {
+    // A spectator isn't in `players` at all, so there's no "self" to add
+    // on top of otherPlayers here.
+    const count = (this.isSpectator ? 0 : 1) + Object.keys(this.otherPlayers).length;
+    this.playerCountText.setText(`참가 ${count}명`);
+    this.fitPanelWidth(this.playerCountPanel, this.playerCountText, 20);
+  }
+
+  // Eases every *other* player's avatar toward its latest server-reported
+  // position, once per rendered frame. Runs unconditionally (before update()'s
+  // own early-returns) so it keeps working for a spectator — who has no
+  // this.player and would otherwise hit the early return below and freeze
+  // everyone they're watching — and while this client is eliminated/in the
+  // countdown. Frame-rate independent: the smoothing factor is derived from
+  // the real elapsed delta, so it glides the same on a 30fps phone as on a
+  // 144Hz monitor. See OTHER_PLAYER_LERP_TAU.
+  interpolateOtherPlayers(delta) {
+    const dt = delta || 16;
+    const t = 1 - Math.exp(-dt / OTHER_PLAYER_LERP_TAU);
+    Object.values(this.otherPlayers).forEach((avatar) => {
+      if (avatar.targetX === undefined) {
+        return;
+      }
+      const dx = avatar.targetX - avatar.x;
+      const dy = avatar.targetY - avatar.y;
+      // Snap once effectively arrived, so it settles exactly on target
+      // instead of chasing it with ever-tinier sub-pixel steps forever.
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        avatar.x = avatar.targetX;
+        avatar.y = avatar.targetY;
+        return;
+      }
+      avatar.x += dx * t;
+      avatar.y += dy * t;
+    });
+  }
+
+  update(time, delta) {
+    this.interpolateOtherPlayers(delta);
+    this.updateTimerText();
+    this.checkPlayerDanger();
+
+    if (!this.player || !this.localTileMap || this.eliminated || this.countdownActive) {
+      return;
+    }
+
+    const speed = 3;
+    let dx = 0;
+    let dy = 0;
+
+    if (this.cursors.left.isDown) {
+      dx = -speed;
+    } else if (this.cursors.right.isDown) {
+      dx = speed;
+    }
+
+    if (this.cursors.up.isDown) {
+      dy = -speed;
+    } else if (this.cursors.down.isDown) {
+      dy = speed;
+    }
+
+    if (dx === 0 && dy === 0 && (this.joystickVector.x !== 0 || this.joystickVector.y !== 0)) {
+      dx = this.joystickVector.x * speed;
+      dy = this.joystickVector.y * speed;
+    }
+
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+
+    if (dx !== 0) {
+      this.player.sprite.setFlipX(dx < 0);
+    }
+
+    const startX = this.player.x;
+    const startY = this.player.y;
+
+    const nextX = Phaser.Math.Clamp(startX + dx, HEX_WIDTH / 2, WORLD_WIDTH - HEX_WIDTH / 2);
+    if (!this.isHole(nextX, startY)) {
+      this.player.x = nextX;
+    }
+
+    const nextY = Phaser.Math.Clamp(startY + dy, HEX_HEIGHT / 2, WORLD_HEIGHT - HEX_HEIGHT / 2);
+    if (!this.isHole(this.player.x, nextY)) {
+      this.player.y = nextY;
+    }
+
+    if (this.player.x !== startX || this.player.y !== startY) {
+      this.socket.emit('playerMovement', { x: this.player.x, y: this.player.y });
+
+      const now = this.time.now;
+      if (now - this.lastFootstepAt > 120) {
+        this.lastFootstepAt = now;
+        this.footstepEmitter.explode(2, this.player.x, this.player.y + 14);
+      }
+    }
+  }
+
+  checkPlayerDanger() {
+    if (!this.player || this.eliminated || !this.currentSafeBounds) {
+      this.dangerVignette.setVisible(false);
+      this.wasInDanger = false;
+      return;
+    }
+
+    const { row, col } = pixelToHex(this.player.x, this.player.y);
+    const b = this.currentSafeBounds;
+    const inDanger = row < b.rowStart || row > b.rowEnd || col < b.colStart || col > b.colEnd;
+    // Edge-triggered rather than every frame while in danger — update()
+    // runs 60x/sec, so a continuous vibrate call here would just look like
+    // one long buzz instead of a distinct "you just left the safe zone" cue.
+    if (inDanger && !this.wasInDanger) {
+      vibrateWarning();
+    }
+    this.wasInDanger = inDanger;
+    this.dangerVignette.setVisible(inDanger);
+  }
+
+  updateTimerText() {
+    if (!this.roundStartTime) {
+      return;
+    }
+    const elapsed = Date.now() - this.roundStartTime;
+    const remaining = Math.max(0, Math.ceil((this.roundDuration - elapsed) / 1000));
+    const mm = Math.floor(remaining / 60);
+    const ss = String(remaining % 60).padStart(2, '0');
+    this.timerText.setText(`${mm}:${ss}`);
+    this.timerText.setColor(remaining <= 10 ? '#ff5555' : '#ffffff');
+    this.fitPanelWidth(this.timerPanel, this.timerText, 30);
+    this.timeUrgencyVignette.setVisible(remaining <= 10 && remaining > 0);
+
+    if (remaining <= 10 && remaining !== this.lastTimerSecond) {
+      this.lastTimerSecond = remaining;
+      if (remaining > 0) {
+        playCountdownTick(true);
+      }
+      this.tweens.killTweensOf(this.timerText);
+      this.timerText.setScale(1);
+      this.tweens.add({
+        targets: this.timerText,
+        scale: 1.35,
+        duration: 120,
+        yoyo: true,
+        ease: 'Quad.easeOut',
+      });
+    } else if (remaining > 10) {
+      this.lastTimerSecond = null;
+    }
+  }
+
+  isHole(x, y) {
+    const { row, col } = pixelToHex(x, y);
+    return this.localTileMap[row][col] === TILE_STATE.GONE;
+  }
+
+  renderMap(tileMap) {
+    Object.values(this.tileSprites).forEach((tile) => {
+      this.stopTileTween(tile);
+      tile.destroy();
+    });
+    this.tileSprites = {};
+    this.localTileMap = tileMap;
+
+    // A hex tile's texture image is a rectangular canvas (HEX_WIDTH x
+    // HEX_HEIGHT) with transparent corners, so the default rectangular
+    // hit area from a bare setInteractive() would let clicks in those
+    // transparent corners register on the wrong tile — an explicit hex
+    // polygon hit area (same shape drawn into the texture) fixes that.
+    const hitArea = new Phaser.Geom.Polygon(hexPoints(HEX_WIDTH / 2 - 1));
+
+    for (let row = 0; row < MAP_ROWS; row++) {
+      for (let col = 0; col < MAP_COLS; col++) {
+        const { x, y } = hexToPixel(row, col);
+        const state = tileMap[row][col];
+
+        const tile = this.add.image(x, y, this.textureForState(state, row, col));
+        tile.baseX = x;
+        tile.baseY = y;
+        tile.row = row;
+        tile.col = col;
+        tile.setDepth(-1);
+        tile.setVisible(state !== TILE_STATE.GONE);
+        tile.setInteractive(hitArea, Phaser.Geom.Polygon.Contains);
+        tile.on('pointerdown', () => this.handleTileClick(row, col));
+        tile.on('pointerover', () => this.handleTileHover(row, col, true));
+        tile.on('pointerout', () => this.handleTileHover(row, col, false));
+        this.tileSprites[`${row}_${col}`] = tile;
+
+        if (state === TILE_STATE.WARNING) {
+          this.startWarningPulse(tile);
+        }
+      }
+    }
+  }
+
+  textureForState(state, row, col) {
+    if (state === TILE_STATE.WARNING) {
+      return 'tile_warning';
+    }
+    return (row + col) % 2 === 0 ? 'tile_solid' : 'tile_solid_b';
+  }
+
+  tileTintForTexture(key) {
+    if (key === 'tile_warning') {
+      return 0xff6b5b;
+    }
+    return 0x767fb8;
+  }
+
+  stopTileTween(tile) {
+    if (tile.activeTween) {
+      tile.activeTween.stop();
+      tile.activeTween = null;
+    }
+  }
+
+  startWarningPulse(tile) {
+    tile.setScale(1);
+    tile.setAlpha(1);
+    tile.activeTween = this.tweens.add({
+      targets: tile,
+      scale: 0.85,
+      alpha: 0.7,
+      duration: 260,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  playCollapseAnimation(tile) {
+    this.debrisEmitter.setTint(this.tileTintForTexture(tile.texture.key));
+    this.debrisEmitter.explode(7, tile.baseX, tile.baseY);
+
+    tile.setPosition(tile.baseX, tile.baseY);
+    tile.setScale(1);
+    tile.setAlpha(1);
+    tile.setAngle(0);
+
+    tile.activeTween = this.tweens.add({
+      targets: tile,
+      scale: 0,
+      alpha: 0,
+      angle: Phaser.Math.Between(-100, 100),
+      y: tile.baseY + 8,
+      duration: 260,
+      ease: 'Back.easeIn',
+      onComplete: () => tile.setVisible(false),
+    });
+  }
+
+  playReviveAnimation(tile) {
+    tile.setTexture(this.textureForState(TILE_STATE.SOLID, tile.row, tile.col));
+    tile.setPosition(tile.baseX, tile.baseY);
+    tile.setAngle(0);
+    tile.setAlpha(1);
+    tile.setScale(0);
+    tile.setVisible(true);
+
+    this.sparkEmitter.setTint(0xfff2b0);
+    this.sparkEmitter.explode(10, tile.baseX, tile.baseY);
+
+    tile.activeTween = this.tweens.add({
+      targets: tile,
+      scale: 1,
+      duration: 320,
+      ease: 'Back.easeOut',
+    });
+  }
+
+  setTileState(row, col, state) {
+    if (this.localTileMap) {
+      this.localTileMap[row][col] = state;
+    }
+
+    const tile = this.tileSprites[`${row}_${col}`];
+    if (!tile) {
+      return;
+    }
+
+    this.stopTileTween(tile);
+
+    switch (state) {
+      case TILE_STATE.GONE:
+        this.playCollapseAnimation(tile);
+        break;
+      case TILE_STATE.WARNING:
+        tile.setTexture('tile_warning');
+        tile.setPosition(tile.baseX, tile.baseY);
+        tile.setVisible(true);
+        this.startWarningPulse(tile);
+        break;
+      default:
+        this.playReviveAnimation(tile);
+        break;
+    }
+  }
+
+  addPlayer(playerInfo) {
+    this.player = this.createAvatar(playerInfo, true);
+  }
+
+  addOtherPlayer(playerInfo) {
+    this.otherPlayers[playerInfo.playerId] = this.createAvatar(playerInfo, false);
+  }
+
+  createAvatar(playerInfo, isSelf) {
+    const container = this.add.container(playerInfo.x, playerInfo.y);
+    const children = [];
+
+    const shadow = this.add.ellipse(0, 15, 22, 8, 0x000000, 0.35);
+    children.push(shadow);
+
+    if (isSelf) {
+      // A steady, always-at-least-partly-visible spotlight ring so self is
+      // easy to spot at a glance, plus the original expanding sonar ping
+      // layered on top for extra motion.
+      const spotlight = this.add.circle(0, 0, 20, 0x55ffaa, 0.16).setStrokeStyle(3, 0x55ffaa, 1);
+      children.push(spotlight);
+      this.tweens.add({
+        targets: spotlight,
+        scale: 1.15,
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      const halo = this.add.circle(0, 0, 16, 0xffffff, 0).setStrokeStyle(2, 0x55ffaa, 0.85);
+      children.push(halo);
+      this.tweens.add({
+        targets: halo,
+        scale: 1.35,
+        alpha: 0,
+        duration: 900,
+        repeat: -1,
+        ease: 'Sine.easeOut',
+      });
+    }
+
+    const sprite = this.add.image(0, 0, ensureAnimalTexture(this, playerInfo.animalIndex));
+    children.push(sprite);
+
+    let labelColor = '#ffffff';
+    if (isSelf) {
+      labelColor = '#ffd700';
+    } else if (playerInfo.isBot) {
+      labelColor = '#9aa3c9';
+    }
+
+    const label = this.add.text(0, -26, playerInfo.nickname, {
+      fontFamily: 'Malgun Gothic, sans-serif',
+      fontSize: '11px',
+      color: labelColor,
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+
+    const labelBounds = label.getBounds();
+    const labelBg = this.add.rectangle(0, -26, labelBounds.width + 10, labelBounds.height + 3, 0x0b0e1c, 0.5)
+      .setOrigin(0.5);
+    children.push(labelBg, label);
+
+    if (playerInfo.isBot) {
+      const botBadge = this.add.text(13, -13, '🤖', { fontSize: '11px' }).setOrigin(0.5);
+      children.push(botBadge);
+    }
+
+    container.add(children);
+    container.playerId = playerInfo.playerId;
+    container.sprite = sprite;
+    // Interpolation target for other players (see interpolateOtherPlayers).
+    // Seeded to the spawn position so the avatar sits still until its first
+    // real 'playerMoved' rather than drifting from an undefined target.
+    container.targetX = playerInfo.x;
+    container.targetY = playerInfo.y;
+    container.setDepth(isSelf ? 4 : 3);
+
+    container.setScale(0.2).setAlpha(0);
+    this.tweens.add({
+      targets: container,
+      scale: 1,
+      alpha: 1,
+      delay: Math.random() * 200,
+      duration: 400,
+      ease: 'Back.easeOut',
+    });
+
+    this.tweens.add({
+      targets: sprite,
+      y: -3,
+      duration: 480 + Math.random() * 220,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return container;
+  }
+}
