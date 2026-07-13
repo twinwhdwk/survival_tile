@@ -149,6 +149,14 @@ export function playCountdownGo() {
   tone(784, 0.22, { type: 'sine', volume: 0.18, delay: 0.09 });
 }
 
+// A deep rumble/boom for the boss's tile-shatter skill — a low descending
+// tone under a heavy low-passed noise burst, meant to read as a menacing
+// ground-slam rather than the light "tink" of a regular tile collapse.
+export function playBossSkill() {
+  noiseBurst(0.4, { volume: 0.28, filterFreq: 350 });
+  tone(110, 0.5, { type: 'sawtooth', volume: 0.2, endFreq: 35 });
+}
+
 export function playVictory() {
   [523, 659, 784, 1046, 1318].forEach((freq, i) => tone(freq, 0.28, { type: 'sine', volume: 0.15, delay: i * 0.11 }));
 }

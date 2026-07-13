@@ -35,6 +35,13 @@ export default class DashboardScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     this.createAmbientEmbers();
 
+    // Same dark backing-panel language as every other HUD readout
+    // (GameScene's timer/score panels, ResultScene's headline) — without
+    // one this title was the only headline in the app just floating
+    // directly over the background.
+    this.titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 14, 10, 34, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setStrokeStyle(1, 0xffffff, 0.08);
+
     const titleGlow = this.add.text(WORLD_WIDTH / 2, 28, `🔥 ${this.stage}라운드 조별 현황`, {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '22px',
@@ -49,6 +56,8 @@ export default class DashboardScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 4,
     }).setOrigin(0.5);
+    this.titlePanel.setSize(this.titleText.width + 36, 34);
+    console.log('[DEBUG]', 'panel.x=', this.titlePanel.x, 'panel.width=', this.titlePanel.width, 'panel.originX=', this.titlePanel.originX, 'text.x=', this.titleText.x, 'text.width=', this.titleText.width, 'WORLD_WIDTH=', WORLD_WIDTH);
 
     this.emptyText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, '현황을 불러오는 중...', {
       fontFamily: 'Malgun Gothic, sans-serif',

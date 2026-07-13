@@ -33,6 +33,12 @@ export default class LoginScene extends Phaser.Scene {
       color: '#88ccff',
     }).setOrigin(0.5);
 
+    // Same dark backing panel as every other headline in the app (lobby,
+    // dashboard, result screen) — keeps the title grounded instead of
+    // floating bare over the background.
+    this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 230, 40, 0x0b0e1c, 0.55)
+      .setStrokeStyle(1, 0xffffff, 0.08);
+
     // A soft additive-blended glow sits behind the title and flickers like
     // a torch (randomized alpha/scale steps, not a smooth sine loop) —
     // ties the title into the same "burning boundary" mood as the ember

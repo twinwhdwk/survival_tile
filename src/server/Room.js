@@ -47,6 +47,16 @@ const MAX_COL_INSET = Math.floor((MAP_COLS - 1) / 2);
 // running for every bot every tick (BOT_MOVE_INTERVAL_MS in server.js).
 const BOT_SEARCH_DEPTH = 6;
 
+// Chance a bot just stands still on any given movement tick instead of
+// stepping — real players don't move in perfectly steady lockstep, they
+// pause to look around, react, or hesitate. A flat per-tick skip is a
+// simple stand-in for that. Harmless relative to the boundary's own
+// timescale (BOUNDARY_SHRINK_INTERVAL_MS is 15s; this costs at most one
+// BOT_MOVE_INTERVAL_MS tick), and findStepTowardSafety() recomputes fresh
+// every tick anyway, so a skipped tick never leaves a bot committed to a
+// stale plan.
+const BOT_HESITATION_CHANCE = 0.2;
+
 // Minimum spacing (ms) between 'playerMoved' broadcasts for a single player.
 // A real client emits 'playerMovement' every animation frame a direction key
 // is held (~60/sec, uncapped), and each one otherwise fans out to every other
@@ -491,7 +501,11 @@ export default class Room {
   // ADMIN_SHATTER_TILE_COUNT random currently-standing tiles and routes them
   // through the exact same triggerTileCollapse() every ordinary footstep
   // uses — same crack-then-break timing/visuals as a normal collapse, so it
-  // reads as bad luck rather than a deliberate intervention.
+  // reads as bad luck rather than a deliberate intervention. The one thing
+  // that IS distinct is 'bossShatterSkill' below: a room-wide camera
+  // shake/rumble cue so it lands as "the boss just did something," not a
+  // silent handful of tiles quietly vanishing — that's still just boss
+  // flavor to players, not a tell that it was admin-triggered.
   triggerBossShatterSkill() {
     const now = Date.now();
     if (now - this.lastAdminShatterAt < ADMIN_SHATTER_COOLDOWN_MS) {
@@ -513,7 +527,11 @@ export default class Room {
       const j = Math.floor(Math.random() * (i + 1));
       [standingTiles[i], standingTiles[j]] = [standingTiles[j], standingTiles[i]];
     }
-    standingTiles.slice(0, ADMIN_SHATTER_TILE_COUNT).forEach(({ row, col }) => {
+    const chosen = standingTiles.slice(0, ADMIN_SHATTER_TILE_COUNT);
+    if (chosen.length > 0) {
+      this.emit('bossShatterSkill', {});
+    }
+    chosen.forEach(({ row, col }) => {
       this.triggerTileCollapse(row, col);
     });
   }
@@ -684,6 +702,10 @@ export default class Room {
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
       if (!player.isBot || player.eliminated) {
+        return;
+      }
+
+      if (Math.random() < BOT_HESITATION_CHANCE) {
         return;
       }
 

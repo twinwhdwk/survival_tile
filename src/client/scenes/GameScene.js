@@ -11,11 +11,12 @@ import {
   playOtherEliminate,
   playBossHit,
   playBossDefeat,
+  playBossSkill,
   playBoundaryAlarm,
   playCountdownTick,
   playCountdownGo,
 } from '../utilities/SoundFx';
-import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateVictory } from '../utilities/Haptics';
+import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 
@@ -325,7 +326,7 @@ export default class GameScene extends Phaser.Scene {
 
   createHud() {
     this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 6, 70, 30, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1);
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.timerText = this.add.text(WORLD_WIDTH / 2, 12, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -336,7 +337,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
     this.playerCountPanel = this.add.rectangle(WORLD_WIDTH - 6, 8, 90, 24, 0x0b0e1c, 0.55)
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(1);
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.playerCountText = this.add.text(WORLD_WIDTH - 10, 12, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -356,7 +357,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
 
     this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 28, BOSS_BAR_WIDTH + 24, 44, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false);
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.bossHpText = this.add.text(WORLD_WIDTH / 2, 40, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -372,7 +373,7 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     this.scorePanel = this.add.rectangle(6, 8, 90, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false);
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.scoreText = this.add.text(10, 12, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -383,7 +384,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
 
     this.spectatorBadgePanel = this.add.rectangle(WORLD_WIDTH / 2, 40, 10, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false);
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 46, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -394,7 +395,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false);
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -912,6 +913,18 @@ export default class GameScene extends Phaser.Scene {
             this.bossTileMarker.setPosition(worldX, worldY);
           }
         }
+      },
+
+      // The boss "slams the ground" and cracks several tiles at once (see
+      // Room.js's triggerBossShatterSkill()) — a heavier, longer shake than
+      // a single boss hit, plus a dark flash instead of boundary's bright
+      // red, so it reads as a distinct, more menacing kind of moment rather
+      // than just another hit landing.
+      bossShatterSkill: () => {
+        this.cameras.main.shake(450, 0.014);
+        this.cameras.main.flash(220, 120, 10, 10);
+        playBossSkill();
+        vibrateBossSkill();
       },
 
       playerMoved: (playerInfo) => {

@@ -39,6 +39,13 @@ export default class LobbyScene extends Phaser.Scene {
       color: '#88ccff',
     }).setOrigin(0.5);
 
+    // Same dark backing panel as every other HUD readout in the app
+    // (GameScene's timer/score panels, ResultScene/DashboardScene's
+    // headline) — keeps the title grounded instead of floating bare over
+    // the background like it was before.
+    this.add.rectangle(WORLD_WIDTH / 2, 38, 130, 34, 0x0b0e1c, 0.55)
+      .setOrigin(0.5, 0).setStrokeStyle(1, 0xffffff, 0.08);
+
     // Same torch-flicker glow as the login title, so the mood carries
     // through instead of resetting to plain text the moment you land here.
     const titleGlow = this.add.text(WORLD_WIDTH / 2, 52, '🔥 대기실', {
