@@ -561,12 +561,20 @@ export default class Room {
       return;
     }
 
-    const now = Date.now();
-    const lastRevive = this.reviveCooldowns.get(id) || 0;
-    if (now - lastRevive < GHOST_REVIVE_COOLDOWN_MS) {
-      return;
+    // Last-stand rally: once only one teammate is still standing, every
+    // ghost's revive cooldown is waived entirely, so a flurry of clicks
+    // from everyone already eliminated can genuinely clear a path in real
+    // time for whoever's left — same 'tileRevived' -> "복구!" feedback
+    // players already know, just without the usual rate limit.
+    const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+    if (aliveCount > 1) {
+      const now = Date.now();
+      const lastRevive = this.reviveCooldowns.get(id) || 0;
+      if (now - lastRevive < GHOST_REVIVE_COOLDOWN_MS) {
+        return;
+      }
+      this.reviveCooldowns.set(id, now);
     }
-    this.reviveCooldowns.set(id, now);
 
     this.tileMap[row][col] = TILE_STATE.SOLID;
     this.emit('tileRevived', { row, col });

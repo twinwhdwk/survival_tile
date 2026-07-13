@@ -325,10 +325,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createHud() {
-    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 6, 70, 30, 0x0b0e1c, 0.55)
+    // Top-aligned with playerCountPanel/scorePanel (y=8) so the whole top
+    // HUD row reads as one even strip — taller (30 vs 24) since the timer
+    // text itself is bigger, but that's the only dimension that should differ.
+    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 8, 70, 30, 0x0b0e1c, 0.55)
       .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(1, 0xffffff, 0.08);
 
-    this.timerText = this.add.text(WORLD_WIDTH / 2, 12, '', {
+    this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '20px',
       color: '#ffffff',
@@ -356,10 +359,14 @@ export default class GameScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
 
-    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 28, BOSS_BAR_WIDTH + 24, 44, 0x0b0e1c, 0.55)
+    // Stacked directly below the timer panel (which ends at y=38), not
+    // overlapping it — they used to share the same y=28 start while the
+    // timer ran to y=38, so during BOSS mode the two panels' semi-transparent
+    // fills and borders visibly bled into each other for that 10px band.
+    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 38, BOSS_BAR_WIDTH + 24, 44, 0x0b0e1c, 0.55)
       .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
-    this.bossHpText = this.add.text(WORLD_WIDTH / 2, 40, '', {
+    this.bossHpText = this.add.text(WORLD_WIDTH / 2, 50, '', {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '13px',
       color: '#ff8888',
@@ -367,9 +374,9 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
-    this.bossHpBarBg = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 60, BOSS_BAR_WIDTH, 12, 0x222222)
+    this.bossHpBarBg = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 12, 0x222222)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(29).setVisible(false);
-    this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 60, BOSS_BAR_WIDTH, 8, 0xff4444)
+    this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 8, 0xff4444)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     this.scorePanel = this.add.rectangle(6, 8, 90, 24, 0x0b0e1c, 0.55)
@@ -414,7 +421,7 @@ export default class GameScene extends Phaser.Scene {
       .setDepth(17);
 
     this.bannerBackdrop = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, 10, 10, 0x000000, 0.45)
-      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false);
+      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
 
     this.reviveHighlight = this.add.polygon(0, 0, hexPoints(HEX_WIDTH / 2 - 2), 0x88ccff, 0.25)
       .setStrokeStyle(2, 0x88ccff, 0.9)
@@ -1090,6 +1097,12 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.flash(300, 255, 80, 80);
     playEliminate();
     vibrateEliminate();
+
+    // Same reasoning as the spectator case: a ghost has no avatar left to
+    // steer (movement is already a no-op once eliminated — see update()),
+    // so leaving the joystick on screen is a dead control that still looks
+    // interactive. Ghost mode's actual input is tapping collapsed tiles.
+    this.hideJoystick();
 
     this.ghostHintText.setAlpha(0).setVisible(true);
     this.ghostHintPanel.setVisible(true);

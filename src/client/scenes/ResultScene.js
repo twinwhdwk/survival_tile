@@ -33,7 +33,7 @@ export default class ResultScene extends Phaser.Scene {
     this.messagePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, 10, 46, 0x0b0e1c, 0.55)
       .setOrigin(0.5).setStrokeStyle(1, 0xffffff, 0.08);
     this.rankingsPanel = this.add.rectangle(WORLD_WIDTH / 2, 0, 360, 10, 0x0b0e1c, 0.5)
-      .setOrigin(0.5).setStrokeStyle(1, 0xffd700, 0.18).setVisible(false);
+      .setOrigin(0.5).setStrokeStyle(1, 0xffffff, 0.08).setVisible(false);
 
     this.messageText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, data.message || '', {
       fontFamily: 'Malgun Gothic, sans-serif',

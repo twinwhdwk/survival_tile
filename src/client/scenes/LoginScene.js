@@ -109,6 +109,19 @@ export default class LoginScene extends Phaser.Scene {
     this.adminNode = this.add.dom(WORLD_WIDTH - 55, WORLD_HEIGHT - 18).createFromHTML(adminHtml);
     this.passwordInput_ = this.adminNode.getChildByID('admin-password-input');
 
+    // outline:none above dropped ALL focus feedback, not just the default
+    // browser outline — clicking into this field gave no visual sign it was
+    // active. Kept deliberately subtle (no glow) to match this field's own
+    // "tucked into the corner" intent, unlike the nickname input's bright
+    // focus treatment.
+    this.passwordInput_.style.transition = 'border-color 0.2s ease';
+    this.passwordInput_.addEventListener('focus', () => {
+      this.passwordInput_.style.borderColor = '#8899cc';
+    });
+    this.passwordInput_.addEventListener('blur', () => {
+      this.passwordInput_.style.borderColor = '#555555';
+    });
+
     this.button.addEventListener('click', () => this.submit());
     this.input_.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
