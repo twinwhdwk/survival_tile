@@ -57,7 +57,6 @@ export default class DashboardScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5);
     this.titlePanel.setSize(this.titleText.width + 36, 34);
-    console.log('[DEBUG]', 'panel.x=', this.titlePanel.x, 'panel.width=', this.titlePanel.width, 'panel.originX=', this.titlePanel.originX, 'text.x=', this.titleText.x, 'text.width=', this.titleText.width, 'WORLD_WIDTH=', WORLD_WIDTH);
 
     this.emptyText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, '현황을 불러오는 중...', {
       fontFamily: 'Malgun Gothic, sans-serif',
