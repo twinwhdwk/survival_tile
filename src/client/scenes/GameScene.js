@@ -84,6 +84,7 @@ export default class GameScene extends Phaser.Scene {
     this.score = 0;
     this.bossLowHpTween = null;
     this.lastTimerSecond = null;
+    this.lastRemainingSeconds = null;
     this.currentSafeBounds = null;
     this.countdownActive = false;
     this.pendingGhostRevives = new Set();
@@ -1311,11 +1312,20 @@ export default class GameScene extends Phaser.Scene {
     }
     const elapsed = Date.now() - this.roundStartTime;
     const remaining = Math.max(0, Math.ceil((this.roundDuration - elapsed) / 1000));
-    const mm = Math.floor(remaining / 60);
-    const ss = String(remaining % 60).padStart(2, '0');
-    this.timerText.setText(`${mm}:${ss}`);
-    this.timerText.setColor(remaining <= 10 ? '#ff5555' : '#ffffff');
-    this.fitPanelWidth(this.timerPanel, this.timerText, 30);
+
+    // The mm:ss readout only actually changes once per second, but update()
+    // calls this ~60x/sec — fitPanelWidth()'s getBounds() call is comparatively
+    // expensive text-measurement work, not worth redoing every single frame
+    // for a string (and panel size) that's identical to the last frame's.
+    if (remaining !== this.lastRemainingSeconds) {
+      this.lastRemainingSeconds = remaining;
+      const mm = Math.floor(remaining / 60);
+      const ss = String(remaining % 60).padStart(2, '0');
+      this.timerText.setText(`${mm}:${ss}`);
+      this.timerText.setColor(remaining <= 10 ? '#ff5555' : '#ffffff');
+      this.fitPanelWidth(this.timerPanel, this.timerText, 30);
+    }
+
     this.timeUrgencyVignette.setVisible(remaining <= 10 && remaining > 0);
 
     if (remaining <= 10 && remaining !== this.lastTimerSecond) {

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
+import { createAmbientEmbers, flickerTitleGlow } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { ANIMAL_COUNT } from '../../shared/animals';
@@ -31,7 +32,7 @@ export default class LobbyScene extends Phaser.Scene {
     generateParticleTextures(this);
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     this.createFloatingAnimals();
-    this.createAmbientEmbers();
+    createAmbientEmbers(this);
 
     this.add.text(WORLD_WIDTH / 2, 20, `참가 주소: ${window.location.origin}`, {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -53,7 +54,7 @@ export default class LobbyScene extends Phaser.Scene {
       fontSize: '26px',
       color: '#ff6622',
     }).setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35);
-    this.flickerTitleGlow(titleGlow);
+    flickerTitleGlow(this, titleGlow);
 
     this.titleText = this.add.text(WORLD_WIDTH / 2, 52, '🔥 대기실', {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -255,23 +256,6 @@ export default class LobbyScene extends Phaser.Scene {
     }
   }
 
-  // Recursive rather than a yoyo/repeat tween so each step lands on a fresh
-  // random alpha/scale/duration — a real flame jitters unevenly rather than
-  // breathing on a steady sine wave.
-  flickerTitleGlow(glow) {
-    const step = () => {
-      this.tweens.add({
-        targets: glow,
-        alpha: Phaser.Math.FloatBetween(0.25, 0.6),
-        scale: Phaser.Math.FloatBetween(1.02, 1.16),
-        duration: Phaser.Math.Between(90, 220),
-        ease: 'Sine.easeInOut',
-        onComplete: step,
-      });
-    };
-    step();
-  }
-
   createFloatingAnimals() {
     const count = 6;
     for (let i = 0; i < count; i++) {
@@ -294,21 +278,4 @@ export default class LobbyScene extends Phaser.Scene {
     }
   }
 
-  // Same faint rising embers as the login screen, so the "burning
-  // boundary" mood carries through the whole pre-game flow instead of
-  // only showing up once the round actually starts.
-  createAmbientEmbers() {
-    this.add.particles('particle_spark').setDepth(-15).createEmitter({
-      x: { min: 0, max: WORLD_WIDTH },
-      y: WORLD_HEIGHT + 10,
-      speedY: { min: -14, max: -6 },
-      speedX: { min: -4, max: 4 },
-      lifespan: { min: 5000, max: 8000 },
-      scale: { start: 0.5, end: 0.1 },
-      alpha: { start: 0.22, end: 0 },
-      tint: [0xff8844, 0xff5533, 0xffcc55],
-      frequency: 350,
-      quantity: 1,
-    });
-  }
 }

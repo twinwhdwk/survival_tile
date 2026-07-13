@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
+import { createAmbientEmbers, flickerTitleGlow } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 
 const CARD_W = 200;
@@ -33,7 +34,7 @@ export default class DashboardScene extends Phaser.Scene {
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
-    this.createAmbientEmbers();
+    createAmbientEmbers(this);
 
     // Same dark backing-panel language as every other HUD readout
     // (GameScene's timer/score panels, ResultScene's headline) — without
@@ -47,7 +48,7 @@ export default class DashboardScene extends Phaser.Scene {
       fontSize: '22px',
       color: '#ff6622',
     }).setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35);
-    this.flickerTitleGlow(titleGlow);
+    flickerTitleGlow(this, titleGlow);
 
     this.titleText = this.add.text(WORLD_WIDTH / 2, 28, `🔥 ${this.stage}라운드 조별 현황`, {
       fontFamily: 'Malgun Gothic, sans-serif',
@@ -124,36 +125,6 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.off('dashboardStarting', this.handleDashboardStarting);
     this.socket.off('gameStarting', this.handleGameStarting);
     this.socket.off('tournamentEnded', this.handleTournamentEnded);
-  }
-
-  // Same torch-flicker glow used on every other title in the app.
-  flickerTitleGlow(glow) {
-    const step = () => {
-      this.tweens.add({
-        targets: glow,
-        alpha: Phaser.Math.FloatBetween(0.25, 0.6),
-        scale: Phaser.Math.FloatBetween(1.02, 1.16),
-        duration: Phaser.Math.Between(90, 220),
-        ease: 'Sine.easeInOut',
-        onComplete: step,
-      });
-    };
-    step();
-  }
-
-  createAmbientEmbers() {
-    this.add.particles('particle_spark').setDepth(-15).createEmitter({
-      x: { min: 0, max: WORLD_WIDTH },
-      y: WORLD_HEIGHT + 10,
-      speedY: { min: -14, max: -6 },
-      speedX: { min: -4, max: 4 },
-      lifespan: { min: 5000, max: 8000 },
-      scale: { start: 0.5, end: 0.1 },
-      alpha: { start: 0.22, end: 0 },
-      tint: [0xff8844, 0xff5533, 0xffcc55],
-      frequency: 350,
-      quantity: 1,
-    });
   }
 
   renderDashboard({ stage, rooms }) {

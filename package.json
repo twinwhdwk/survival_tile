@@ -1,7 +1,7 @@
 {
-  "name": "phaser3-multiplayer-template",
+  "name": "survival-tile",
   "version": "1.0.0",
-  "description": "A light Phaser 3 Multiplayer Game template using Socket IO.",
+  "description": "Real-time multiplayer \"last tile standing\" browser game (Phaser 3 + Socket.io): hex-grid tile-collapse survival rounds, boss fights, and tournament bracket progression.",
   "scripts": {
     "build": "webpack --config webpack.server.config.js && webpack --config webpack.client.config.js",
     "start": "node dist/server.bundle.js",
@@ -10,18 +10,17 @@
     "lint": "eslint src --ext .js"
   },
   "author": {
-    "name": "Brandon Morrissey",
-    "url": "https://github.com/BrandonMorr"
+    "name": "woohyun.kang"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BrandonMorr/phaser3-multiplayer-template.git"
+    "url": "git+https://github.com/twinwhdwk/survival_tile.git"
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/BrandonMorr/phaser3-multiplayer-template/issues"
+    "url": "https://github.com/twinwhdwk/survival_tile/issues"
   },
-  "homepage": "https://github.com/BrandonMorr/phaser3-multiplayer-template#readme",
+  "homepage": "https://github.com/twinwhdwk/survival_tile#readme",
   "dependencies": {
     "compression": "^1.7.4",
     "express": "^4.17.1",

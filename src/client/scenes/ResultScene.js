@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { getSocket } from '../net/socket';
 import { getNickname } from '../net/session';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
+import { createAmbientEmbers } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
 import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
@@ -24,7 +25,7 @@ export default class ResultScene extends Phaser.Scene {
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
-    this.createAmbientEmbers();
+    createAmbientEmbers(this);
 
     // Backing panels behind the headline and (later) the ranking list, matching
     // the dark rounded-panel language already used for every HUD readout in
@@ -101,24 +102,6 @@ export default class ResultScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.stopWaitingDots();
       cleanup();
-    });
-  }
-
-  // Same faint rising embers as the login/lobby screens, keeping the
-  // "burning boundary" mood consistent across the whole flow rather than
-  // reverting to a plain background right as the round wraps up.
-  createAmbientEmbers() {
-    this.add.particles('particle_spark').setDepth(-15).createEmitter({
-      x: { min: 0, max: WORLD_WIDTH },
-      y: WORLD_HEIGHT + 10,
-      speedY: { min: -14, max: -6 },
-      speedX: { min: -4, max: 4 },
-      lifespan: { min: 5000, max: 8000 },
-      scale: { start: 0.5, end: 0.1 },
-      alpha: { start: 0.22, end: 0 },
-      tint: [0xff8844, 0xff5533, 0xffcc55],
-      frequency: 350,
-      quantity: 1,
     });
   }
 

@@ -16,7 +16,6 @@ import { MAP_COLS, MAP_ROWS, HEX_SIZE } from './mapConfig';
 
 const SQRT3 = Math.sqrt(3);
 
-export { HEX_SIZE };
 export const HEX_WIDTH = HEX_SIZE * 2;
 export const HEX_HEIGHT = HEX_SIZE * SQRT3;
 const HORIZ_SPACING = HEX_SIZE * 1.5;
