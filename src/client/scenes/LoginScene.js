@@ -4,12 +4,13 @@ import { getSocket } from '../net/socket';
 import { setNickname } from '../net/session';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
-import { createAmbientEmbers, flickerTitleGlow } from '../utilities/SceneFx';
+import { createAmbientEmbers } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
 import { unlockAudio } from '../utilities/SoundFx';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
+import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 
 export default class LoginScene extends Phaser.Scene {
 
@@ -28,7 +29,7 @@ export default class LoginScene extends Phaser.Scene {
     this.createFloatingAnimals();
     createAmbientEmbers(this);
 
-    this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 175, `참가 주소: ${window.location.origin}`, {
+    this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 175, `참가 주소: ${PUBLIC_SITE_URL}`, {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '14px',
       color: '#88ccff',
@@ -40,24 +41,18 @@ export default class LoginScene extends Phaser.Scene {
     this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 230, 40, 0x0b0e1c, 0.55)
       .setStrokeStyle(1, 0xffffff, 0.08);
 
-    // A soft additive-blended glow sits behind the title and flickers like
-    // a torch (randomized alpha/scale steps, not a smooth sine loop) —
-    // ties the title into the same "burning boundary" mood as the ember
-    // particles instead of just sitting there as plain static text.
-    const titleGlow = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, '🔥 타일 서바이벌 🔥', {
-      fontFamily: 'Malgun Gothic, sans-serif',
-      fontSize: '28px',
-      color: '#ff6622',
-    }).setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35);
-    flickerTitleGlow(this, titleGlow);
-
+    // A single title with a drop shadow for the "burning" mood, instead of a
+    // second overlapping emoji text whose additive blend + randomized scale
+    // (flickerTitleGlow) drifted out of alignment with the main title and
+    // read as a stray duplicate/shadow rather than a soft glow.
     const title = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, '🔥 타일 서바이벌 🔥', {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '28px',
       color: '#ffffff',
       stroke: '#000000',
       strokeThickness: 4,
-    }).setOrigin(0.5).setScale(0.6).setAlpha(0);
+    }).setOrigin(0.5).setScale(0.6).setAlpha(0)
+      .setShadow(0, 0, '#ff6622', 12, true, true);
 
     this.tweens.add({
       targets: title,

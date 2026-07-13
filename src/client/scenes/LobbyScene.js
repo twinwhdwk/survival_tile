@@ -7,6 +7,7 @@ import { applyButtonFx } from '../utilities/ButtonFx';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
+import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
@@ -34,7 +35,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.createFloatingAnimals();
     createAmbientEmbers(this);
 
-    this.add.text(WORLD_WIDTH / 2, 20, `참가 주소: ${window.location.origin}`, {
+    this.add.text(WORLD_WIDTH / 2, 20, `참가 주소: ${PUBLIC_SITE_URL}`, {
       fontFamily: 'Malgun Gothic, sans-serif',
       fontSize: '18px',
       color: '#88ccff',
