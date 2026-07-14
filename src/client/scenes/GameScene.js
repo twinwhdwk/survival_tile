@@ -437,7 +437,7 @@ export default class GameScene extends Phaser.Scene {
         ← 현황판으로
       </button>
     `;
-    this.backToDashboardNode = this.add.dom(64, 46).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
+    this.backToDashboardNode = this.add.dom(WORLD_WIDTH / 2, 96).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
     this.backToDashboardButton = this.backToDashboardNode.getChildByID('back-to-dashboard-button');
     this.backToDashboardButton.addEventListener('click', () => {
       this.socket.once('dashboardStarting', (payload) => {
@@ -461,9 +461,9 @@ export default class GameScene extends Phaser.Scene {
     // 'reviveGaugeUpdate' handler) — reaching the end respawns them back
     // into the round (Room.respawnGhost), so this doubles as visible
     // progress toward that instead of tapping feeling directionless.
-    this.reviveGaugeBarBg = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 84, 160, 10, 0x222222)
+    this.reviveGaugeBarBg = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 70, 160, 10, 0x222222)
       .setScrollFactor(0).setDepth(29).setVisible(false);
-    this.reviveGaugeBarFill = this.add.rectangle(WORLD_WIDTH / 2 - 80, WORLD_HEIGHT - 84, 0, 8, 0x88ccff)
+    this.reviveGaugeBarFill = this.add.rectangle(WORLD_WIDTH / 2 - 80, WORLD_HEIGHT - 70, 0, 8, 0x88ccff)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     // A whole-screen blue-gray wash so ghost mode reads as "you're now
