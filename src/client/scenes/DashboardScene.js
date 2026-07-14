@@ -313,6 +313,13 @@ export default class DashboardScene extends Phaser.Scene {
     const bg = this.add.rectangle(0, 0, cardW, cardH, COLORS.panelFill, 0.35)
       .setInteractive({ useHandCursor: true });
 
+    // Same idea as every DOM button's hover lift (ButtonFx.js) — a subtle
+    // brighten so hovering a card reads as "this is clickable" the same
+    // way everything else in the app already does, not just a cursor
+    // change that's easy to miss.
+    bg.on('pointerover', () => bg.setFillStyle(COLORS.panelFill, 0.5));
+    bg.on('pointerout', () => bg.setFillStyle(COLORS.panelFill, 0.35));
+
     let lastClickAt = 0;
     bg.on('pointerdown', () => {
       // Every other clickable thing in the app (buttons via applyButtonFx,
