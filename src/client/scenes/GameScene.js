@@ -17,7 +17,7 @@ import {
   playCountdownGo,
   playVictory,
 } from '../utilities/SoundFx';
-import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory } from '../utilities/Haptics';
+import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory, vibrateTap } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
@@ -912,6 +912,7 @@ export default class GameScene extends Phaser.Scene {
           this.pendingGhostRevives.delete(key);
           const { x: reviveX, y: reviveY } = hexToPixel(row, col);
           this.showFloatingLabel(reviveX, reviveY, '복구!', '#88ccff');
+          vibrateTap();
         }
         this.setTileState(row, col, TILE_STATE.SOLID);
         playRevive();
@@ -1256,6 +1257,7 @@ export default class GameScene extends Phaser.Scene {
     this.showJoystick();
     this.cameras.main.flash(300, 120, 255, 150);
     playVictory();
+    vibrateVictory();
     this.updatePlayerCount();
   }
 
