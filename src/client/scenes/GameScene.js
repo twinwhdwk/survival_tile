@@ -23,6 +23,7 @@ import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGH
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { START_COUNTDOWN_MS } from '../../shared/roundConfig';
 import { fitPanelWidth } from '../utilities/PanelFit';
+import { applyButtonFx } from '../utilities/ButtonFx';
 
 // Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
 // for both a tile's click/hover hit area and the ghost-revive highlight, so
@@ -462,6 +463,11 @@ export default class GameScene extends Phaser.Scene {
     `;
     this.backToDashboardNode = this.add.dom(WORLD_WIDTH / 2, 96).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
     this.backToDashboardButton = this.backToDashboardNode.getChildByID('back-to-dashboard-button');
+    // Every other button in the app (login, lobby, result) gets this same
+    // hover-lift/press feedback plus click sound+haptic via one shared
+    // helper — this was the one DOM button in the whole game that never
+    // called it, so it alone felt inert/unresponsive next to everything else.
+    applyButtonFx(this.backToDashboardButton);
     this.backToDashboardButton.addEventListener('click', () => {
       this.socket.once('dashboardStarting', (payload) => {
         this.scene.start('DashboardScene', payload);
