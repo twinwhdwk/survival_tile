@@ -19,6 +19,7 @@ import {
 import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 
 // Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
 // for both a tile's click/hover hit area and the ghost-revive highlight, so
@@ -79,6 +80,7 @@ export default class GameScene extends Phaser.Scene {
     this.eliminated = false;
     this.roomFinished = false;
     this.isSpectator = false;
+    this.fromDashboard = false;
     this.mode = 'SURVIVAL';
     this.boss = null;
     this.score = 0;
@@ -185,9 +187,10 @@ export default class GameScene extends Phaser.Scene {
     this.lastFootstepAt = 0;
   }
 
-  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, boss, score, isSpectator }) {
+  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, boss, score, isSpectator, fromDashboard }) {
     this.roomId = roomId;
     this.isSpectator = !!isSpectator;
+    this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
 
     // A spectator's own socket id is never a key in `players` (the server
@@ -210,6 +213,7 @@ export default class GameScene extends Phaser.Scene {
       this.spectatorBadge.setVisible(true);
       this.spectatorBadgePanel.setVisible(true);
       this.fitPanelWidth(this.spectatorBadgePanel, this.spectatorBadge, 24);
+      this.backToDashboardNode.setVisible(this.fromDashboard);
 
       if (!this.spectatorBadgePulse) {
         this.spectatorBadgePulse = this.tweens.add({
@@ -258,10 +262,10 @@ export default class GameScene extends Phaser.Scene {
     this.setAvatarsFrozenTint(true);
 
     const countdownText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 20, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '72px',
-      color: '#ffffff',
-      stroke: '#000000',
+      color: COLORS.textPrimary,
+      stroke: TEXT_STROKE,
       strokeThickness: 8,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(35);
 
@@ -329,33 +333,33 @@ export default class GameScene extends Phaser.Scene {
     // Top-aligned with playerCountPanel/scorePanel (y=8) so the whole top
     // HUD row reads as one even strip — taller (30 vs 24) since the timer
     // text itself is bigger, but that's the only dimension that should differ.
-    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 8, 70, 30, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(1, 0xffffff, 0.08);
+    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 8, 70, 30, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '20px',
-      color: '#ffffff',
-      stroke: '#000000',
+      color: COLORS.textPrimary,
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
-    this.playerCountPanel = this.add.rectangle(WORLD_WIDTH - 6, 8, 90, 24, 0x0b0e1c, 0.55)
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(1, 0xffffff, 0.08);
+    this.playerCountPanel = this.add.rectangle(WORLD_WIDTH - 6, 8, 90, 24, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.playerCountText = this.add.text(WORLD_WIDTH - 10, 12, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#ffffff',
-      stroke: '#000000',
+      color: COLORS.textPrimary,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
 
     this.bannerText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '26px',
-      color: '#ffffff',
-      stroke: '#000000',
+      color: COLORS.textPrimary,
+      stroke: TEXT_STROKE,
       strokeThickness: 5,
       align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
@@ -364,14 +368,14 @@ export default class GameScene extends Phaser.Scene {
     // overlapping it — they used to share the same y=28 start while the
     // timer ran to y=38, so during BOSS mode the two panels' semi-transparent
     // fills and borders visibly bled into each other for that 10px band.
-    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 38, BOSS_BAR_WIDTH + 24, 44, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
+    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 38, BOSS_BAR_WIDTH + 24, 44, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.bossHpText = this.add.text(WORLD_WIDTH / 2, 50, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '13px',
-      color: '#ff8888',
-      stroke: '#000000',
+      color: COLORS.textDanger,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
@@ -380,36 +384,55 @@ export default class GameScene extends Phaser.Scene {
     this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 8, 0xff4444)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.scorePanel = this.add.rectangle(6, 8, 90, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
+    this.scorePanel = this.add.rectangle(6, 8, 90, 24, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.scoreText = this.add.text(10, 12, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#ffd700',
-      stroke: '#000000',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.spectatorBadgePanel = this.add.rectangle(WORLD_WIDTH / 2, 40, 10, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
+    this.spectatorBadgePanel = this.add.rectangle(WORLD_WIDTH / 2, 40, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 46, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '13px',
-      color: '#ffd700',
-      stroke: '#000000',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
+    // Only shown when the admin reached this room by clicking a card on
+    // the multi-room dashboard (see applySnapshot's `fromDashboard` flag) —
+    // the stage-3+ auto-spectate case has no dashboard to go back to, so
+    // that path never sets fromDashboard and this stays hidden for it.
+    const backButtonHtml = `
+      <button id="back-to-dashboard-button" type="button"
+        style="padding:8px 14px;font-size:13px;border-radius:8px;border:none;background:#1c130dcc;color:#ffd9a0;cursor:pointer;font-family:${FONT_BODY};border:1px solid #ffa94d88;">
+        ← 현황판으로
+      </button>
+    `;
+    this.backToDashboardNode = this.add.dom(64, 46).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
+    this.backToDashboardButton = this.backToDashboardNode.getChildByID('back-to-dashboard-button');
+    this.backToDashboardButton.addEventListener('click', () => {
+      this.socket.once('dashboardStarting', (payload) => {
+        this.scene.start('DashboardScene', payload);
+      });
+      this.socket.emit('adminReturnToDashboard', { roomId: this.roomId });
+    });
+
+    this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '13px',
-      color: '#88ccff',
-      stroke: '#000000',
+      color: COLORS.textInfo,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
@@ -422,7 +445,7 @@ export default class GameScene extends Phaser.Scene {
       .setDepth(17);
 
     this.bannerBackdrop = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, 10, 10, 0x000000, 0.45)
-      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(1, 0xffffff, 0.08);
+      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     this.reviveHighlight = this.add.polygon(0, 0, hexPoints(HEX_WIDTH / 2 - 2), 0x88ccff, 0.25)
       .setStrokeStyle(2, 0x88ccff, 0.9)
@@ -637,10 +660,10 @@ export default class GameScene extends Phaser.Scene {
 
   showFloatingDamage(x, y, amount) {
     const text = this.add.text(x, y - 10, `-${amount}`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '16px',
       color: '#ffdd55',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(25);
 
@@ -656,10 +679,10 @@ export default class GameScene extends Phaser.Scene {
 
   showFloatingLabel(x, y, message, color) {
     const text = this.add.text(x, y - 20, message, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '15px',
       color,
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(25).setScale(0.6).setAlpha(0);
 
@@ -717,10 +740,10 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     const text = this.add.text(this.scoreText.x + this.scoreText.width + 12, this.scoreText.y + 6, `+${amount}`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '13px',
       color: '#88ff99',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(31).setAlpha(0);
 
@@ -1548,10 +1571,10 @@ export default class GameScene extends Phaser.Scene {
     }
 
     const label = this.add.text(0, -26, playerInfo.nickname, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '11px',
       color: labelColor,
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0.5);
 

@@ -8,6 +8,7 @@ import { applyButtonFx } from '../utilities/ButtonFx';
 import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 
 export default class ResultScene extends Phaser.Scene {
 
@@ -27,21 +28,21 @@ export default class ResultScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     createAmbientEmbers(this);
 
-    // Backing panels behind the headline and (later) the ranking list, matching
-    // the dark rounded-panel language already used for every HUD readout in
-    // GameScene (score/timer/spectator badge) — without one, text here just
-    // floated directly over the ember background with nothing grounding it.
-    this.messagePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, 10, 46, 0x0b0e1c, 0.55)
-      .setOrigin(0.5).setStrokeStyle(1, 0xffffff, 0.08);
-    this.rankingsPanel = this.add.rectangle(WORLD_WIDTH / 2, 0, 360, 10, 0x0b0e1c, 0.5)
-      .setOrigin(0.5).setStrokeStyle(1, 0xffffff, 0.08).setVisible(false);
+    // Backing panels behind the headline and (later) the ranking list, in
+    // the same warm ember-bordered language used everywhere else now —
+    // previously a flat navy fill with a near-invisible white hairline,
+    // which read as generic/incomplete against the fire theme.
+    this.messagePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, 10, 46, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.rankingsPanel = this.add.rectangle(WORLD_WIDTH / 2, 0, 360, 10, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha).setVisible(false);
 
     this.messageText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, data.message || '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: '#ffffff',
       align: 'center',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setScale(0.6).setAlpha(0);
     this.messagePanel.setSize(this.messageText.width + 48, 46);
@@ -61,9 +62,9 @@ export default class ResultScene extends Phaser.Scene {
     }
 
     this.subText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 180, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#aaaaaa',
+      color: COLORS.textMuted,
     }).setOrigin(0.5);
 
     // The tournament can end in the exact same instant this player's own
@@ -145,9 +146,9 @@ export default class ResultScene extends Phaser.Scene {
 
     if (!rankings || rankings.length === 0) {
       const empty = this.add.text(WORLD_WIDTH / 2, startY, '결과가 없습니다.', {
-        fontFamily: 'Malgun Gothic, sans-serif',
+        fontFamily: FONT_BODY,
         fontSize: '16px',
-        color: '#aaaaaa',
+        color: COLORS.textMuted,
       }).setOrigin(0.5);
       this.rankingTexts.push(empty);
     }
@@ -174,7 +175,7 @@ export default class ResultScene extends Phaser.Scene {
       }
 
       const text = this.add.text(WORLD_WIDTH / 2, rowY, label, {
-        fontFamily: 'Malgun Gothic, sans-serif',
+        fontFamily: FONT_BODY,
         fontSize: '15px',
         color,
       }).setOrigin(0.5).setScale(0.7).setAlpha(0);
@@ -230,7 +231,7 @@ export default class ResultScene extends Phaser.Scene {
 
     const buttonHtml = `
       <button id="return-button" type="button"
-        style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:'Malgun Gothic',sans-serif;">
+        style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
         대기실로 돌아가기
       </button>
     `;

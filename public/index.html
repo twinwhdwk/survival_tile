@@ -6,6 +6,15 @@
 
     <title>타일 서바이벌</title>
 
+    <!-- Display face for titles/headlines (Black Han Sans) and body face for
+         HUD/labels (Gothic A1) — see src/client/theme/Theme.js for where
+         these are referenced. Both replace the previous 'Malgun Gothic'
+         system-font fallback, which rendered inconsistently across OSes and
+         carried no visual identity of its own. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+    <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Gothic+A1:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+
     <link rel="stylesheet" type="text/css" href="public/css/styles.css"/>
     <!-- An inline SVG data URI needs no separate image asset/build step,
          matching the game's own no-external-assets approach to textures

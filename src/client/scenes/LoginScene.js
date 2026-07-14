@@ -11,6 +11,7 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 
 export default class LoginScene extends Phaser.Scene {
 
@@ -30,26 +31,26 @@ export default class LoginScene extends Phaser.Scene {
     createAmbientEmbers(this);
 
     this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 175, `참가 주소: ${PUBLIC_SITE_URL}`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#88ccff',
+      color: COLORS.textInfo,
     }).setOrigin(0.5);
 
-    // Same dark backing panel as every other headline in the app (lobby,
-    // dashboard, result screen) — keeps the title grounded instead of
-    // floating bare over the background.
-    this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 230, 40, 0x0b0e1c, 0.55)
-      .setStrokeStyle(1, 0xffffff, 0.08);
+    // Same warm ember-bordered panel as every other headline in the app
+    // (lobby, dashboard, result screen) — keeps the title grounded instead
+    // of floating bare over the background.
+    this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 230, 40, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     // A single title with a drop shadow for the "burning" mood, instead of a
     // second overlapping emoji text whose additive blend + randomized scale
     // (flickerTitleGlow) drifted out of alignment with the main title and
     // read as a stray duplicate/shadow rather than a soft glow.
     const title = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, '🔥 타일 서바이벌 🔥', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '28px',
       color: '#ffffff',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setScale(0.6).setAlpha(0)
       .setShadow(0, 0, '#ff6622', 12, true, true);
@@ -63,7 +64,7 @@ export default class LoginScene extends Phaser.Scene {
     });
 
     this.statusText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 60, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
       color: '#ff5555',
     }).setOrigin(0.5);
@@ -71,9 +72,9 @@ export default class LoginScene extends Phaser.Scene {
     const formHtml = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
         <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)"
-          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:8px;border:2px solid #ffffff;background:#111827;color:#ffffff;outline:none;" />
+          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:8px;border:2px solid #ffffff;background:#111827;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
         <button id="join-button" type="button"
-          style="width:220px;padding:12px;font-size:18px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;">
+          style="width:220px;padding:12px;font-size:18px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           참가하기
         </button>
       </div>

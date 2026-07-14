@@ -638,6 +638,48 @@ function setServerHandlers() {
       }
     });
 
+    // Admin manually picked a room's card on the multi-room dashboard
+    // (stage 1/2) to watch in full — same seating mechanism already used
+    // to auto-spectate the sole remaining room from stage 3 onward (see
+    // startStage()'s index===0 admin branch), just triggered on demand for
+    // whichever roomId the admin clicked instead of automatically for
+    // room 0. `fromDashboard` tells the client to show a way back, since
+    // (unlike the stage 3+ auto case) there's a dashboard to return to.
+    socket.on('adminSpectateRoom', (payload) => {
+      if (!adminSockets.has(socket.id)) {
+        return;
+      }
+      const roomId = payload && payload.roomId;
+      if (typeof roomId !== 'string') {
+        return;
+      }
+      const room = rooms.get(roomId);
+      if (!room) {
+        return;
+      }
+      socket.join(roomId);
+      socket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true, fromDashboard: true });
+    });
+
+    // Leaves the spectated room's channel (so its tileWarning/tileCollapsed/
+    // playerMoved broadcasts stop reaching a socket no longer rendering
+    // that room) and, if the tournament is still in a dashboard-eligible
+    // stage, re-sends the current stage's room list so the client can jump
+    // straight back into DashboardScene instead of being stranded.
+    socket.on('adminReturnToDashboard', (payload) => {
+      if (!adminSockets.has(socket.id)) {
+        return;
+      }
+      const roomId = payload && payload.roomId;
+      if (typeof roomId === 'string') {
+        socket.leave(roomId);
+      }
+      if (currentStage === 0 || currentStage > 2) {
+        return;
+      }
+      socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size });
+    });
+
     socket.on('disconnect', () => {
       console.log('Socket disconnected: ' + socket.id);
       adminSockets.delete(socket.id);

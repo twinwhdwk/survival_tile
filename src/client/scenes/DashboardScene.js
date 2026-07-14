@@ -2,21 +2,38 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
-import { createAmbientEmbers, flickerTitleGlow } from '../utilities/SceneFx';
+import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
+import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 
-const CARD_W = 200;
-const CARD_H = 130;
-const CARD_GAP = 16;
+const CARD_GAP = 14;
+const GRID_PADDING = 20;
+const HEADER_HEIGHT = 70;
+const FOOTER_MARGIN = 14;
+
+// A short window between two pointerdowns on the same card to count as a
+// double-click/tap — Phaser interactive objects don't expose native
+// dblclick, so this is tracked per-card instead.
+const DOUBLE_CLICK_MS = 350;
+
+// Colors for the live per-room tile thumbnail. Deliberately distinct from
+// the board's own beveled-hex palette (EffectTextures.js) rather than
+// reusing it exactly — at thumbnail size the bevel/gradient detail would
+// be lost anyway, so flat, high-contrast fills read better small.
+const MINIMAP_COLORS = {
+  [TILE_STATE.SOLID]: '#4b5aa0',
+  [TILE_STATE.WARNING]: '#ff6b4a',
+  [TILE_STATE.GONE]: '#05060c',
+};
 
 // Admin-only multi-room overview for stage 1/2 (see server.js's
 // 'dashboardStarting' branch in startStage()) — once the bracket has
 // several simultaneous rooms, watching one full board in detail is less
-// useful than seeing every group's status at a glance. Deliberately a
-// simplified summary grid, not N live rendered boards: a full per-tile
-// render of up to 8 rooms at once would be both expensive and unreadable
-// at that size, and the admin mainly needs "who's still alive / how much
-// time is left / who's ahead", not the tile-by-tile detail.
+// useful than seeing every group's status at a glance. Stage 1 lays out
+// up to 8 groups as a 4x2 grid; stage 2's narrower field of ~4 groups lays
+// out as 2x2 — both sized to actually fill the screen rather than sitting
+// as a small fixed-size cluster in the middle of empty space.
 export default class DashboardScene extends Phaser.Scene {
 
   constructor() {
@@ -36,33 +53,35 @@ export default class DashboardScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     createAmbientEmbers(this);
 
-    // Same dark backing-panel language as every other HUD readout
-    // (GameScene's timer/score panels, ResultScene's headline) — without
-    // one this title was the only headline in the app just floating
-    // directly over the background.
-    this.titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 14, 10, 34, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setStrokeStyle(1, 0xffffff, 0.08);
+    // Same warm ember-bordered panel language as every other HUD readout
+    // (GameScene's timer/score panels, ResultScene's headline).
+    this.titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 14, 10, 34, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
-    const titleGlow = this.add.text(WORLD_WIDTH / 2, 28, `🔥 ${this.stage}라운드 조별 현황`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
-      fontSize: '22px',
-      color: '#ff6622',
-    }).setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35);
-    flickerTitleGlow(this, titleGlow);
-
+    // A single title with a drop shadow for the "burning" mood, rather than
+    // a second overlapping emoji text — the previous additive-blend glow
+    // copy scaled independently of the main title (flickerTitleGlow) and
+    // drifted out of alignment, reading as a stray duplicate/shadow instead
+    // of a soft glow. See LoginScene for the same fix.
     this.titleText = this.add.text(WORLD_WIDTH / 2, 28, `🔥 ${this.stage}라운드 조별 현황`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '22px',
       color: '#ffffff',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
     this.titlePanel.setSize(this.titleText.width + 36, 34);
 
+    this.hintText = this.add.text(WORLD_WIDTH / 2, 50, '클릭: 대상 지정 (C/S 스킬)  ·  더블클릭: 게임 화면 보기', {
+      fontFamily: FONT_BODY,
+      fontSize: '12px',
+      color: COLORS.textMuted,
+    }).setOrigin(0.5);
+
     this.emptyText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, '현황을 불러오는 중...', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '16px',
-      color: '#aaaaaa',
+      color: COLORS.textMuted,
     }).setOrigin(0.5);
 
     this.handleDashboardUpdate = (payload) => this.renderDashboard(payload);
@@ -85,7 +104,9 @@ export default class DashboardScene extends Phaser.Scene {
     // selected — see server.js's 'adminCritical'/'adminShatterTiles'
     // handlers. Deliberately no on-screen label for what these keys do:
     // this admin screen may be projected on a TV, and the whole point is
-    // that nobody watching can tell an intervention happened.
+    // that nobody watching can tell an intervention happened. A second,
+    // quick click on the same card instead jumps into that room's full
+    // game view (see spectateRoom()) — see the hintText above.
     this.handleKeyC = () => this.triggerAdminSkill('adminCritical');
     this.handleKeyS = () => this.triggerAdminSkill('adminShatterTiles');
     this.input.keyboard.on('keydown-C', this.handleKeyC);
@@ -103,6 +124,15 @@ export default class DashboardScene extends Phaser.Scene {
     Object.values(this.cardsByRoomId).forEach((card) => {
       card.selectionRing.setVisible(card.roomId === this.selectedRoomId);
     });
+  }
+
+  // Jumps the admin straight into a specific room's full GameScene as a
+  // spectator — server.js's 'adminSpectateRoom' handler seats this socket
+  // in that room's channel and replies with a normal 'gameStarting' event,
+  // which this scene already listens for (handleGameStarting), so there's
+  // nothing further to wire up here.
+  spectateRoom(roomId) {
+    this.socket.emit('adminSpectateRoom', { roomId });
   }
 
   triggerAdminSkill(eventName) {
@@ -127,33 +157,53 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.off('tournamentEnded', this.handleTournamentEnded);
   }
 
+  // Stage 1 expects up to ~8 simultaneous groups arranged 4 wide x 2 tall;
+  // stage 2's narrower field of ~4 groups arranged 2x2 — in both cases the
+  // card size is derived from the actual room count and the real screen
+  // area (not a fixed constant), so the grid always reads as "full" rather
+  // than a small cluster floating in unused space.
+  computeLayout(n) {
+    const cols = this.stage <= 1 ? Math.min(4, Math.max(n, 1)) : Math.min(2, Math.max(n, 1));
+    const rows = Math.max(1, Math.ceil(n / cols));
+    const availW = WORLD_WIDTH - GRID_PADDING * 2;
+    const availH = WORLD_HEIGHT - HEADER_HEIGHT - FOOTER_MARGIN;
+    const cardW = (availW - (cols - 1) * CARD_GAP) / cols;
+    const cardH = (availH - (rows - 1) * CARD_GAP) / rows;
+    const totalWidth = cols * cardW + (cols - 1) * CARD_GAP;
+    const startX = (WORLD_WIDTH - totalWidth) / 2 + cardW / 2;
+    const startY = HEADER_HEIGHT + cardH / 2;
+    return { cols, rows, cardW, cardH, startX, startY };
+  }
+
   renderDashboard({ stage, rooms }) {
     this.stage = stage;
     this.emptyText.setVisible(rooms.length === 0);
+    if (rooms.length === 0) {
+      return;
+    }
 
-    // Stage 1 expects up to ~8 simultaneous groups, stage 2 up to ~4 (each
-    // stage roughly halves the room count via mergeAdjacentLineages) — a
-    // narrower grid for stage 2 reads as "fewer, bigger groups remain"
-    // rather than just re-using the same dense 4-column layout throughout.
-    const cols = stage <= 1 ? 4 : 2;
-    const totalWidth = cols * CARD_W + (cols - 1) * CARD_GAP;
-    const startX = (WORLD_WIDTH - totalWidth) / 2 + CARD_W / 2;
-    const startY = 90;
+    const layout = this.computeLayout(rooms.length);
 
     const seenIds = new Set();
     rooms.forEach((summary, i) => {
       seenIds.add(summary.roomId);
       let card = this.cardsByRoomId[summary.roomId];
-      if (!card) {
-        card = this.createCard(summary.roomId);
+      if (!card || card.cardW !== layout.cardW || card.cardH !== layout.cardH) {
+        if (card) {
+          card.container.destroy();
+          if (card.minimapTextureKey && this.textures.exists(card.minimapTextureKey)) {
+            this.textures.remove(card.minimapTextureKey);
+          }
+        }
+        card = this.createCard(summary.roomId, layout.cardW, layout.cardH);
         this.cardsByRoomId[summary.roomId] = card;
       }
 
-      const col = i % cols;
-      const row = Math.floor(i / cols);
+      const col = i % layout.cols;
+      const row = Math.floor(i / layout.cols);
       card.container.setPosition(
-        startX + col * (CARD_W + CARD_GAP),
-        startY + row * (CARD_H + CARD_GAP) + CARD_H / 2,
+        layout.startX + col * (layout.cardW + CARD_GAP),
+        layout.startY + row * (layout.cardH + CARD_GAP),
       );
 
       this.updateCardContent(card, summary, i);
@@ -161,7 +211,11 @@ export default class DashboardScene extends Phaser.Scene {
 
     Object.keys(this.cardsByRoomId).forEach((roomId) => {
       if (!seenIds.has(roomId)) {
-        this.cardsByRoomId[roomId].container.destroy();
+        const stale = this.cardsByRoomId[roomId];
+        stale.container.destroy();
+        if (stale.minimapTextureKey && this.textures.exists(stale.minimapTextureKey)) {
+          this.textures.remove(stale.minimapTextureKey);
+        }
         delete this.cardsByRoomId[roomId];
         if (this.selectedRoomId === roomId) {
           this.selectedRoomId = null;
@@ -170,44 +224,75 @@ export default class DashboardScene extends Phaser.Scene {
     });
   }
 
-  createCard(roomId) {
+  createCard(roomId, cardW, cardH) {
     const container = this.add.container(0, 0).setScale(0.7).setAlpha(0);
 
-    const bg = this.add.rectangle(0, 0, CARD_W, CARD_H, 0x0b0e1c, 0.6)
+    // The live tile-status thumbnail fills almost the entire card as its
+    // own background layer; the header strip below sits on top of it with
+    // its own solid backing so the room label/stats stay legible over
+    // whatever the board looks like at that instant.
+    const minimapTextureKey = `dashboard_minimap_${roomId}`;
+    const minimapWidth = MAP_COLS * 4;
+    const minimapHeight = MAP_ROWS * 4;
+    if (!this.textures.exists(minimapTextureKey)) {
+      this.textures.createCanvas(minimapTextureKey, minimapWidth, minimapHeight);
+    }
+    const minimapInnerW = cardW - 16;
+    const minimapInnerH = cardH - 46;
+    const minimap = this.add.image(0, 20, minimapTextureKey)
+      .setDisplaySize(minimapInnerW, Math.max(minimapInnerH, 10));
+
+    const bg = this.add.rectangle(0, 0, cardW, cardH, COLORS.panelFill, 0.35)
       .setStrokeStyle(1, 0xffd700, 0.25)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.selectRoom(roomId));
+      .setInteractive({ useHandCursor: true });
+
+    let lastClickAt = 0;
+    bg.on('pointerdown', () => {
+      const now = Date.now();
+      if (now - lastClickAt < DOUBLE_CLICK_MS) {
+        lastClickAt = 0;
+        this.spectateRoom(roomId);
+        return;
+      }
+      lastClickAt = now;
+      this.selectRoom(roomId);
+    });
 
     // A distinct ring (not just re-coloring bg's own border) so the
     // persistent "this room is targeted" state never fights with the
     // temporary red elimination-flash on bg itself.
-    const selectionRing = this.add.rectangle(0, 0, CARD_W + 8, CARD_H + 8, 0x000000, 0)
+    const selectionRing = this.add.rectangle(0, 0, cardW + 8, cardH + 8, 0x000000, 0)
       .setStrokeStyle(3, 0x55ddff, 1).setVisible(false);
 
-    const label = this.add.text(0, -CARD_H / 2 + 18, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+    // Header strip: solid backing so text stays readable over the
+    // thumbnail, holding the group label + alive count + timer/score.
+    const headerBar = this.add.rectangle(0, -cardH / 2 + 20, cardW, 40, COLORS.panelFill, 0.82)
+      .setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+
+    const label = this.add.text(-cardW / 2 + 10, -cardH / 2 + 12, '', {
+      fontFamily: FONT_BODY,
       fontSize: '15px',
-      color: '#ffd700',
-      stroke: '#000000',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
       strokeThickness: 3,
-    }).setOrigin(0.5);
-    const aliveText = this.add.text(0, -14, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
-      fontSize: '14px',
-      color: '#ffffff',
-    }).setOrigin(0.5);
-    const infoText = this.add.text(0, 10, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+    }).setOrigin(0, 0.5);
+    const aliveText = this.add.text(cardW / 2 - 10, -cardH / 2 + 12, '', {
+      fontFamily: FONT_BODY,
       fontSize: '13px',
       color: '#ffffff',
-      align: 'center',
-      lineSpacing: 6,
-    }).setOrigin(0.5);
-    const hpBarBg = this.add.rectangle(0, CARD_H / 2 - 18, CARD_W - 30, 8, 0x222222).setVisible(false);
-    const hpBarFill = this.add.rectangle(-(CARD_W - 30) / 2, CARD_H / 2 - 18, CARD_W - 30, 6, 0xff4444)
+    }).setOrigin(1, 0.5);
+    const infoText = this.add.text(-cardW / 2 + 10, -cardH / 2 + 28, '', {
+      fontFamily: FONT_BODY,
+      fontSize: '12px',
+      color: COLORS.textMuted,
+      align: 'left',
+    }).setOrigin(0, 0.5);
+
+    const hpBarBg = this.add.rectangle(0, cardH / 2 - 12, cardW - 24, 8, 0x222222).setVisible(false);
+    const hpBarFill = this.add.rectangle(-(cardW - 24) / 2, cardH / 2 - 12, cardW - 24, 6, 0xff4444)
       .setOrigin(0, 0.5).setVisible(false);
 
-    container.add([bg, selectionRing, label, aliveText, infoText, hpBarBg, hpBarFill]);
+    container.add([minimap, bg, selectionRing, headerBar, label, aliveText, infoText, hpBarBg, hpBarFill]);
 
     this.tweens.add({
       targets: container,
@@ -219,13 +304,39 @@ export default class DashboardScene extends Phaser.Scene {
 
     return {
       container, bg, selectionRing, label, aliveText, infoText, hpBarBg, hpBarFill,
-      roomId, prevAliveCount: null, lowHpTween: null,
+      minimap, minimapTextureKey, minimapCanvas: null,
+      roomId, cardW, cardH, prevAliveCount: null, lowHpTween: null,
     };
+  }
+
+  // Redraws this room's tile-status thumbnail from its current tileMap —
+  // one flat-color fillRect per cell (see MINIMAP_COLORS), which at 4px per
+  // cell is cheap even redrawn every ~1s tick across 8 simultaneous rooms.
+  drawMinimap(card, tileMap) {
+    if (!tileMap) {
+      return;
+    }
+    if (!card.minimapCanvas) {
+      const canvasTexture = this.textures.get(card.minimapTextureKey);
+      card.minimapCanvas = canvasTexture.getContext();
+      card.minimapCanvasTexture = canvasTexture;
+    }
+    const ctx = card.minimapCanvas;
+    for (let row = 0; row < tileMap.length; row++) {
+      const rowData = tileMap[row];
+      for (let col = 0; col < rowData.length; col++) {
+        ctx.fillStyle = MINIMAP_COLORS[rowData[col]] || MINIMAP_COLORS[TILE_STATE.GONE];
+        ctx.fillRect(col * 4, row * 4, 4, 4);
+      }
+    }
+    card.minimapCanvasTexture.refresh();
   }
 
   updateCardContent(card, summary, i) {
     const modeLabel = summary.mode === 'BOSS' ? '⚔️ 보스전' : '🏃 생존';
     card.label.setText(`${i + 1}조 ${modeLabel}`);
+
+    this.drawMinimap(card, summary.tileMap);
 
     // Someone in this group just went down since the last tick — a quick
     // red flash on the card border makes that jump out at a glance instead
@@ -256,13 +367,13 @@ export default class DashboardScene extends Phaser.Scene {
     const mm = Math.floor(totalSeconds / 60);
     const ss = totalSeconds % 60;
     const timerStr = `${mm}:${ss.toString().padStart(2, '0')}`;
-    card.infoText.setText(`점수 ${summary.score}\n남은시간 ${timerStr}`);
+    card.infoText.setText(`점수 ${summary.score} · 남은시간 ${timerStr}`);
 
     if (summary.boss) {
       card.hpBarBg.setVisible(true);
       card.hpBarFill.setVisible(true);
       const ratio = summary.boss.maxHp > 0 ? Math.max(0, summary.boss.hp / summary.boss.maxHp) : 0;
-      card.hpBarFill.setSize((CARD_W - 30) * ratio, 6);
+      card.hpBarFill.setSize((card.cardW - 24) * ratio, 6);
 
       // Same "low HP pulses" cue as GameScene's boss HUD bar.
       if (ratio <= 0.25 && !card.lowHpTween) {

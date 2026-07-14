@@ -213,8 +213,9 @@ export default class Room {
 
   // Lightweight per-room stats for the admin's multi-room dashboard (stage
   // 1/2, before the bracket narrows down to a single room worth watching in
-  // full). Deliberately not a tile-by-tile snapshot — the dashboard shows a
-  // simplified summary card per group rather than rendering N live boards.
+  // full). Includes the full tileMap (same array getSnapshot() already
+  // sends to real joiners, so the wire cost is proven fine) so each card
+  // can render a small live thumbnail of the board instead of just numbers.
   getSummary() {
     const players = Object.values(this.players);
     const aliveCount = players.filter((p) => !p.eliminated).length;
@@ -227,6 +228,7 @@ export default class Room {
       totalCount: players.length,
       score: this.score,
       remainingMs,
+      tileMap: this.tileMap,
       boss: this.boss ? { hp: this.boss.hp, maxHp: this.boss.maxHp } : null,
     };
   }

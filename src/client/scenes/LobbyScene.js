@@ -2,12 +2,13 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
-import { createAmbientEmbers, flickerTitleGlow } from '../utilities/SceneFx';
+import { createAmbientEmbers } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
@@ -36,60 +37,56 @@ export default class LobbyScene extends Phaser.Scene {
     createAmbientEmbers(this);
 
     this.add.text(WORLD_WIDTH / 2, 20, `참가 주소: ${PUBLIC_SITE_URL}`, {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '18px',
-      color: '#88ccff',
+      color: COLORS.textInfo,
     }).setOrigin(0.5);
 
-    // Same dark backing panel as every other HUD readout in the app
-    // (GameScene's timer/score panels, ResultScene/DashboardScene's
+    // Same warm ember-bordered panel language as every other HUD readout in
+    // the app (GameScene's timer/score panels, ResultScene/DashboardScene's
     // headline) — keeps the title grounded instead of floating bare over
     // the background like it was before.
-    this.add.rectangle(WORLD_WIDTH / 2, 38, 130, 34, 0x0b0e1c, 0.55)
-      .setOrigin(0.5, 0).setStrokeStyle(1, 0xffffff, 0.08);
+    this.add.rectangle(WORLD_WIDTH / 2, 38, 130, 34, COLORS.panelFill, COLORS.panelFillAlpha)
+      .setOrigin(0.5, 0).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
-    // Same torch-flicker glow as the login title, so the mood carries
-    // through instead of resetting to plain text the moment you land here.
-    const titleGlow = this.add.text(WORLD_WIDTH / 2, 52, '🔥 대기실', {
-      fontFamily: 'Malgun Gothic, sans-serif',
-      fontSize: '26px',
-      color: '#ff6622',
-    }).setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35);
-    flickerTitleGlow(this, titleGlow);
-
+    // A single title with a drop shadow for the "burning" mood, rather than
+    // a second overlapping emoji text — the previous additive-blend glow
+    // copy scaled independently of the main title (flickerTitleGlow) and
+    // drifted out of alignment, reading as a stray duplicate/shadow instead
+    // of a soft glow. See LoginScene for the same fix.
     this.titleText = this.add.text(WORLD_WIDTH / 2, 52, '🔥 대기실', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: '#ffffff',
-      stroke: '#000000',
+      stroke: TEXT_STROKE,
       strokeThickness: 4,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
 
     this.countText = this.add.text(WORLD_WIDTH / 2, 82, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#aaaaaa',
+      color: COLORS.textMuted,
     }).setOrigin(0.5);
 
     this.statusText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 70, '', {
-      fontFamily: 'Malgun Gothic, sans-serif',
+      fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#ffd700',
+      color: COLORS.textGold,
       align: 'center',
     }).setOrigin(0.5);
 
     const buttonHtml = `
       <div style="display:flex;gap:12px;align-items:center;">
         <button id="clear-lobby-button" type="button"
-          style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:'Malgun Gothic',sans-serif;">
+          style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
           초기화
         </button>
         <button id="add-bot-button" type="button"
-          style="padding:14px 20px;font-size:16px;border-radius:10px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:'Malgun Gothic',sans-serif;">
+          style="padding:14px 20px;font-size:16px;border-radius:10px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
           봇 추가
         </button>
         <button id="start-button" type="button"
-          style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:'Malgun Gothic',sans-serif;">
+          style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
           게임 시작
         </button>
       </div>
@@ -171,8 +168,8 @@ export default class LobbyScene extends Phaser.Scene {
       // lobby grid has the same problem finding their own entry.
       const isMe = socketId === this.socket.id;
       const bg = this.add.rectangle(0, 0, GRID_CELL_W - 10, GRID_CELL_H - 8,
-        isMe ? 0x3a2f0a : 0x0b0e1c, isMe ? 0.6 : 0.32)
-        .setStrokeStyle(1, isMe ? 0xffd700 : 0xffffff, isMe ? 0.7 : 0.08);
+        isMe ? 0x3a2f0a : COLORS.panelFill, isMe ? 0.6 : COLORS.panelFillAlpha)
+        .setStrokeStyle(COLORS.panelBorderWidth, isMe ? 0xffd700 : COLORS.panelBorder, isMe ? 0.7 : COLORS.panelBorderAlpha);
       cell.add(bg);
 
       if (isMe) {
@@ -193,7 +190,7 @@ export default class LobbyScene extends Phaser.Scene {
 
       const color = isMe ? '#ffd700' : (entry.isBot ? '#9aa3c9' : '#ffffff');
       const text = this.add.text(-16, 0, entry.nickname, {
-        fontFamily: 'Malgun Gothic, sans-serif',
+        fontFamily: FONT_BODY,
         fontSize: '14px',
         color,
       }).setOrigin(0, 0.5);
