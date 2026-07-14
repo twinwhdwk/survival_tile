@@ -7,6 +7,8 @@ import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
+import { playClick } from '../utilities/SoundFx';
+import { vibrateTap } from '../utilities/Haptics';
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -313,6 +315,14 @@ export default class DashboardScene extends Phaser.Scene {
 
     let lastClickAt = 0;
     bg.on('pointerdown', () => {
+      // Every other clickable thing in the app (buttons via applyButtonFx,
+      // in-round tile taps) gets a click sound + tap haptic — these cards
+      // were the one interactive surface in the whole game with neither,
+      // reading as unresponsive next to everything else even though the
+      // click itself worked fine.
+      playClick();
+      vibrateTap();
+
       const now = Date.now();
       if (now - lastClickAt < DOUBLE_CLICK_MS) {
         lastClickAt = 0;
