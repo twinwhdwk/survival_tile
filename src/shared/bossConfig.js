@@ -1,4 +1,11 @@
 export const GHOST_REVIVE_COOLDOWN_MS = 1500;
+// Once only one teammate is still standing (Room.eliminatePlayer's
+// aliveCount === 1 check), every ghost's revive-tap cooldown shortens to
+// this instead of being waived entirely — a genuinely unlimited-rate tap
+// (every client-side click hitting the server with zero throttling) risks
+// real server load from a room full of people spam-tapping at once, so
+// this stays a real (if much shorter) rate limit rather than none at all.
+export const GHOST_REVIVE_LAST_STAND_COOLDOWN_MS = 400;
 export const BOSS_METEOR_DAMAGE = 1;
 
 export const BOSS_HIT_SCORE = 10;

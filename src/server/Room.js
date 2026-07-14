@@ -13,7 +13,8 @@ import {
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
   BOUNDARY_WAVE_MS,
-  AUTO_REGEN_TILES_PER_BURST,
+  AUTO_REGEN_BASE_BURST,
+  AUTO_REGEN_BURST_PER_ALIVE_PLAYER,
   AUTO_REGEN_SOLID_RATIO_THRESHOLD,
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
@@ -23,6 +24,7 @@ import {
 } from '../shared/roundConfig';
 import {
   GHOST_REVIVE_COOLDOWN_MS,
+  GHOST_REVIVE_LAST_STAND_COOLDOWN_MS,
   BOSS_METEOR_DAMAGE,
   BOSS_HIT_SCORE,
   BOSS_KILL_SCORE,
@@ -622,19 +624,20 @@ export default class Room {
     }
 
     // Last-stand rally: once only one teammate is still standing, every
-    // ghost's revive cooldown is waived entirely, so a flurry of clicks
-    // from everyone already eliminated can genuinely clear a path in real
-    // time for whoever's left — same 'tileRevived' -> "복구!" feedback
-    // players already know, just without the usual rate limit.
+    // ghost's revive cooldown shortens from the normal GHOST_REVIVE_COOLDOWN_MS
+    // to GHOST_REVIVE_LAST_STAND_COOLDOWN_MS instead of being waived
+    // entirely — a genuinely unlimited tap rate (every client click hitting
+    // the server with zero throttling, from however many ghosts are already
+    // eliminated) risks real load if several people spam-tap at once. Still
+    // dramatically faster than normal, just not literally unbounded.
     const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
-    if (aliveCount > 1) {
-      const now = Date.now();
-      const lastRevive = this.reviveCooldowns.get(id) || 0;
-      if (now - lastRevive < GHOST_REVIVE_COOLDOWN_MS) {
-        return;
-      }
-      this.reviveCooldowns.set(id, now);
+    const cooldownMs = aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
+    const now = Date.now();
+    const lastRevive = this.reviveCooldowns.get(id) || 0;
+    if (now - lastRevive < cooldownMs) {
+      return;
     }
+    this.reviveCooldowns.set(id, now);
 
     this.tileMap[row][col] = TILE_STATE.SOLID;
     this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
@@ -936,7 +939,16 @@ export default class Room {
       const j = Math.floor(Math.random() * (i + 1));
       [goneTiles[i], goneTiles[j]] = [goneTiles[j], goneTiles[i]];
     }
-    goneTiles.slice(0, AUTO_REGEN_TILES_PER_BURST).forEach(({ row, col }) => {
+
+    // Scales with how many players are actually still alive right now —
+    // a nearly-full room burns through tiles far faster than one down to
+    // its last survivor, so a flat burst size can't be tuned right for
+    // both at once. See roundConfig.js's AUTO_REGEN_BASE_BURST /
+    // AUTO_REGEN_BURST_PER_ALIVE_PLAYER comment for the throughput math.
+    const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+    const burstSize = AUTO_REGEN_BASE_BURST + AUTO_REGEN_BURST_PER_ALIVE_PLAYER * aliveCount;
+
+    goneTiles.slice(0, burstSize).forEach(({ row, col }) => {
       this.tileMap[row][col] = TILE_STATE.SOLID;
       this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
       this.emit('tileRevived', { row, col });

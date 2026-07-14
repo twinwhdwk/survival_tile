@@ -21,6 +21,7 @@ import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vib
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { START_COUNTDOWN_MS } from '../../shared/roundConfig';
 
 // Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
 // for both a tile's click/hover hit area and the ghost-revive highlight, so
@@ -258,6 +259,17 @@ export default class GameScene extends Phaser.Scene {
   // moment to get their bearings before movement is allowed. The server's
   // own timers (mass regen, bots, etc.) keep running underneath this the
   // whole time; only local input is held back via countdownActive.
+  //
+  // Derived from the server's own roundStartTime (already stored on this
+  // scene by applySnapshot) rather than always starting a fresh local
+  // "10, 9, 8..." the instant this scene finishes loading — a client that
+  // took a couple seconds to get here (texture generation on first load,
+  // DOM setup, plain network/scene-transition delay) would otherwise show
+  // a full 10s count with no relation to how much of START_COUNTDOWN_MS
+  // the server has already burned through, and the server's own bot/
+  // movement gating (Room.js, purely server-clock-based) could unlock
+  // well before this client's own countdown visually finished — exactly
+  // what made bots look like they started moving only ~2s in.
   showStartCountdown(onDone) {
     this.countdownActive = true;
     this.setAvatarsFrozenTint(true);
@@ -270,9 +282,12 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 8,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(35);
 
-    let count = 10;
+    const deadline = (this.roundStartTime || Date.now()) + START_COUNTDOWN_MS;
 
     const tick = () => {
+      const remainingMs = deadline - Date.now();
+      const count = Math.ceil(remainingMs / 1000);
+
       if (count <= 0) {
         countdownText.setText('시작!');
         countdownText.setColor('#55ff88');
@@ -307,8 +322,13 @@ export default class GameScene extends Phaser.Scene {
         ease: 'Back.easeOut',
       });
 
-      count -= 1;
-      this.time.delayedCall(1000, tick);
+      // Re-aligns the next tick to the real next whole-second boundary
+      // before the deadline, instead of a flat 1000ms step that would
+      // otherwise compound this callback's own scheduling jitter over
+      // 10 ticks — msIntoThisSecond is how far *into* the current
+      // displayed second we already are.
+      const msIntoThisSecond = remainingMs - (count - 1) * 1000;
+      this.time.delayedCall(Math.max(50, msIntoThisSecond), tick);
     };
 
     tick();
@@ -909,9 +929,9 @@ export default class GameScene extends Phaser.Scene {
       // freely, cooldown-free) and explains to the survivor why the map
       // is suddenly filling back in around them.
       lastStandActivated: () => {
-        this.showBanner('⚡ 라스트 스탠드!\n유령들이 쿨타임 없이 타일을 복구합니다', '#ffd700');
+        this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         if (this.eliminated) {
-          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 쿨타임 없음 · 게이지를 채우면 부활!');
+          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
           this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
         }
       },
