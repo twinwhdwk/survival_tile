@@ -268,6 +268,15 @@ export default class LobbyScene extends Phaser.Scene {
       fontSize: '14px',
       color,
     }).setOrigin(0, 0.5);
+    // Nicknames can be up to NICKNAME_MAX_LENGTH (8) characters — at full
+    // Korean-glyph width that's wider than this cell has room for, and
+    // was previously left to just overflow straight out the side of the
+    // rounded chip. Shrinking to fit (rather than truncating) keeps the
+    // full name legible instead of losing characters to an ellipsis.
+    const maxTextWidth = 50;
+    if (text.width > maxTextWidth) {
+      text.setScale(maxTextWidth / text.width);
+    }
     container.add(text);
 
     if (entry.isBot) {
