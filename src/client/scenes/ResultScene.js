@@ -184,11 +184,18 @@ export default class ResultScene extends Phaser.Scene {
         fontFamily: FONT_BODY,
         fontSize: '15px',
         color,
-      }).setOrigin(0.5).setScale(0.7).setAlpha(0);
+      }).setOrigin(0.5);
+      // A merged team (later bracket stages) can join several nicknames
+      // into one row — at full size that easily runs wider than the
+      // rankingsPanel itself (360px) and spilled out both edges instead of
+      // staying inside it. Scaling the whole row down to fit keeps every
+      // name intact rather than truncating anyone out of their own result.
+      const fitScale = Math.min(1, 336 / text.width);
+      text.setScale(fitScale * 0.7).setAlpha(0);
 
       this.tweens.add({
         targets: text,
-        scale: 1,
+        scale: fitScale,
         alpha: 1,
         delay: i * 90,
         duration: 260,
