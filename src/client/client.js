@@ -6,22 +6,6 @@ import ResultScene from './scenes/ResultScene';
 import DashboardScene from './scenes/DashboardScene';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../shared/hexGrid';
 
-// Every Text object in this game renders soft gradients, hex bevels, and
-// stroked labels — none of it is pixel-art sprite work — so the internal
-// canvas texture should be created at a higher pixel density than the
-// design resolution (732x644) it's laid out at. Phaser's Text/TextStyle
-// defaults `resolution` to 0 ("inherit the Game Config's resolution",
-// which itself defaults to 1), producing soft/aliased edges once the small
-// design canvas is scaled up by Scale.FIT to fill an actual screen. This
-// patches the shared TextStyle default once, before any scene creates a
-// Text object, so every screen benefits without touching 30+ call sites.
-const TEXT_RESOLUTION = Math.min(window.devicePixelRatio || 1, 3);
-const originalSetStyle = Phaser.GameObjects.Components.TextStyle.prototype.setStyle;
-Phaser.GameObjects.Components.TextStyle.prototype.setStyle = function setStyleWithResolution(style, updateText, setDefaults) {
-  const merged = Object.assign({ resolution: TEXT_RESOLUTION }, style);
-  return originalSetStyle.call(this, merged, updateText, setDefaults);
-};
-
 const config = {
   title:    'Phaser 3 Multiplayer Game',
   version:  '0.0.1',
@@ -49,10 +33,12 @@ const config = {
     pixelArt:   false,
     antialias:  true,
     antialiasGL: true,
-    // Renders the internal drawing buffer at device pixel density so
-    // hex bevels, gradients, and (combined with the TextStyle patch above)
-    // text all stay sharp on high-DPI screens instead of just the CSS
-    // canvas being stretched.
+    // Renders the internal drawing buffer at device pixel density so hex
+    // bevels, gradients, and text all stay sharp on high-DPI screens
+    // instead of just the CSS canvas being stretched. Text objects default
+    // their own `resolution` to 0 ("inherit the Game Config's resolution"
+    // — see Phaser.GameObjects.TextStyle's own docs), so this one setting
+    // is enough on its own; no per-TextStyle override is needed.
     resolution: Math.min(window.devicePixelRatio || 1, 2),
   },
   backgroundColor: '0x000000',

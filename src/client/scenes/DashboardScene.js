@@ -70,9 +70,19 @@ export default class DashboardScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    this.titlePanel.setSize(this.titleText.width + 36, 34);
+    // +36 (text.width) undercounted here — canvas measureText mismeasures
+    // the leading/trailing 🔥 emoji glyphs enough that the stroked text
+    // visibly poked out past the panel border on both sides. Stage numbers
+    // are always a single small digit, so a bit of extra fixed slack is
+    // simpler than a more "accurate" measurement fix.
+    this.titlePanel.setSize(this.titleText.width + 64, 34);
 
-    this.hintText = this.add.text(WORLD_WIDTH / 2, 50, '클릭: 대상 지정 (C/S 스킬)  ·  더블클릭: 게임 화면 보기', {
+    // No mention of C/S here (or anywhere on this screen) — this dashboard
+    // gets projected on a TV for everyone to see, and the whole point of
+    // the admin skills is that nobody watching can tell they exist, let
+    // alone that clicking a card arms one. Only the harmless spectate hint
+    // stays.
+    this.hintText = this.add.text(WORLD_WIDTH / 2, 50, '더블클릭: 게임 화면 보기', {
       fontFamily: FONT_BODY,
       fontSize: '12px',
       color: COLORS.textMuted,
