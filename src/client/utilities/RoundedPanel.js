@@ -45,3 +45,17 @@ export function fitTitlePanel(graphics, centerX, centerY, height, text, paddingX
   const bounds = text.getBounds();
   drawRoundedPanel(graphics, centerX, centerY, bounds.width + paddingX, height);
 }
+
+// Same idea as fitTitlePanel, but for GameScene's small HUD chips (timer,
+// score, player count, ...), which anchor at a corner/edge rather than
+// their own center (matching the Rectangle .setOrigin() convention they
+// had before) — (anchorX, anchorY) is the fixed on-screen point,
+// (originX, originY) says which fraction of the panel that point
+// represents, same numbers as the .setOrigin() call would have used.
+export function fitAnchoredRoundedPanel(graphics, anchorX, anchorY, originX, originY, height, text, paddingX) {
+  const bounds = text.getBounds();
+  const width = bounds.width + paddingX;
+  const centerX = anchorX + width * (0.5 - originX);
+  const centerY = anchorY + height * (0.5 - originY);
+  drawRoundedRect(graphics, centerX, centerY, width, height, { radius: 6 });
+}

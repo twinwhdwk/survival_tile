@@ -22,7 +22,7 @@ import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { START_COUNTDOWN_MS } from '../../shared/roundConfig';
-import { fitPanelWidth } from '../utilities/PanelFit';
+import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
 // Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
@@ -238,7 +238,7 @@ export default class GameScene extends Phaser.Scene {
       this.hideJoystick();
       this.spectatorBadge.setVisible(true);
       this.spectatorBadgePanel.setVisible(true);
-      fitPanelWidth(this.spectatorBadgePanel, this.spectatorBadge, 24);
+      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 40, 0.5, 0, 24, this.spectatorBadge, 24);
       this.backToDashboardNode.setVisible(this.fromDashboard);
 
       if (!this.spectatorBadgePulse) {
@@ -378,8 +378,11 @@ export default class GameScene extends Phaser.Scene {
     // Top-aligned with playerCountPanel/scorePanel (y=8) so the whole top
     // HUD row reads as one even strip — taller (30 vs 24) since the timer
     // text itself is bigger, but that's the only dimension that should differ.
-    this.timerPanel = this.add.rectangle(WORLD_WIDTH / 2, 8, 70, 30, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    // A rounded Graphics panel now (matching every other panel in the app),
+    // not a Rectangle — .setScrollFactor(0)/.setDepth(1) still apply the
+    // same way, Graphics is a normal GameObject. See fitAnchoredRoundedPanel
+    // for how (0.5, 0) below reproduces the old .setOrigin(0.5, 0) anchor.
+    this.timerPanel = this.add.graphics().setScrollFactor(0).setDepth(1);
 
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
       fontFamily: FONT_BODY,
@@ -389,8 +392,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
-    this.playerCountPanel = this.add.rectangle(WORLD_WIDTH - 6, 8, 90, 24, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(1).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.playerCountPanel = this.add.graphics().setScrollFactor(0).setDepth(1);
 
     this.playerCountText = this.add.text(WORLD_WIDTH - 10, 12, '', {
       fontFamily: FONT_BODY,
@@ -413,8 +415,11 @@ export default class GameScene extends Phaser.Scene {
     // overlapping it — they used to share the same y=28 start while the
     // timer ran to y=38, so during BOSS mode the two panels' semi-transparent
     // fills and borders visibly bled into each other for that 10px band.
-    this.bossHpPanel = this.add.rectangle(WORLD_WIDTH / 2, 38, BOSS_BAR_WIDTH + 24, 44, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    // Fixed size (never resized to fit text the way the other HUD panels
+    // are), so this draws once here rather than needing a redraw call
+    // anywhere else.
+    this.bossHpPanel = this.add.graphics().setScrollFactor(0).setDepth(1).setVisible(false);
+    drawRoundedRect(this.bossHpPanel, WORLD_WIDTH / 2, 38 + 44 / 2, BOSS_BAR_WIDTH + 24, 44, { radius: 6 });
 
     this.bossHpText = this.add.text(WORLD_WIDTH / 2, 50, '', {
       fontFamily: FONT_BODY,
@@ -429,8 +434,7 @@ export default class GameScene extends Phaser.Scene {
     this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 8, 0xff4444)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.scorePanel = this.add.rectangle(6, 8, 90, 24, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(1).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.scorePanel = this.add.graphics().setScrollFactor(0).setDepth(1).setVisible(false);
 
     this.scoreText = this.add.text(10, 12, '', {
       fontFamily: FONT_BODY,
@@ -440,8 +444,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.spectatorBadgePanel = this.add.rectangle(WORLD_WIDTH / 2, 40, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.spectatorBadgePanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
     this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 46, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
       fontFamily: FONT_BODY,
@@ -475,8 +478,7 @@ export default class GameScene extends Phaser.Scene {
       this.socket.emit('adminReturnToDashboard', { roomId: this.roomId });
     });
 
-    this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.ghostHintPanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
     this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, GHOST_HINT_DEFAULT_TEXT, {
       fontFamily: FONT_BODY,
@@ -788,7 +790,7 @@ export default class GameScene extends Phaser.Scene {
     const changed = score !== this.score;
     this.score = score;
     this.scoreText.setText(`팀 점수 ${score}`);
-    fitPanelWidth(this.scorePanel, this.scoreText, 20);
+    fitAnchoredRoundedPanel(this.scorePanel, 6, 8, 0, 0, 24, this.scoreText, 20);
 
     if (changed) {
       this.tweens.killTweensOf(this.scoreText);
@@ -991,13 +993,13 @@ export default class GameScene extends Phaser.Scene {
           // in the text object for this player's *next* elimination.
           // setText on a currently-hidden object is harmless either way.
           this.ghostHintText.setText(GHOST_HINT_DEFAULT_TEXT);
-          fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+          fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
           return;
         }
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         if (this.eliminated) {
           this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
-          fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+          fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
         }
       },
 
@@ -1310,7 +1312,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.ghostHintText.setAlpha(0).setVisible(true);
     this.ghostHintPanel.setVisible(true);
-    fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+    fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
     this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
 
     this.reviveGaugeBarBg.setVisible(true);
@@ -1427,9 +1429,11 @@ export default class GameScene extends Phaser.Scene {
     // bannerBackdrop is created at a 10x10 placeholder (origin 0.5,0.5) and
     // grown here once the actual banner text is known. setSize() alone
     // leaves _displayOriginX/Y frozen at the old (tiny) size, so the fill
-    // renders offset from where it should be — updateDisplayOrigin() (see
-    // PanelFit.js's fitPanelWidth for the same fix and full explanation)
-    // recomputes that cached origin from the new size.
+    // renders offset from where it should be — updateDisplayOrigin()
+    // recomputes that cached origin from the new size. (The other HUD
+    // panels sidestepped this entirely by moving to rounded Graphics
+    // panels, which redraw outright instead of resizing a persistent
+    // shape — this is the one panel still a plain Rectangle.)
     this.bannerBackdrop.setSize(bounds.width + 40, bounds.height + 24);
     this.bannerBackdrop.updateDisplayOrigin();
     this.bannerBackdrop.setVisible(true).setAlpha(1);
@@ -1461,7 +1465,7 @@ export default class GameScene extends Phaser.Scene {
     // on top of otherPlayers here.
     const count = (this.isSpectator ? 0 : 1) + Object.keys(this.otherPlayers).length;
     this.playerCountText.setText(`참가 ${count}명`);
-    fitPanelWidth(this.playerCountPanel, this.playerCountText, 20);
+    fitAnchoredRoundedPanel(this.playerCountPanel, WORLD_WIDTH - 6, 8, 1, 0, 24, this.playerCountText, 20);
   }
 
   // Eases every *other* player's avatar toward its latest server-reported
@@ -1583,16 +1587,17 @@ export default class GameScene extends Phaser.Scene {
     const remaining = Math.max(0, Math.ceil((this.roundDuration - elapsed) / 1000));
 
     // The mm:ss readout only actually changes once per second, but update()
-    // calls this ~60x/sec — fitPanelWidth()'s getBounds() call is comparatively
-    // expensive text-measurement work, not worth redoing every single frame
-    // for a string (and panel size) that's identical to the last frame's.
+    // calls this ~60x/sec — fitAnchoredRoundedPanel()'s getBounds() call is
+    // comparatively expensive text-measurement work, not worth redoing every
+    // single frame for a string (and panel size) that's identical to the
+    // last frame's.
     if (remaining !== this.lastRemainingSeconds) {
       this.lastRemainingSeconds = remaining;
       const mm = Math.floor(remaining / 60);
       const ss = String(remaining % 60).padStart(2, '0');
       this.timerText.setText(`${mm}:${ss}`);
       this.timerText.setColor(remaining <= 10 ? '#ff5555' : '#ffffff');
-      fitPanelWidth(this.timerPanel, this.timerText, 30);
+      fitAnchoredRoundedPanel(this.timerPanel, WORLD_WIDTH / 2, 8, 0.5, 0, 30, this.timerText, 30);
     }
 
     this.timeUrgencyVignette.setVisible(remaining <= 10 && remaining > 0);
