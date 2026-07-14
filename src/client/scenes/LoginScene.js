@@ -12,7 +12,7 @@ import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitPanelWidth } from '../utilities/PanelFit';
+import { fitTitlePanel } from '../utilities/RoundedPanel';
 
 export default class LoginScene extends Phaser.Scene {
 
@@ -47,10 +47,9 @@ export default class LoginScene extends Phaser.Scene {
 
     // Same warm ember-bordered panel as every other headline in the app
     // (lobby, dashboard, result screen) — keeps the title grounded instead
-    // of floating bare over the background. Started at a placeholder width
-    // and resized below once the title text exists to measure against.
-    const titlePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 10, 40, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    // of floating bare over the background. Drawn (not sized) below once
+    // the title text exists to measure against.
+    const titlePanel = this.add.graphics();
 
     // A single title with a drop shadow for the "burning" mood, instead of a
     // second overlapping emoji text whose additive blend + randomized scale
@@ -63,17 +62,14 @@ export default class LoginScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    // A fixed 230px box (this title's old size) was narrower than the
-    // actual rendered text on some font/DPI combinations — canvas
-    // measureText undercounts the two 🔥 emoji glyphs it's straddled by,
-    // so the stroked text visibly poked out past the panel border instead
-    // of sitting inside it. getBounds() (same helper GameScene's HUD panels
-    // already use) reflects what's actually drawn, including that emoji
-    // overhang, so it needs far less fudge-padding than a plain .width fix
-    // would. Measured here at the text's default scale=1 — doing this
-    // after the entrance tween's setScale(0.6) below would size the panel
-    // for the shrunk starting pose instead of the settled title.
-    fitPanelWidth(titlePanel, title, 28);
+    // Rounded rather than a flat square-cornered rectangle — a hard box
+    // read as an unstyled debug panel against the rounded DOM
+    // inputs/buttons right below it. getBounds() (not .width, which
+    // undercounts the two 🔥 emoji glyphs) sizes it to actually wrap the
+    // text. Measured here at the text's default scale=1 — doing this after
+    // the entrance tween's setScale(0.6) below would size the panel for
+    // the shrunk starting pose instead of the settled title.
+    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 40, title, 28);
     title.setScale(0.6).setAlpha(0);
 
     this.tweens.add({

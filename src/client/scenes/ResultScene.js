@@ -9,7 +9,7 @@ import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitPanelWidth } from '../utilities/PanelFit';
+import { drawRoundedPanel } from '../utilities/RoundedPanel';
 
 export default class ResultScene extends Phaser.Scene {
 
@@ -32,11 +32,12 @@ export default class ResultScene extends Phaser.Scene {
     // Backing panels behind the headline and (later) the ranking list, in
     // the same warm ember-bordered language used everywhere else now —
     // previously a flat navy fill with a near-invisible white hairline,
-    // which read as generic/incomplete against the fire theme.
-    this.messagePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, 10, 46, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
-    this.rankingsPanel = this.add.rectangle(WORLD_WIDTH / 2, 0, 360, 10, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha).setVisible(false);
+    // which read as generic/incomplete against the fire theme. Rounded
+    // rather than flat square-cornered boxes (see LoginScene's same fix) —
+    // Graphics has no persistent .setSize() the way Rectangle does, so
+    // these get cleared + redrawn on demand instead.
+    this.messagePanel = this.add.graphics();
+    this.rankingsPanel = this.add.graphics().setVisible(false);
 
     this.messageText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, data.message || '', {
       fontFamily: FONT_DISPLAY,
@@ -46,10 +47,11 @@ export default class ResultScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5);
-    // Measured at the text's default scale=1, same as LoginScene's title —
-    // doing this after the entrance tween's setScale(0.6) below would size
-    // the panel for the shrunk starting pose instead of the settled text.
-    fitPanelWidth(this.messagePanel, this.messageText, 28);
+    // .width (not getBounds(), which reflects the *current* transform) so
+    // this is safe regardless of the entrance tween's scale — used instead
+    // of the getBounds() fit elsewhere since showRankings() below needs to
+    // redraw this same panel later while the tween may still be mid-flight.
+    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, this.messageText.width + 28, 46);
     this.messageText.setScale(0.6).setAlpha(0);
 
     this.tweens.add({
@@ -135,16 +137,15 @@ export default class ResultScene extends Phaser.Scene {
   showRankings(rankings) {
     this.stopWaitingDots();
     this.messageText.setText('토너먼트 결과');
-    this.messagePanel.setSize(this.messageText.width + 48, 46);
+    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, this.messageText.width + 28, 46);
     this.subText.setText('');
 
     const mySocketId = this.socket.id;
     const startY = WORLD_HEIGHT / 2 - 130;
     const rowCount = Math.max(rankings ? rankings.length : 0, 1);
     const listCenterY = startY + ((rowCount - 1) * 26) / 2;
+    drawRoundedPanel(this.rankingsPanel, WORLD_WIDTH / 2, listCenterY, 360, rowCount * 26 + 30);
     this.rankingsPanel
-      .setPosition(WORLD_WIDTH / 2, listCenterY)
-      .setSize(360, rowCount * 26 + 30)
       .setVisible(true)
       .setAlpha(0);
     this.tweens.add({ targets: this.rankingsPanel, alpha: 1, duration: 300 });

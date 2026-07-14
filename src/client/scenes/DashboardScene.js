@@ -6,7 +6,7 @@ import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitPanelWidth } from '../utilities/PanelFit';
+import { fitTitlePanel } from '../utilities/RoundedPanel';
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -56,8 +56,7 @@ export default class DashboardScene extends Phaser.Scene {
 
     // Same warm ember-bordered panel language as every other HUD readout
     // (GameScene's timer/score panels, ResultScene's headline).
-    this.titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 14, 10, 34, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.titlePanel = this.add.graphics();
 
     // A single title with a drop shadow for the "burning" mood, rather than
     // a second overlapping emoji text — the previous additive-blend glow
@@ -71,11 +70,12 @@ export default class DashboardScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    // getBounds() (what GameScene's own HUD panels already use) reflects
-    // the emoji glyphs' real drawn extent, unlike plain .width, which
-    // undercounted them enough that the stroked text visibly poked out
-    // past the panel border on both sides.
-    fitPanelWidth(this.titlePanel, this.titleText, 28);
+    // Rounded rather than a flat square-cornered box (see LoginScene's same
+    // fix). getBounds() (what GameScene's own HUD panels already use)
+    // reflects the emoji glyphs' real drawn extent, unlike plain .width,
+    // which undercounted them enough that the stroked text visibly poked
+    // out past the panel border on both sides.
+    fitTitlePanel(this.titlePanel, WORLD_WIDTH / 2, 31, 34, this.titleText, 28);
 
     // No mention of C/S here (or anywhere on this screen) — this dashboard
     // gets projected on a TV for everyone to see, and the whole point of

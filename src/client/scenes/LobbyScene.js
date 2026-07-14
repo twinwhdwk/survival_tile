@@ -9,7 +9,7 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitPanelWidth } from '../utilities/PanelFit';
+import { fitTitlePanel } from '../utilities/RoundedPanel';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
@@ -47,8 +47,7 @@ export default class LobbyScene extends Phaser.Scene {
     // the app (GameScene's timer/score panels, ResultScene/DashboardScene's
     // headline) — keeps the title grounded instead of floating bare over
     // the background like it was before.
-    const titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 38, 10, 34, COLORS.panelFill, COLORS.panelFillAlpha)
-      .setOrigin(0.5, 0).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    const titlePanel = this.add.graphics();
 
     // A single title with a drop shadow for the "burning" mood, rather than
     // a second overlapping emoji text — the previous additive-blend glow
@@ -62,10 +61,11 @@ export default class LobbyScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    // See LoginScene's title panel fix — getBounds() (what GameScene's own
-    // HUD panels already use) reflects the emoji glyph's real drawn extent,
+    // See LoginScene's title panel fix — rounded rather than a flat
+    // square-cornered box, and getBounds() (what GameScene's own HUD
+    // panels already use) reflects the emoji glyph's real drawn extent,
     // unlike plain .width.
-    fitPanelWidth(titlePanel, this.titleText, 28);
+    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, 55, 34, this.titleText, 28);
 
     this.countText = this.add.text(WORLD_WIDTH / 2, 82, '', {
       fontFamily: FONT_BODY,
