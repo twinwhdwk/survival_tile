@@ -5,7 +5,15 @@
 }
 
 html, body {
-  background-color: #000;
+  /* Matches the outer edge of the game's own radial background gradient
+     (see generateBackgroundTexture in EffectTextures.js) rather than pure
+     black -- Phaser.Scale.FIT letterboxes the canvas on any viewport that
+     isn't exactly the game's aspect ratio, and those bars were a visibly
+     different, starker black than the game's own background right next to
+     them. Matching them makes the letterboxing read as an intentional
+     dark frame instead of an unstyled gap.
+     */
+  background-color: #090b18;
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;

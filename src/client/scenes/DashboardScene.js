@@ -198,7 +198,8 @@ export default class DashboardScene extends Phaser.Scene {
     rooms.forEach((summary, i) => {
       seenIds.add(summary.roomId);
       let card = this.cardsByRoomId[summary.roomId];
-      if (!card || card.cardW !== layout.cardW || card.cardH !== layout.cardH) {
+      const isNew = !card || card.cardW !== layout.cardW || card.cardH !== layout.cardH;
+      if (isNew) {
         if (card) {
           card.container.destroy();
           if (card.minimapTextureKey && this.textures.exists(card.minimapTextureKey)) {
@@ -211,21 +212,56 @@ export default class DashboardScene extends Phaser.Scene {
 
       const col = i % layout.cols;
       const row = Math.floor(i / layout.cols);
-      card.container.setPosition(
-        layout.startX + col * (layout.cardW + CARD_GAP),
-        layout.startY + row * (layout.cardH + CARD_GAP),
-      );
+      const cellX = layout.startX + col * (layout.cardW + CARD_GAP);
+      const cellY = layout.startY + row * (layout.cardH + CARD_GAP);
+
+      if (isNew) {
+        // Snap straight into its slot -- the entrance scale/alpha tween in
+        // createCard() already handles the "arriving" motion, so sliding it
+        // in from the container's (0,0) origin too would just look like an
+        // unintended extra slide underneath the pop-in.
+        card.container.setPosition(cellX, cellY);
+      } else if (card.container.x !== cellX || card.container.y !== cellY) {
+        // dashboardUpdate ticks about once a second; most of those a card's
+        // slot hasn't actually changed, so this only actually fires on the
+        // rare tick where another room finishing shifted everyone after it
+        // — gliding instead of snapping matches the reposition treatment
+        // already used for LobbyScene's roster cells.
+        this.tweens.add({ targets: card.container, x: cellX, y: cellY, duration: 250, ease: 'Quad.easeOut' });
+      }
 
       this.updateCardContent(card, summary, i);
     });
 
     Object.keys(this.cardsByRoomId).forEach((roomId) => {
       if (!seenIds.has(roomId)) {
+        // A quick fade/shrink out rather than an instant pop, matching the
+        // card's own entrance animation (same fix applied to LobbyScene's
+        // roster cells, which had the identical instant-destroy asymmetry).
         const stale = this.cardsByRoomId[roomId];
-        stale.container.destroy();
-        if (stale.minimapTextureKey && this.textures.exists(stale.minimapTextureKey)) {
-          this.textures.remove(stale.minimapTextureKey);
+        const { container, hpBarFill, lowHpTween, minimapTextureKey } = stale;
+        // The boss low-HP pulse (repeat: -1) doesn't stop on its own just
+        // because the card is going away -- left running, it'd keep
+        // ticking against an orphaned game object until this whole scene
+        // next restarts/shuts down instead of ending the moment its card
+        // does.
+        if (lowHpTween) {
+          lowHpTween.stop();
         }
+        this.tweens.killTweensOf(hpBarFill);
+        this.tweens.add({
+          targets: container,
+          scale: 0.7,
+          alpha: 0,
+          duration: 200,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            container.destroy();
+            if (minimapTextureKey && this.textures.exists(minimapTextureKey)) {
+              this.textures.remove(minimapTextureKey);
+            }
+          },
+        });
         delete this.cardsByRoomId[roomId];
         if (this.selectedRoomId === roomId) {
           this.selectedRoomId = null;
@@ -270,9 +306,12 @@ export default class DashboardScene extends Phaser.Scene {
 
     // A distinct ring (not just re-coloring bg's own border) so the
     // persistent "this room is targeted" state never fights with the
-    // temporary red elimination-flash on bg itself.
+    // temporary red elimination-flash on bg itself. Same light blue as
+    // every other "interactive/highlighted" cue in the app (GameScene's
+    // ghost-revive tile highlight, frozen-countdown avatar tint) rather
+    // than a one-off brighter cyan that didn't match anything else.
     const selectionRing = this.add.rectangle(0, 0, cardW + 8, cardH + 8, 0x000000, 0)
-      .setStrokeStyle(3, 0x55ddff, 1).setVisible(false);
+      .setStrokeStyle(3, 0x88ccff, 1).setVisible(false);
 
     // Header strip: solid backing so text stays readable over the
     // thumbnail, holding the group label + alive count + timer/score.

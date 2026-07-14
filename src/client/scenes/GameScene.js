@@ -884,7 +884,11 @@ export default class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: this.joystickBase, scale: 1, duration: 150, ease: 'Quad.easeOut' });
         this.tweens.killTweensOf(this.joystickThumb);
         this.tweens.add({ targets: this.joystickThumb, x: JOYSTICK_X, y: JOYSTICK_Y, duration: 150, ease: 'Back.easeOut' });
-        this.joystickThumb.setFillStyle(0xffffff, 0.35);
+        // Back to the same amber as its initial idle color (0xffcc66,
+        // 0.4) -- this was still the pre-recolor white, so after the
+        // first touch-and-release the thumb would stay white in idle for
+        // the rest of the round instead of returning to amber.
+        this.joystickThumb.setFillStyle(0xffcc66, 0.4);
       }
     };
 

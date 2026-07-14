@@ -22,6 +22,14 @@ export default class LoginScene extends Phaser.Scene {
   }
 
   create() {
+    // The static HTML preloader (index.html) has done its job the moment
+    // Phaser has something real to show -- remove it now rather than
+    // leaving it sitting on top of (or under) the actual game forever.
+    const preloader = document.getElementById('preloader');
+    if (preloader) {
+      preloader.remove();
+    }
+
     this.socket = getSocket();
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
@@ -101,7 +109,7 @@ export default class LoginScene extends Phaser.Scene {
     // for someone who knows to look for it.
     const adminHtml = `
       <input id="admin-password-input" type="password" placeholder="관리자"
-        style="width:80px;height:22px;font-size:11px;padding:2px 6px;text-align:center;border-radius:5px;border:1px solid #555555;background:#111827cc;color:#cccccc;outline:none;" />
+        style="width:80px;height:22px;font-size:11px;padding:2px 6px;text-align:center;border-radius:5px;border:1px solid #555555;background:#0b0e1ccc;color:#aaaaaa;outline:none;" />
     `;
     this.adminNode = this.add.dom(WORLD_WIDTH - 55, WORLD_HEIGHT - 18).createFromHTML(adminHtml);
     this.passwordInput_ = this.adminNode.getChildByID('admin-password-input');
@@ -120,11 +128,17 @@ export default class LoginScene extends Phaser.Scene {
     });
 
     this.button.addEventListener('click', () => this.submit());
-    this.input_.addEventListener('keydown', (event) => {
+    // An admin naturally types nickname -> tabs to password -> hits Enter,
+    // expecting that to submit like any normal login form. Only the
+    // nickname field had this before, so finishing in the password field
+    // silently did nothing until they noticed and clicked the button instead.
+    const submitOnEnter = (event) => {
       if (event.key === 'Enter') {
         this.submit();
       }
-    });
+    };
+    this.input_.addEventListener('keydown', submitOnEnter);
+    this.passwordInput_.addEventListener('keydown', submitOnEnter);
   }
 
   createFloatingAnimals() {

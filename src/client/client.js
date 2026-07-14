@@ -7,8 +7,7 @@ import DashboardScene from './scenes/DashboardScene';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../shared/hexGrid';
 
 const config = {
-  title:    'Phaser 3 Multiplayer Game',
-  version:  '0.0.1',
+  title:    '타일 서바이벌',
   parent:   'game',
   type:     Phaser.AUTO,
   input: {
@@ -41,7 +40,11 @@ const config = {
     // is enough on its own; no per-TextStyle override is needed.
     resolution: Math.min(window.devicePixelRatio || 1, 2),
   },
-  backgroundColor: '0x000000',
+  // Matches the CSS body background and the outer edge of every scene's
+  // own radial gradient (EffectTextures.js) rather than pure black, so
+  // there's no visible seam anywhere -- canvas edges, CSS letterboxing,
+  // and each scene's own background all agree on the same dark navy.
+  backgroundColor: '0x090b18',
   dom: {
     createContainer: true,
   },

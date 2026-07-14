@@ -26,7 +26,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   create(data) {
     this.socket = getSocket();
-    this.rosterTexts = [];
+    this.rosterCells = {};
     this.isAdmin = !!data.isAdmin;
     this.statusPulseTween = null;
 
@@ -149,68 +149,58 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   renderLobby({ players, phase }) {
-    this.rosterTexts.forEach((text) => text.destroy());
-    this.rosterTexts = [];
-
     const entries = Object.entries(players || {});
     this.countText.setText(`${entries.length}명 참가 중`);
 
+    // Keyed by socketId (same diffing approach as DashboardScene's room
+    // cards) rather than destroying and rebuilding the whole grid on every
+    // 'lobbyUpdate' — that used to replay every existing player's entrance
+    // pop-in animation each time anyone joined/left (e.g. clicking "봇 추가"
+    // a few times in a row made the whole roster visibly flicker).
+    const seenIds = new Set();
     entries.forEach(([socketId, entry], i) => {
+      seenIds.add(socketId);
       const col = i % GRID_COLS;
       const row = Math.floor(i / GRID_COLS);
       const cellX = GRID_START_X + col * GRID_CELL_W;
       const cellY = GRID_START_Y + row * GRID_CELL_H;
 
-      const cell = this.add.container(cellX, cellY).setScale(0.5).setAlpha(0);
-
-      // Same "find myself instantly" idea as the in-round gold nickname/
-      // spotlight ring, applied here too — a player waiting in a crowded
-      // lobby grid has the same problem finding their own entry.
-      const isMe = socketId === this.socket.id;
-      const bg = this.add.rectangle(0, 0, GRID_CELL_W - 10, GRID_CELL_H - 8,
-        isMe ? 0x3a2f0a : COLORS.panelFill, isMe ? 0.6 : COLORS.panelFillAlpha)
-        .setStrokeStyle(COLORS.panelBorderWidth, isMe ? 0xffd700 : COLORS.panelBorder, isMe ? 0.7 : COLORS.panelBorderAlpha);
-      cell.add(bg);
-
-      if (isMe) {
-        this.tweens.add({
-          targets: bg,
-          alpha: 0.75,
-          duration: 700,
-          yoyo: true,
-          repeat: -1,
-          ease: 'Sine.easeInOut',
-        });
+      const existing = this.rosterCells[socketId];
+      if (existing) {
+        if (existing.container.x !== cellX || existing.container.y !== cellY) {
+          this.tweens.add({ targets: existing.container, x: cellX, y: cellY, duration: 200, ease: 'Quad.easeOut' });
+        }
+        return;
       }
 
-      if (Number.isInteger(entry.animalIndex)) {
-        const icon = this.add.image(-30, 0, ensureAnimalTexture(this, entry.animalIndex)).setScale(0.4);
-        cell.add(icon);
-      }
-
-      const color = isMe ? '#ffd700' : (entry.isBot ? '#9aa3c9' : '#ffffff');
-      const text = this.add.text(-16, 0, entry.nickname, {
-        fontFamily: FONT_BODY,
-        fontSize: '14px',
-        color,
-      }).setOrigin(0, 0.5);
-      cell.add(text);
-
-      if (entry.isBot) {
-        const badge = this.add.text(-18, -10, '🤖', { fontSize: '9px' }).setOrigin(0.5);
-        cell.add(badge);
-      }
-
+      const cell = this.createRosterCell(socketId, entry, cellX, cellY);
+      this.rosterCells[socketId] = cell;
       this.tweens.add({
-        targets: cell,
+        targets: cell.container,
         scale: 1,
         alpha: 1,
         delay: i * 25,
         duration: 220,
         ease: 'Back.easeOut',
       });
+    });
 
-      this.rosterTexts.push(cell);
+    Object.keys(this.rosterCells).forEach((socketId) => {
+      if (!seenIds.has(socketId)) {
+        // A quick fade/shrink out rather than an instant pop, matching the
+        // entrance animation's own polish — most noticeable on 초기화
+        // (reset), where every cell would otherwise vanish in one frame.
+        const { container } = this.rosterCells[socketId];
+        this.tweens.add({
+          targets: container,
+          scale: 0.5,
+          alpha: 0,
+          duration: 150,
+          ease: 'Quad.easeIn',
+          onComplete: () => container.destroy(),
+        });
+        delete this.rosterCells[socketId];
+      }
     });
 
     if (phase === 'TOURNAMENT') {
@@ -229,6 +219,50 @@ export default class LobbyScene extends Phaser.Scene {
       this.statusText.setText('관리자가 게임을 시작하기를 기다리는 중...');
       this.startStatusPulse();
     }
+  }
+
+  createRosterCell(socketId, entry, cellX, cellY) {
+    const container = this.add.container(cellX, cellY).setScale(0.5).setAlpha(0);
+
+    // Same "find myself instantly" idea as the in-round gold nickname/
+    // spotlight ring, applied here too — a player waiting in a crowded
+    // lobby grid has the same problem finding their own entry.
+    const isMe = socketId === this.socket.id;
+    const bg = this.add.rectangle(0, 0, GRID_CELL_W - 10, GRID_CELL_H - 8,
+      isMe ? 0x3a2f0a : COLORS.panelFill, isMe ? 0.6 : COLORS.panelFillAlpha)
+      .setStrokeStyle(COLORS.panelBorderWidth, isMe ? 0xffd700 : COLORS.panelBorder, isMe ? 0.7 : COLORS.panelBorderAlpha);
+    container.add(bg);
+
+    if (isMe) {
+      this.tweens.add({
+        targets: bg,
+        alpha: 0.75,
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    if (Number.isInteger(entry.animalIndex)) {
+      const icon = this.add.image(-30, 0, ensureAnimalTexture(this, entry.animalIndex)).setScale(0.4);
+      container.add(icon);
+    }
+
+    const color = isMe ? '#ffd700' : (entry.isBot ? '#9aa3c9' : '#ffffff');
+    const text = this.add.text(-16, 0, entry.nickname, {
+      fontFamily: FONT_BODY,
+      fontSize: '14px',
+      color,
+    }).setOrigin(0, 0.5);
+    container.add(text);
+
+    if (entry.isBot) {
+      const badge = this.add.text(-18, -10, '🤖', { fontSize: '9px' }).setOrigin(0.5);
+      container.add(badge);
+    }
+
+    return { container };
   }
 
   startStatusPulse() {

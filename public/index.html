@@ -21,9 +21,37 @@
          (see EffectTextures.js) -- just the same 🔥 used throughout the UI. -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%94%A5</text></svg>"/>
 
-    <script type="text/javascript" src="public/js/bundle.js"></script>
+    <!-- Pure CSS/HTML, no dependency on bundle.js -- on a slow connection
+         the ~1MB client bundle can take a few seconds to download+parse,
+         during which this project's own JS-driven UI can't render anything
+         yet. Without this the page was just a blank black rectangle with
+         zero feedback (reads as frozen/broken, not "loading"), which
+         matters more here than most sites since this is meant to be joined
+         over spotty venue wifi on a phone mid-event. LoginScene removes
+         this element itself once Phaser actually has something to show. -->
+    <style>
+      #preloader {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 12px;
+        background: #090b18; z-index: 10000;
+      }
+      #preloader .emoji { font-size: 48px; animation: preloaderPulse 1s ease-in-out infinite; }
+      #preloader .label { color: #aaaaaa; font-family: 'Malgun Gothic', sans-serif; font-size: 14px; }
+      @keyframes preloaderPulse { 0%, 100% { opacity: 0.4; transform: scale(0.92); } 50% { opacity: 1; transform: scale(1); } }
+    </style>
+
+    <!-- defer (not a plain blocking script) is load-bearing for the
+         preloader above: an unmarked <script> in <head> blocks all HTML
+         parsing until it finishes downloading+running, so the <body>
+         (including the preloader div) would never even be inserted into
+         the DOM until bundle.js was already done -- silently defeating the
+         whole point of having a preloader. defer lets the browser keep
+         parsing (and paint the preloader) while the script downloads in
+         the background, running it only once parsing is complete. -->
+    <script type="text/javascript" src="public/js/bundle.js" defer></script>
   </head>
   <body>
+    <div id="preloader"><div class="emoji">🔥</div><div class="label">불러오는 중...</div></div>
     <div id="game"></div>
   </body>
 </html>
