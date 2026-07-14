@@ -6,7 +6,7 @@ import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitTitlePanel } from '../utilities/RoundedPanel';
+import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -288,8 +288,14 @@ export default class DashboardScene extends Phaser.Scene {
     const minimap = this.add.image(0, 20, minimapTextureKey)
       .setDisplaySize(minimapInnerW, Math.max(minimapInnerH, 10));
 
+    // bg stays a plain Rectangle purely for its native hit-testing (click
+    // to select, double-click to spectate) — Graphics has no built-in hit
+    // area the way Rectangle does, and this card's interaction is the one
+    // thing not worth any risk to. Its own border is left off; the rounded
+    // outline below is a separate, purely decorative layer drawn at the
+    // same bounds, so the square-cornered box the interactive rectangle
+    // technically is never actually gets seen.
     const bg = this.add.rectangle(0, 0, cardW, cardH, COLORS.panelFill, 0.35)
-      .setStrokeStyle(1, 0xffd700, 0.25)
       .setInteractive({ useHandCursor: true });
 
     let lastClickAt = 0;
@@ -304,14 +310,17 @@ export default class DashboardScene extends Phaser.Scene {
       this.selectRoom(roomId);
     });
 
+    const cardBorder = this.add.graphics();
+    drawRoundedRect(cardBorder, 0, 0, cardW, cardH, { fillAlpha: 0, strokeWidth: 1, strokeColor: 0xffd700, strokeAlpha: 0.25, radius: 8 });
+
     // A distinct ring (not just re-coloring bg's own border) so the
     // persistent "this room is targeted" state never fights with the
     // temporary red elimination-flash on bg itself. Same light blue as
     // every other "interactive/highlighted" cue in the app (GameScene's
     // ghost-revive tile highlight, frozen-countdown avatar tint) rather
     // than a one-off brighter cyan that didn't match anything else.
-    const selectionRing = this.add.rectangle(0, 0, cardW + 8, cardH + 8, 0x000000, 0)
-      .setStrokeStyle(3, 0x88ccff, 1).setVisible(false);
+    const selectionRing = this.add.graphics().setVisible(false);
+    drawRoundedRect(selectionRing, 0, 0, cardW + 8, cardH + 8, { fillAlpha: 0, strokeWidth: 3, strokeColor: 0x88ccff, strokeAlpha: 1, radius: 10 });
 
     // Header strip: solid backing so text stays readable over the
     // thumbnail, holding the group label + alive count + timer/score.
@@ -341,7 +350,7 @@ export default class DashboardScene extends Phaser.Scene {
     const hpBarFill = this.add.rectangle(-(cardW - 24) / 2, cardH / 2 - 12, cardW - 24, 6, 0xff4444)
       .setOrigin(0, 0.5).setVisible(false);
 
-    container.add([minimap, bg, selectionRing, headerBar, label, aliveText, infoText, hpBarBg, hpBarFill]);
+    container.add([minimap, bg, cardBorder, selectionRing, headerBar, label, aliveText, infoText, hpBarBg, hpBarFill]);
 
     this.tweens.add({
       targets: container,
