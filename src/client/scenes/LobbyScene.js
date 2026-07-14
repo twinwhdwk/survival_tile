@@ -9,7 +9,7 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { fitTitlePanel } from '../utilities/RoundedPanel';
+import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
@@ -231,11 +231,19 @@ export default class LobbyScene extends Phaser.Scene {
 
     // Same "find myself instantly" idea as the in-round gold nickname/
     // spotlight ring, applied here too — a player waiting in a crowded
-    // lobby grid has the same problem finding their own entry.
+    // lobby grid has the same problem finding their own entry. Rounded
+    // (smaller radius than the title panels' — this cell is only 24px
+    // tall, and the default radius would look almost pill-shaped) rather
+    // than a flat square-cornered chip, matching the rest of the app.
     const isMe = socketId === this.socket.id;
-    const bg = this.add.rectangle(0, 0, GRID_CELL_W - 10, GRID_CELL_H - 8,
-      isMe ? 0x3a2f0a : COLORS.panelFill, isMe ? 0.6 : COLORS.panelFillAlpha)
-      .setStrokeStyle(COLORS.panelBorderWidth, isMe ? 0xffd700 : COLORS.panelBorder, isMe ? 0.7 : COLORS.panelBorderAlpha);
+    const bg = this.add.graphics();
+    drawRoundedRect(bg, 0, 0, GRID_CELL_W - 10, GRID_CELL_H - 8, {
+      radius: 6,
+      fillColor: isMe ? 0x3a2f0a : COLORS.panelFill,
+      fillAlpha: isMe ? 0.6 : COLORS.panelFillAlpha,
+      strokeColor: isMe ? 0xffd700 : COLORS.panelBorder,
+      strokeAlpha: isMe ? 0.7 : COLORS.panelBorderAlpha,
+    });
     container.add(bg);
 
     if (isMe) {

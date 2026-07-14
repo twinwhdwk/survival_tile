@@ -10,15 +10,29 @@ import { COLORS } from '../theme/Theme';
 // actually drawn.
 const RADIUS = 10;
 
-export function drawRoundedPanel(graphics, centerX, centerY, width, height) {
+// Lower-level draw with overridable colors/radius, for the rare panel that
+// isn't the standard ember fill+border (e.g. a highlighted "this is you"
+// roster cell) or that's too small for the default radius to look right.
+export function drawRoundedRect(graphics, centerX, centerY, width, height, {
+  radius = RADIUS,
+  fillColor = COLORS.panelFill,
+  fillAlpha = COLORS.panelFillAlpha,
+  strokeWidth = COLORS.panelBorderWidth,
+  strokeColor = COLORS.panelBorder,
+  strokeAlpha = COLORS.panelBorderAlpha,
+} = {}) {
   const x = centerX - width / 2;
   const y = centerY - height / 2;
 
   graphics.clear();
-  graphics.fillStyle(COLORS.panelFill, COLORS.panelFillAlpha);
-  graphics.fillRoundedRect(x, y, width, height, RADIUS);
-  graphics.lineStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
-  graphics.strokeRoundedRect(x, y, width, height, RADIUS);
+  graphics.fillStyle(fillColor, fillAlpha);
+  graphics.fillRoundedRect(x, y, width, height, radius);
+  graphics.lineStyle(strokeWidth, strokeColor, strokeAlpha);
+  graphics.strokeRoundedRect(x, y, width, height, radius);
+}
+
+export function drawRoundedPanel(graphics, centerX, centerY, width, height) {
+  drawRoundedRect(graphics, centerX, centerY, width, height);
 }
 
 // getBounds() reflects the text object's *current* transform, so this is
