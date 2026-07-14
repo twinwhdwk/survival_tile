@@ -505,8 +505,7 @@ export default class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(17);
 
-    this.bannerBackdrop = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, 10, 10, 0x000000, 0.45)
-      .setOrigin(0.5).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    this.bannerBackdrop = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
     this.reviveHighlight = this.add.polygon(0, 0, hexPoints(HEX_WIDTH / 2 - 2), 0x88ccff, 0.25)
       .setStrokeStyle(2, 0x88ccff, 0.9)
@@ -1426,16 +1425,13 @@ export default class GameScene extends Phaser.Scene {
     this.bannerText.setScale(1);
 
     const bounds = this.bannerText.getBounds();
-    // bannerBackdrop is created at a 10x10 placeholder (origin 0.5,0.5) and
-    // grown here once the actual banner text is known. setSize() alone
-    // leaves _displayOriginX/Y frozen at the old (tiny) size, so the fill
-    // renders offset from where it should be — updateDisplayOrigin()
-    // recomputes that cached origin from the new size. (The other HUD
-    // panels sidestepped this entirely by moving to rounded Graphics
-    // panels, which redraw outright instead of resizing a persistent
-    // shape — this is the one panel still a plain Rectangle.)
-    this.bannerBackdrop.setSize(bounds.width + 40, bounds.height + 24);
-    this.bannerBackdrop.updateDisplayOrigin();
+    // Same rounded-Graphics treatment as every other panel in the app now
+    // — redraws outright to the new size rather than resizing a persistent
+    // shape, so there's no display-origin caching to fight with the way a
+    // Rectangle would have needed.
+    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, bounds.width + 40, bounds.height + 24, {
+      fillColor: 0x000000, fillAlpha: 0.45, radius: 10,
+    });
     this.bannerBackdrop.setVisible(true).setAlpha(1);
 
     this.bannerText.setScale(0.6);
