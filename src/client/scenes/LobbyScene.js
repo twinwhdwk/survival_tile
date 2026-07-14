@@ -83,15 +83,15 @@ export default class LobbyScene extends Phaser.Scene {
     const buttonHtml = `
       <div style="display:flex;gap:12px;align-items:center;">
         <button id="clear-lobby-button" type="button"
-          style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
+          style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           초기화
         </button>
         <button id="add-bot-button" type="button"
-          style="padding:14px 20px;font-size:16px;border-radius:10px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
+          style="padding:14px 20px;font-size:16px;border-radius:10px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           봇 추가
         </button>
         <button id="start-button" type="button"
-          style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:'Gothic A1','Malgun Gothic',sans-serif;">
+          style="padding:14px 28px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           게임 시작
         </button>
       </div>
