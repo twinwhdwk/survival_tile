@@ -1,4 +1,5 @@
 import SocketIO from 'socket.io-client';
+import { FONT_BODY } from '../theme/Theme';
 
 let socket = null;
 let statusEl = null;
@@ -23,7 +24,7 @@ function ensureStatusEl() {
     'background-size:200% 100%',
     'animation:reconnectShimmer 1.5s linear infinite',
     'color:#ffffff', 'text-align:center',
-    "font-family:'Malgun Gothic',sans-serif", 'font-size:14px', 'font-weight:600',
+    `font-family:${FONT_BODY}`, 'font-size:14px', 'font-weight:600',
     'padding:10px', 'z-index:9999',
     'transform:translateY(-100%)',
     'transition:transform 0.35s ease',
