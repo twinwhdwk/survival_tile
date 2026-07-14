@@ -140,6 +140,22 @@ export default class GameScene extends Phaser.Scene {
       on: false,
     });
 
+    // A heavier, wider burst than hitEmitter — used only for the boss's
+    // AoE tile-shatter skill (bossShatterSkill), which should read as a
+    // bigger, more menacing moment than an ordinary hit landing, not just
+    // the same spark burst scaled up.
+    this.shatterEmitter = this.add.particles('particle_debris').setDepth(16).createEmitter({
+      speed: { min: 140, max: 340 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 400, max: 650 },
+      scale: { start: 1.4, end: 0.1 },
+      alpha: { start: 1, end: 0 },
+      gravityY: 260,
+      tint: [0xff6633, 0xff2222, 0x8a1a0a],
+      quantity: 0,
+      on: false,
+    });
+
     this.confettiEmitter = this.add.particles('particle_spark').setDepth(31).createEmitter({
       speed: { min: 120, max: 320 },
       angle: { min: 0, max: 360 },
@@ -688,6 +704,24 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // A quick expanding-ring shockwave at (x, y) — used by both a boss hit
+  // and (bigger/slower) the boss's AoE shatter skill, so a landed attack
+  // reads as a real impact instead of just a particle puff with no sense
+  // of force radiating outward.
+  spawnImpactRing(x, y, { color = 0xff5555, startRadius = 10, endScale = 4, duration = 350, strokeWidth = 4 } = {}) {
+    const ring = this.add.circle(x, y, startRadius, 0x000000, 0)
+      .setStrokeStyle(strokeWidth, color, 0.9)
+      .setDepth(17);
+    this.tweens.add({
+      targets: ring,
+      scale: endScale,
+      alpha: 0,
+      duration,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   showFloatingDamage(x, y, amount) {
     const text = this.add.text(x, y - 10, `-${amount}`, {
       fontFamily: FONT_BODY,
@@ -985,9 +1019,26 @@ export default class GameScene extends Phaser.Scene {
         const { x: worldX, y: worldY } = hexToPixel(row, col);
 
         if (damage > 0) {
+          // Bigger hits (an admin's hidden critical, or just a bigger
+          // BOSS_METEOR_DAMAGE down the line) now visibly hit harder
+          // instead of always producing the exact same-sized burst
+          // regardless of how much damage actually landed.
+          const isBigHit = damage >= 4;
+          const particleCount = Math.min(36, 10 + damage * 3);
+          const shakeIntensity = Math.min(0.02, 0.0035 + damage * 0.0015);
+
           this.showFloatingDamage(worldX, worldY, damage);
-          this.hitEmitter.explode(10, worldX, worldY);
-          this.cameras.main.shake(90, 0.0035);
+          this.hitEmitter.explode(particleCount, worldX, worldY);
+          this.spawnImpactRing(worldX, worldY, {
+            color: isBigHit ? 0xffcc33 : 0xff5555,
+            endScale: isBigHit ? 6 : 3.5,
+            duration: isBigHit ? 450 : 300,
+          });
+          this.cameras.main.shake(isBigHit ? 180 : 90, shakeIntensity);
+          if (this.bossTileMarker) {
+            this.bossTileMarker.setTint(0xffffff);
+            this.time.delayedCall(90, () => this.bossTileMarker && this.bossTileMarker.clearTint());
+          }
           playBossHit();
           vibrateBossHit();
         }
@@ -1013,13 +1064,33 @@ export default class GameScene extends Phaser.Scene {
       },
 
       // The boss "slams the ground" and cracks several tiles at once (see
-      // Room.js's triggerBossShatterSkill()) — a heavier, longer shake than
-      // a single boss hit, plus a dark flash instead of boundary's bright
-      // red, so it reads as a distinct, more menacing kind of moment rather
-      // than just another hit landing.
+      // Room.js's triggerBossShatterSkill()) — a heavier, longer shake, a
+      // dark flash, a wide shockwave ring + debris burst radiating from
+      // the boss's current tile, a brief camera zoom punch, and a banner
+      // naming the moment, so it reads as a genuine set-piece rather than
+      // a slightly-longer version of an ordinary hit.
       bossShatterSkill: () => {
+        const origin = this.boss ? hexToPixel(this.boss.row, this.boss.col) : { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
+
         this.cameras.main.shake(450, 0.014);
         this.cameras.main.flash(220, 120, 10, 10);
+        this.cameras.main.zoomTo(1.06, 140, 'Sine.easeOut', false, (camera, progress) => {
+          if (progress === 1) {
+            this.cameras.main.zoomTo(1, 260, 'Sine.easeIn');
+          }
+        });
+
+        this.spawnImpactRing(origin.x, origin.y, {
+          color: 0xff6633, startRadius: 16, endScale: 9, duration: 550, strokeWidth: 6,
+        });
+        this.time.delayedCall(90, () => {
+          this.spawnImpactRing(origin.x, origin.y, {
+            color: 0xffaa33, startRadius: 10, endScale: 6, duration: 450, strokeWidth: 4,
+          });
+        });
+        this.shatterEmitter.explode(30, origin.x, origin.y);
+
+        this.showBanner('⚠️ 보스의 대지 붕괴!', '#ff6633');
         playBossSkill();
         vibrateBossSkill();
       },
