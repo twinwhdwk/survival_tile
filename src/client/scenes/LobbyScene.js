@@ -110,11 +110,17 @@ export default class LobbyScene extends Phaser.Scene {
     this.addBotButton.addEventListener('click', () => {
       this.socket.emit('addBot');
     });
-    // Removes bots (which have no real socket, so nothing ever cleans them
-    // up if a test session ends without starting the tournament) and any
-    // lobby entry whose socket has actually disconnected — never touches a
-    // currently-connected real player.
+    // A full reset, not just a stale-entry sweep — removes every bot plus
+    // force-disconnects every currently-connected non-admin real player
+    // too (see server.js's clearLobby handler). That's a real, immediate
+    // consequence for anyone actually waiting in the lobby right now, and
+    // this button otherwise looks identical to any other lobby button, so
+    // a plain native confirm() (no custom modal — stays within "simple,
+    // no added UI") guards against a stray misclick during a live event.
     this.clearLobbyButton.addEventListener('click', () => {
+      if (!window.confirm('초기화하면 현재 접속 중인 참가자도 모두 퇴장됩니다. 계속할까요?')) {
+        return;
+      }
       this.socket.emit('clearLobby');
     });
 
