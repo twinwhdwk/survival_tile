@@ -244,6 +244,24 @@ export default class Room {
       && col >= colInset && col <= MAP_COLS - 1 - colInset;
   }
 
+  // How many rings inside the current safe rectangle (row, col) sits —
+  // 0 means right on the current edge (the very next boundary shrink would
+  // remove it), higher means further from danger. Negative means already
+  // outside the safe zone. Used by findStepTowardSafety() to steer bots
+  // toward the interior instead of merely "technically still safe right
+  // now," so they aren't caught flat-footed by the next shrink step the
+  // way a purely reactive "nearest safe tile" search would leave them.
+  safeMargin(row, col) {
+    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
+    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
+    return Math.min(
+      row - rowInset,
+      (MAP_ROWS - 1 - rowInset) - row,
+      col - colInset,
+      (MAP_COLS - 1 - colInset) - col,
+    );
+  }
+
   // The current safe rectangle's edges, in tile coordinates — sent along
   // with the boundary events so the client can draw an outline of what's
   // currently safe, rather than players only finding out tile-by-tile as
@@ -618,34 +636,42 @@ export default class Room {
     });
   }
 
-  // Breadth-first search outward from (startRow, startCol), stopping at the
-  // first SOLID tile that's also inside the current safe boundary. Returns
-  // just the *first step* of that path (an adjacent tile, plus its
-  // direction index), not the whole route — moveBotsRandomly() only needs
-  // to know which way to lean this tick, and recomputes fresh next tick
-  // anyway as the map keeps changing under it (tiles collapsing, boundary
-  // closing in). Capped at BOT_SEARCH_DEPTH tiles out so a bot in a small
-  // isolated pocket doesn't scan the entire map every tick; returns null if
-  // nothing suitable is found within that radius (caller falls back to
-  // immediate-neighbor logic).
+  // Breadth-first search outward from (startRow, startCol) collecting every
+  // reachable SOLID, non-pending, in-bounds tile within BOT_SEARCH_DEPTH,
+  // then picking among them by a score that favors *margin* from the
+  // current safe-zone edge (safeMargin()) over raw distance — not just the
+  // first-found nearest safe tile. A purely "nearest safe tile" bot reads
+  // as reactive rather than skilled: it happily settles on a tile sitting
+  // right on the current edge as long as it's technically still inside the
+  // boundary *this instant*, then gets caught flat-footed the moment the
+  // next BOUNDARY_SHRINK_INTERVAL_MS tick removes that exact ring. Scoring
+  // by margin instead makes bots drift toward the interior over time as
+  // real pressure builds, the way a cautious human player does, rather
+  // than camping the crumbling edge until it's too late.
   //
-  // preferredDir (a bot's remembered heading, or null) softly weights which
-  // candidate wins when several are equally close, so a bot facing multiple
-  // safe options keeps drifting roughly the same way instead of jittering
-  // between directions every tick — see pickWeightedByHeading().
+  // Returns just the *first step* of the winning path (an adjacent tile,
+  // plus its direction index), not the whole route — moveBotsRandomly()
+  // only needs to know which way to lean this tick, and recomputes fresh
+  // next tick anyway as the map keeps changing under it (tiles collapsing,
+  // boundary closing in). Capped at BOT_SEARCH_DEPTH tiles out so a bot in
+  // a small isolated pocket doesn't scan the entire map every tick; returns
+  // null if nothing suitable is found within that radius (caller falls
+  // back to immediate-neighbor logic).
+  //
+  // preferredDir (a bot's remembered heading, or null) gives a small
+  // continuity bonus so a bot facing several similarly-good options keeps
+  // drifting roughly the same way instead of jittering between directions
+  // every tick — see pickWeightedByHeading(), used here only to add
+  // organic variety among the top-scoring candidates rather than always
+  // picking a single deterministic "best" tile.
   findStepTowardSafety(startRow, startCol, preferredDir) {
     const startKey = `${startRow}_${startCol}`;
     const visited = new Set([startKey]);
     let frontier = [{ row: startRow, col: startCol, firstStep: null, firstStepDir: null }];
+    const found = [];
 
     for (let depth = 0; depth < BOT_SEARCH_DEPTH && frontier.length > 0; depth++) {
       const next = [];
-      // Collect every valid target found at this depth (not just the
-      // first) so pickWeightedByHeading() below has real options to weigh
-      // — otherwise, since hexNeighbors() always returns the 6 neighbors
-      // in the same fixed order, a bot with several equally-close safe
-      // tiles around it would always drift the same direction.
-      const foundAtThisDepth = [];
 
       for (const node of frontier) {
         const neighbors = hexNeighbors(node.row, node.col);
@@ -673,19 +699,45 @@ export default class Room {
           const firstStep = node.firstStep || { row, col };
           const firstStepDir = node.firstStepDir !== null ? node.firstStepDir : dir;
           if (state === TILE_STATE.SOLID && !isPending && this.isSafeTile(row, col)) {
-            foundAtThisDepth.push({ row: firstStep.row, col: firstStep.col, dir: firstStepDir });
+            found.push({
+              row: firstStep.row,
+              col: firstStep.col,
+              dir: firstStepDir,
+              depth,
+              margin: this.safeMargin(row, col),
+            });
           } else {
             next.push({ row, col, firstStep, firstStepDir });
           }
         }
       }
-
-      if (foundAtThisDepth.length > 0) {
-        return pickWeightedByHeading(foundAtThisDepth, preferredDir);
-      }
       frontier = next;
     }
-    return null;
+
+    if (found.length === 0) {
+      return null;
+    }
+
+    // Margin dominates the score (each extra ring of safety is worth more
+    // than a couple tiles of detour) but isn't the only factor — a far-off
+    // interior tile still loses to a nearby merely-decent one, so bots keep
+    // reacting to immediate local danger rather than beelining across the
+    // whole map on every tick.
+    let bestScore = -Infinity;
+    found.forEach((c) => {
+      c.score = c.margin * 2 - c.depth * 0.5;
+      if (c.score > bestScore) {
+        bestScore = c.score;
+      }
+    });
+
+    // Keep every candidate within a point of the best score (not just
+    // ties) so pickWeightedByHeading() still has real, comparably-good
+    // options to weigh by heading continuity — otherwise a bot would
+    // re-plan a brand new direction every single tick even among tiles
+    // that are all roughly equally safe.
+    const topCandidates = found.filter((c) => c.score >= bestScore - 1);
+    return pickWeightedByHeading(topCandidates, preferredDir);
   }
 
   // Test bots have no client sending 'playerMovement', so the room drives
