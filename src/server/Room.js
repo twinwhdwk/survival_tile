@@ -162,6 +162,14 @@ export default class Room {
     this.safeInset = 0;
     this.boundaryShrinkStepsDone = 0;
     this.lastRegenAt = 0;
+    // Tracks the 0-alive -> 1-alive "last stand" state as an explicit
+    // false->true->false transition (see eliminatePlayer()/respawnGhost())
+    // rather than re-deriving it from aliveCount alone — the ghost-revive
+    // gauge can bring a player back into the round and then have them
+    // eliminated again later in the same round, which would otherwise
+    // re-hit aliveCount === 1 repeatedly and re-broadcast the activation
+    // event (and its full-screen client banner) every single time.
+    this.lastStandActive = false;
 
     // Admin-only "balance lever" state (see armCriticalHit() and
     // triggerBossShatterSkill()) — never exposed to players.
@@ -318,6 +326,22 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
+  // SURVIVAL-only variant of pickRandomSolidTile(), scoped to the current
+  // safe zone via getSafeZoneTiles() — the same restriction pattern
+  // autoRegenerateTiles() already uses. Used by respawnGhost() so a filled
+  // revival gauge never drops a player outside the shrinking boundary,
+  // where they'd render as alive and safe but can never count as a
+  // survivor at round end (finishRoom's SURVIVAL branch checks isSafeTile)
+  // and would keep accruing SURVIVAL_SCORE_PER_SECOND for standing outside
+  // the play area.
+  pickRandomSolidTileInSafeZone() {
+    const tiles = this.getSafeZoneTiles().filter(({ row, col }) => this.tileMap[row][col] === TILE_STATE.SOLID);
+    if (tiles.length === 0) {
+      return null;
+    }
+    return tiles[Math.floor(Math.random() * tiles.length)];
+  }
+
   // Used by moveBotsRandomly()'s eliminated-bot branch, which calls
   // reviveTile() the same way a real ghost's tile click does, just picked
   // at random rather than aimed by a cursor.
@@ -429,12 +453,17 @@ export default class Room {
     this.emit('playerEliminated', { playerId: id, score: this.score });
 
     const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
-    if (aliveCount === 1) {
+    if (aliveCount === 1 && !this.lastStandActive) {
       // Same "last-stand" threshold reviveTile() already waives the ghost
-      // cooldown at (see its aliveCount > 1 check) — this just tells every
-      // client that moment has arrived, so ghosts know to tap freely and
-      // the lone survivor knows why the map is suddenly filling back in.
-      this.emit('lastStandActivated', {});
+      // cooldown down to (see its aliveCount > 1 check) — this just tells
+      // every client that moment has arrived, so ghosts know to tap freely
+      // and the lone survivor knows why the map is suddenly filling back
+      // in. Only fired on the actual false->true transition (see
+      // this.lastStandActive's own comment) — respawnGhost() flips it back
+      // and re-emits with active: false once the gauge brings someone back
+      // and aliveCount rises above 1 again.
+      this.lastStandActive = true;
+      this.emit('lastStandActivated', { active: true });
     }
 
     const allEliminated = Object.values(this.players).every((p) => p.eliminated);
@@ -650,6 +679,16 @@ export default class Room {
     if (this.tileMap[row][col] !== TILE_STATE.GONE) {
       return;
     }
+    // SURVIVAL only: shrinkBoundary() only ever sweeps the *one* ring
+    // transitioning at that moment, so a tile revived outside the current
+    // safe zone would never get swept again — permanently wasting the tap
+    // on ground nobody can get survivor credit for standing on (finishRoom's
+    // SURVIVAL branch requires isSafeTile at round end). BOSS has no
+    // shrinking boundary (safeInset stays 0, isSafeTile covers the whole
+    // map), so this is a no-op there.
+    if (this.mode === 'SURVIVAL' && !this.isSafeTile(row, col)) {
+      return;
+    }
 
     // Last-stand rally: once only one teammate is still standing, every
     // ghost's revive cooldown shortens from the normal GHOST_REVIVE_COOLDOWN_MS
@@ -693,9 +732,12 @@ export default class Room {
     if (!player || !player.eliminated || this.finished) {
       return;
     }
-    const tile = this.pickRandomSolidTile();
+    // SURVIVAL restricts the candidate pool to the current safe zone (see
+    // pickRandomSolidTileInSafeZone()); BOSS has no shrinking boundary, so
+    // it keeps picking from the whole map as before.
+    const tile = this.mode === 'SURVIVAL' ? this.pickRandomSolidTileInSafeZone() : this.pickRandomSolidTile();
     if (!tile) {
-      return; // nothing standing anywhere to respawn onto — stay a ghost
+      return; // nothing standing anywhere (in the safe zone, for SURVIVAL) to respawn onto — stay a ghost
     }
     const { x, y } = hexToPixel(tile.row, tile.col);
     const respawnTime = Date.now();
@@ -711,6 +753,20 @@ export default class Room {
     player.lastScoreCreditAt = respawnTime;
     this.reviveCooldowns.delete(id);
     this.emit('playerRevived', { playerId: id, x, y });
+
+    // Mirror image of the activation in eliminatePlayer(): a respawn is the
+    // only way aliveCount can go back up mid-round, so this is the one place
+    // last-stand can end. Only fires on the true->false transition, and only
+    // once aliveCount has actually climbed back above 1 — respawning the
+    // very last ghost when aliveCount was already 0 would be impossible
+    // anyway (finishRoom('all-eliminated') already ended the room by then).
+    if (this.lastStandActive) {
+      const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+      if (aliveCount > 1) {
+        this.lastStandActive = false;
+        this.emit('lastStandActivated', { active: false });
+      }
+    }
   }
 
   // Fired once, right when the grace period ends and the boundary starts

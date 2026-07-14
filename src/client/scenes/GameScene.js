@@ -54,6 +54,12 @@ const BOSS_BAR_WIDTH = 220;
 // finished its 180ms tween then sat still until the next step re-triggered it).
 const OTHER_PLAYER_LERP_TAU = 70;
 
+// Default ghostHintText copy, shown while a ghost's cooldown is the normal
+// GHOST_REVIVE_COOLDOWN_MS rate. Swapped out for the "라스트 스탠드" copy while
+// that's active (see the lastStandActivated handler) and restored here once
+// the server signals it's deactivated again.
+const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 무너진 칸을 클릭해 복구하세요 (게이지를 채우면 부활!)';
+
 export default class GameScene extends Phaser.Scene {
 
   constructor() {
@@ -466,7 +472,7 @@ export default class GameScene extends Phaser.Scene {
     this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
       .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
-    this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요 (게이지를 채우면 부활!)', {
+    this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, GHOST_HINT_DEFAULT_TEXT, {
       fontFamily: FONT_BODY,
       fontSize: '13px',
       color: COLORS.textInfo,
@@ -961,9 +967,27 @@ export default class GameScene extends Phaser.Scene {
 
       // Room-wide: everyone hears the moment only one lineage member is
       // still standing, since it changes what ghosts should do (tap
-      // freely, cooldown-free) and explains to the survivor why the map
-      // is suddenly filling back in around them.
-      lastStandActivated: () => {
+      // freely, faster cooldown) and explains to the survivor why the map
+      // is suddenly filling back in around them. Room.js now only fires
+      // this on the real false->true/true->false transition (a ghost
+      // respawning via the gauge and dying again no longer re-triggers it),
+      // and sends an { active: false } deactivation once a respawn brings
+      // the alive-count back above 1 — handled here by reverting the ghost
+      // hint text back to its normal (non-last-stand) copy rather than
+      // leaving it claiming the fast cooldown is still active.
+      lastStandActivated: ({ active } = {}) => {
+        if (active === false) {
+          // Reset unconditionally, not just while currently a ghost: when
+          // this deactivation is triggered by *this* client's own respawn,
+          // 'playerRevived' (which flips this.eliminated to false) is
+          // always processed first, so an `if (this.eliminated)` guard here
+          // would skip the reset and leave stale "last stand" copy sitting
+          // in the text object for this player's *next* elimination.
+          // setText on a currently-hidden object is harmless either way.
+          this.ghostHintText.setText(GHOST_HINT_DEFAULT_TEXT);
+          fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+          return;
+        }
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         if (this.eliminated) {
           this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
@@ -1207,6 +1231,19 @@ export default class GameScene extends Phaser.Scene {
         if (this.isSpectator) {
           this.scene.start('ResultScene', { status: 'waiting', rankings });
         }
+      },
+
+      // Only ever sent to admin sockets (see server.js's startStage() and
+      // adminReturnToDashboard handler) — a stage-<=2 admin who double-clicked
+      // into a room via 'adminSpectateRoom' to watch it in full has no
+      // listener for this without it, so if the bracket advances to the next
+      // stage while they're still parked in GameScene, they were left
+      // stranded on a dead, frozen board (stale "라운드 종료" banner) instead
+      // of being routed back to DashboardScene the way LobbyScene's
+      // identical handleDashboardStarting already does for a lobby-phase
+      // admin.
+      dashboardStarting: (payload) => {
+        this.scene.start('DashboardScene', payload);
       },
 
     };

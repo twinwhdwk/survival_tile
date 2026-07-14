@@ -413,6 +413,28 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore) {
       result: 'eliminated',
       stage: currentStage,
     });
+  } else if (advancing.length < allMembers.length) {
+    // Some teammates advance (into the merged lineage that plays on) but
+    // not everyone did — e.g. an 8-player room where only 4 make it out.
+    // Only a fully-wiped lineage (above) or the eventual champion (below)
+    // used to get recorded in finalRankings, so a player cut from a room
+    // whose lineage otherwise kept advancing would simply never appear in
+    // the final results at all. Recorded here, at this room's own finish
+    // time and score, rather than waiting on the lineage's eventual
+    // fate — which the survivors who did advance don't share with them
+    // from this point on anyway (their own path already diverged for good
+    // reasons: mergeAdjacentLineages(), a later wipeout, etc).
+    const advancingIds = new Set(advancing.map((m) => m.socketId));
+    const eliminatedHere = allMembers.filter((m) => !advancingIds.has(m.socketId));
+    if (eliminatedHere.length > 0) {
+      finalRankings.push({
+        nicknames: eliminatedHere.map((m) => m.nickname),
+        socketIds: eliminatedHere.map((m) => m.socketId),
+        score: finalScore,
+        result: 'eliminated',
+        stage: currentStage,
+      });
+    }
   }
 
   if (room) {
