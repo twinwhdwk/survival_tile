@@ -15,6 +15,7 @@ import {
   playBoundaryAlarm,
   playCountdownTick,
   playCountdownGo,
+  playVictory,
 } from '../utilities/SoundFx';
 import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
@@ -428,13 +429,22 @@ export default class GameScene extends Phaser.Scene {
     this.ghostHintPanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 10, 24, COLORS.panelFill, COLORS.panelFillAlpha)
       .setOrigin(0.5, 0).setScrollFactor(0).setDepth(29).setVisible(false).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
-    this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요', {
+    this.ghostHintText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 100, '유령 모드 - 무너진 칸을 클릭해 복구하세요 (게이지를 채우면 부활!)', {
       fontFamily: FONT_BODY,
       fontSize: '13px',
       color: COLORS.textInfo,
       stroke: TEXT_STROKE,
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    // Fills as this ghost successfully taps collapsed tiles (see the
+    // 'reviveGaugeUpdate' handler) — reaching the end respawns them back
+    // into the round (Room.respawnGhost), so this doubles as visible
+    // progress toward that instead of tapping feeling directionless.
+    this.reviveGaugeBarBg = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 84, 160, 10, 0x222222)
+      .setScrollFactor(0).setDepth(29).setVisible(false);
+    this.reviveGaugeBarFill = this.add.rectangle(WORLD_WIDTH / 2 - 80, WORLD_HEIGHT - 84, 0, 8, 0x88ccff)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     // A whole-screen blue-gray wash so ghost mode reads as "you're now
     // spectating," not just a slightly-faded version of normal play —
@@ -887,6 +897,41 @@ export default class GameScene extends Phaser.Scene {
         playRevive();
       },
 
+      // Personal to this socket (Room.reviveTile emits this via
+      // io.to(id), not a room-wide broadcast) — only ever received while
+      // this client is actually a ghost.
+      reviveGaugeUpdate: ({ gauge, max }) => {
+        this.updateReviveGauge(gauge, max);
+      },
+
+      // Room-wide: everyone hears the moment only one lineage member is
+      // still standing, since it changes what ghosts should do (tap
+      // freely, cooldown-free) and explains to the survivor why the map
+      // is suddenly filling back in around them.
+      lastStandActivated: () => {
+        this.showBanner('⚡ 라스트 스탠드!\n유령들이 쿨타임 없이 타일을 복구합니다', '#ffd700');
+        if (this.eliminated) {
+          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 쿨타임 없음 · 게이지를 채우면 부활!');
+          this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+        }
+      },
+
+      playerRevived: ({ playerId, x, y }) => {
+        if (playerId === this.socket.id) {
+          this.handleOwnRevival(x, y);
+          return;
+        }
+        const avatar = this.otherPlayers[playerId];
+        if (avatar) {
+          avatar.targetX = x;
+          avatar.targetY = y;
+          avatar.setPosition(x, y);
+          this.showFloatingLabel(x, y, '부활!', '#88ff99');
+          this.tweens.add({ targets: avatar, alpha: 1, scale: 1, duration: 300, ease: 'Back.easeOut' });
+        }
+        this.updatePlayerCount();
+      },
+
       massCollapseStarted: ({ safeBounds }) => {
         this.cameras.main.shake(400, 0.008);
         this.cameras.main.flash(250, 255, 60, 60);
@@ -1133,7 +1178,65 @@ export default class GameScene extends Phaser.Scene {
     this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
     this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
 
+    this.reviveGaugeBarBg.setVisible(true);
+    this.reviveGaugeBarFill.setVisible(true).setSize(0, 8);
+
     this.tweens.add({ targets: this.ghostOverlay, alpha: 0.3, duration: 600 });
+  }
+
+  // Server sends the running total on every successful tap (Room.reviveTile
+  // -> 'reviveGaugeUpdate'), so this just renders whatever it says rather
+  // than tracking taps independently — a dropped/out-of-order event can
+  // never leave the bar showing a stale value for long.
+  updateReviveGauge(gauge, max) {
+    const ratio = max > 0 ? Phaser.Math.Clamp(gauge / max, 0, 1) : 0;
+    this.reviveGaugeBarFill.setSize(160 * ratio, 8);
+  }
+
+  // Inverse of hideJoystick() — needed once a ghost fills their revival
+  // gauge and comes back into the round mid-game, which (unlike a
+  // spectator, the only other case that hides the joystick) genuinely
+  // needs it back.
+  showJoystick() {
+    this.joystickGlow.setVisible(true);
+    this.joystickBase.setVisible(true);
+    this.joystickThumb.setVisible(true);
+  }
+
+  // Server-authoritative respawn (Room.respawnGhost) landed on this exact
+  // client — reverses everything handleOwnElimination did, rather than
+  // re-running the create()/applySnapshot() setup from scratch.
+  handleOwnRevival(x, y) {
+    this.eliminated = false;
+
+    if (this.player) {
+      this.player.setPosition(x, y);
+      this.tweens.add({ targets: this.player, alpha: 1, scale: 1, duration: 300, ease: 'Back.easeOut' });
+      this.showFloatingLabel(x, y, '부활!', '#88ff99');
+    }
+
+    if (this.ghostAuraEmitter) {
+      this.ghostAuraEmitter.stop();
+      this.ghostAuraEmitter = null;
+    }
+
+    this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel, this.reviveGaugeBarBg, this.reviveGaugeBarFill], alpha: 0, duration: 300, onComplete: () => {
+      this.ghostHintText.setVisible(false);
+      this.ghostHintPanel.setVisible(false);
+      this.reviveGaugeBarBg.setVisible(false);
+      this.reviveGaugeBarFill.setVisible(false);
+      // Tweened alpha to 0 for the fade-out above; restore full alpha now
+      // so these are ready to fade back in cleanly next time this player
+      // is eliminated again.
+      this.ghostHintText.setAlpha(1);
+      this.ghostHintPanel.setAlpha(1);
+    } });
+    this.tweens.add({ targets: this.ghostOverlay, alpha: 0, duration: 400 });
+
+    this.showJoystick();
+    this.cameras.main.flash(300, 120, 255, 150);
+    playVictory();
+    this.updatePlayerCount();
   }
 
   startGhostAura(x, y) {

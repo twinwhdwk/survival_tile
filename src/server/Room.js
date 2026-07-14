@@ -17,6 +17,9 @@ import {
   AUTO_REGEN_SOLID_RATIO_THRESHOLD,
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
+  REGEN_GRACE_MS,
+  GHOST_REVIVE_GAUGE_PER_TAP,
+  GHOST_REVIVE_GAUGE_MAX,
 } from '../shared/roundConfig';
 import {
   GHOST_REVIVE_COOLDOWN_MS,
@@ -140,6 +143,11 @@ export default class Room {
     this.roundStartTime = Date.now();
     this.finished = false;
     this.reviveCooldowns = new Map();
+    // Tile key -> timestamp until which that tile is immune to
+    // triggerTileCollapse() re-starting its collapse — set whenever a tile
+    // comes back via autoRegenerateTiles() or a ghost's reviveTile(), so a
+    // freshly-restored tile isn't instantly walked on and popped again.
+    this.regenGraceUntil = new Map();
     // Per-player movement-broadcast throttle state (socketId -> { last, timer }),
     // kept off the player object itself so the Node Timeout it holds never ends
     // up in a serialized getSnapshot() payload. See broadcastPlayerMoved().
@@ -304,6 +312,24 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
+  // Used by moveBotsRandomly()'s eliminated-bot branch, which calls
+  // reviveTile() the same way a real ghost's tile click does, just picked
+  // at random rather than aimed by a cursor.
+  pickRandomGoneTile() {
+    const tiles = [];
+    for (let row = 0; row < MAP_ROWS; row++) {
+      for (let col = 0; col < MAP_COLS; col++) {
+        if (this.tileMap[row][col] === TILE_STATE.GONE) {
+          tiles.push({ row, col });
+        }
+      }
+    }
+    if (tiles.length === 0) {
+      return null;
+    }
+    return tiles[Math.floor(Math.random() * tiles.length)];
+  }
+
   getRandomSpawn() {
     const tiles = [];
     for (let row = 0; row < MAP_ROWS; row++) {
@@ -323,6 +349,10 @@ export default class Room {
   triggerTileCollapse(row, col) {
     const key = `${row}_${col}`;
     if (this.tileMap[row][col] !== TILE_STATE.SOLID || this.pendingTiles.has(key)) {
+      return;
+    }
+    const graceUntil = this.regenGraceUntil.get(key);
+    if (graceUntil && Date.now() < graceUntil) {
       return;
     }
     this.pendingTiles.add(key);
@@ -374,10 +404,20 @@ export default class Room {
       return;
     }
     player.eliminated = true;
+    player.revivalGauge = 0;
     if (this.mode === 'SURVIVAL') {
       this.addSurvivalScore(player, Date.now());
     }
     this.emit('playerEliminated', { playerId: id, score: this.score });
+
+    const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+    if (aliveCount === 1) {
+      // Same "last-stand" threshold reviveTile() already waives the ghost
+      // cooldown at (see its aliveCount > 1 check) — this just tells every
+      // client that moment has arrived, so ghosts know to tap freely and
+      // the lone survivor knows why the map is suddenly filling back in.
+      this.emit('lastStandActivated', {});
+    }
 
     const allEliminated = Object.values(this.players).every((p) => p.eliminated);
     const allHumansGone = this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
@@ -597,7 +637,42 @@ export default class Room {
     }
 
     this.tileMap[row][col] = TILE_STATE.SOLID;
+    this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
     this.emit('tileRevived', { row, col });
+
+    // Every successful tap (ghost or bot alike — see moveBotsRandomly's
+    // eliminated-bot branch) fills this player's own personal revival
+    // gauge. Reaching GHOST_REVIVE_GAUGE_MAX respawns them back into the
+    // round instead of elimination being permanent for the rest of it.
+    player.revivalGauge = Math.min(GHOST_REVIVE_GAUGE_MAX, (player.revivalGauge || 0) + GHOST_REVIVE_GAUGE_PER_TAP);
+    this.io.to(id).emit('reviveGaugeUpdate', { gauge: player.revivalGauge, max: GHOST_REVIVE_GAUGE_MAX });
+    if (player.revivalGauge >= GHOST_REVIVE_GAUGE_MAX) {
+      this.respawnGhost(id);
+    }
+  }
+
+  // Brings an eliminated player back into the round once their revival
+  // gauge fills — not a full re-seat (name/animal/score all stay as they
+  // were), just clearing `eliminated` and dropping them back onto a
+  // currently-standing tile chosen the same way a boss room's rescue spot
+  // would be (pickRandomSolidTile()), since their old position may well
+  // be gone by now.
+  respawnGhost(id) {
+    const player = this.players[id];
+    if (!player || !player.eliminated || this.finished) {
+      return;
+    }
+    const tile = this.pickRandomSolidTile();
+    if (!tile) {
+      return; // nothing standing anywhere to respawn onto — stay a ghost
+    }
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    player.eliminated = false;
+    player.revivalGauge = 0;
+    player.x = x;
+    player.y = y;
+    this.reviveCooldowns.delete(id);
+    this.emit('playerRevived', { playerId: id, x, y });
   }
 
   // Fired once, right when the grace period ends and the boundary starts
@@ -763,7 +838,22 @@ export default class Room {
 
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
-      if (!player.isBot || player.eliminated) {
+      if (!player.isBot) {
+        return;
+      }
+
+      // A bot that's been eliminated is now a "ghost" exactly like a real
+      // eliminated player — same reviveTile() path, same cooldown/last-stand
+      // rules, same revival-gauge payoff — just aimed at a random collapsed
+      // tile each attempt instead of a real cursor click. Without this,
+      // bots went completely idle the moment they died, which is both a
+      // wasted teammate and (per the person's own report) reads as "do bots
+      // even help revive tiles?" — no, previously; now yes.
+      if (player.eliminated) {
+        const target = this.pickRandomGoneTile();
+        if (target) {
+          this.reviveTile(id, target.row, target.col);
+        }
         return;
       }
 
@@ -848,6 +938,7 @@ export default class Room {
     }
     goneTiles.slice(0, AUTO_REGEN_TILES_PER_BURST).forEach(({ row, col }) => {
       this.tileMap[row][col] = TILE_STATE.SOLID;
+      this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
       this.emit('tileRevived', { row, col });
     });
     return true;

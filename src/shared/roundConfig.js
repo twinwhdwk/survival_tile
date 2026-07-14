@@ -18,11 +18,13 @@ export const SURVIVAL_SCORE_PER_SECOND = 1;
 // within seconds: worst case (at the original BOT_MOVE_INTERVAL_MS=300 in
 // server.js, since raised to 600 for more human-like pacing) was
 // MAX_PLAYERS bots each stepping onto a new tile every 300ms = up to ~13
-// tiles/sec of consumption in one room. The burst size and interval below
-// are tuned so sustained regen throughput (TILES_PER_BURST /
-// (MIN_INTERVAL_MS/1000)) clears that worst case with margin — 15
-// tiles/sec at a 1s cadence, i.e. still comfortably ahead even at the
-// original faster/harsher bot pace.
+// tiles/sec of consumption in one room. At the current 600ms bot pace that
+// worst case is closer to ~7 tiles/sec, and the earlier (proactive, 0.75)
+// trigger threshold plus smarter bot pathing (Room.safeMargin — bots now
+// avoid camping the shrinking edge) both reduce sustained pressure further,
+// so 9 tiles/sec of burst throughput (TILES_PER_BURST / (MIN_INTERVAL_MS/
+// 1000)) still clears it with margin despite being lower than the original
+// tuning's 15.
 //
 // The threshold itself was originally 0.5 (only step in once a *majority*
 // of the safe zone was already gone), which in practice reads as "nothing
@@ -35,6 +37,26 @@ export const SURVIVAL_SCORE_PER_SECOND = 1;
 // 0.75 so regen kicks in once roughly a quarter of the zone is gone,
 // well before the zone actually feels dangerous, instead of only as a
 // last-ditch rescue.
-export const AUTO_REGEN_TILES_PER_BURST = 15; // SURVIVAL round only: collapsed tiles restored per burst, scoped to the current safe zone only
+export const AUTO_REGEN_TILES_PER_BURST = 9; // SURVIVAL round only: collapsed tiles restored per burst, scoped to the current safe zone only
 export const AUTO_REGEN_SOLID_RATIO_THRESHOLD = 0.75; // trigger a regen burst once fewer than 3/4 of the safe zone's tiles are still SOLID
 export const AUTO_REGEN_MIN_INTERVAL_MS = 1000; // rate-limits how often threshold-triggered bursts can fire; matches the 1s server tick, so it can fire every tick while below threshold
+
+// How long a tile stays immune to re-collapsing right after it comes back
+// (via autoRegenerateTiles' burst or a ghost's reviveTile click) — without
+// this, a tile could be walked on and start collapsing again the instant it
+// reappeared, which reads as "regen didn't actually help" even though it
+// technically fired. Deliberately shorter than a full footstep-to-gone
+// cycle (WARNING_DELAY_MS + COLLAPSE_DELAY_MS = 1200ms in mapConfig.js) so
+// it reads as "freshly solid ground," not permanent invulnerability.
+export const REGEN_GRACE_MS = 2000;
+
+// A ghost (eliminated player) tapping collapsed tiles builds a personal
+// revival gauge — GAUGE_PER_TAP per successful tap (i.e. one that actually
+// flips a GONE tile back to SOLID; rate-limited the same way normal ghost
+// taps already are, see Room.reviveTile's GHOST_REVIVE_COOLDOWN_MS gate,
+// except that gate is waived entirely once only one teammate remains).
+// Filling the gauge to GAUGE_MAX respawns that ghost back into the round
+// at a random currently-standing tile, rather than leaving elimination as
+// a permanent state for the rest of the round.
+export const GHOST_REVIVE_GAUGE_PER_TAP = 10;
+export const GHOST_REVIVE_GAUGE_MAX = 100;
