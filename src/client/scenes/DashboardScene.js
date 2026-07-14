@@ -239,7 +239,7 @@ export default class DashboardScene extends Phaser.Scene {
         // card's own entrance animation (same fix applied to LobbyScene's
         // roster cells, which had the identical instant-destroy asymmetry).
         const stale = this.cardsByRoomId[roomId];
-        const { container, hpBarFill, lowHpTween, minimapTextureKey } = stale;
+        const { container, hpBarFill, lowHpTween, borderFlashTimer, minimapTextureKey } = stale;
         // The boss low-HP pulse (repeat: -1) doesn't stop on its own just
         // because the card is going away -- left running, it'd keep
         // ticking against an orphaned game object until this whole scene
@@ -247,6 +247,12 @@ export default class DashboardScene extends Phaser.Scene {
         // does.
         if (lowHpTween) {
           lowHpTween.stop();
+        }
+        // Same idea for the elimination-flash's pending redraw -- it
+        // targets card.cardBorder, which container.destroy() below is
+        // about to tear down along with everything else in the card.
+        if (borderFlashTimer) {
+          borderFlashTimer.remove();
         }
         this.tweens.killTweensOf(hpBarFill);
         this.tweens.add({
@@ -361,9 +367,9 @@ export default class DashboardScene extends Phaser.Scene {
     });
 
     return {
-      container, bg, selectionRing, label, aliveText, infoText, hpBarBg, hpBarFill,
+      container, bg, cardBorder, selectionRing, label, aliveText, infoText, hpBarBg, hpBarFill,
       minimap, minimapTextureKey, minimapCanvas: null,
-      roomId, cardW, cardH, prevAliveCount: null, lowHpTween: null,
+      roomId, cardW, cardH, prevAliveCount: null, lowHpTween: null, borderFlashTimer: null,
     };
   }
 
@@ -400,12 +406,17 @@ export default class DashboardScene extends Phaser.Scene {
     // red flash on the card border makes that jump out at a glance instead
     // of relying on the admin to notice the number itself changed.
     if (card.prevAliveCount !== null && summary.aliveCount < card.prevAliveCount) {
-      this.tweens.killTweensOf(card.bg);
-      card.bg.setStrokeStyle(2, 0xff4444, 0.9);
-      this.tweens.add({
-        targets: card.bg,
-        duration: 500,
-        onComplete: () => card.bg.setStrokeStyle(1, 0xffd700, 0.25),
+      // Redraws the same rounded border (see createCard) in red, then back
+      // to its normal gold after a beat — Graphics has no settable stroke
+      // property to tween the way Rectangle's setStrokeStyle() had, so
+      // this clears+redraws on a plain delayed call instead of a tween.
+      if (card.borderFlashTimer) {
+        card.borderFlashTimer.remove();
+      }
+      drawRoundedRect(card.cardBorder, 0, 0, card.cardW, card.cardH, { fillAlpha: 0, strokeWidth: 2, strokeColor: 0xff4444, strokeAlpha: 0.9, radius: 8 });
+      card.borderFlashTimer = this.time.delayedCall(500, () => {
+        drawRoundedRect(card.cardBorder, 0, 0, card.cardW, card.cardH, { fillAlpha: 0, strokeWidth: 1, strokeColor: 0xffd700, strokeAlpha: 0.25, radius: 8 });
+        card.borderFlashTimer = null;
       });
       this.tweens.add({
         targets: card.container,
