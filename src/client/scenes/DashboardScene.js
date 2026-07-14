@@ -214,6 +214,13 @@ export default class DashboardScene extends Phaser.Scene {
       const row = Math.floor(i / layout.cols);
       const cellX = layout.startX + col * (layout.cardW + CARD_GAP);
       const cellY = layout.startY + row * (layout.cardH + CARD_GAP);
+      // Recorded so the elimination-flash shake (updateCardContent) always
+      // has a stable reference to snap back to, rather than reading
+      // card.container.x at shake-time — which drifted if two deaths in
+      // the same room landed close enough together for their shake tweens
+      // to overlap (each one's "current x" was already mid-shake from the
+      // last one).
+      card.homeX = cellX;
 
       if (isNew) {
         // Snap straight into its slot -- the entrance scale/alpha tween in
@@ -418,9 +425,20 @@ export default class DashboardScene extends Phaser.Scene {
         drawRoundedRect(card.cardBorder, 0, 0, card.cardW, card.cardH, { fillAlpha: 0, strokeWidth: 1, strokeColor: 0xffd700, strokeAlpha: 0.25, radius: 8 });
         card.borderFlashTimer = null;
       });
+      // Two deaths in the same room close enough together (a real
+      // occurrence during a boundary-shrink pile-up, not just a
+      // theoretical case) used to layer a second shake on top of the
+      // first mid-flight — each one reading card.container.x as its
+      // "center" meant the second shake's range was already offset by
+      // however far the first had drifted, compounding indefinitely.
+      // Killing any shake in progress and snapping back to the recorded
+      // home position first makes every shake start from the same known
+      // center regardless of what was still animating.
+      this.tweens.killTweensOf(card.container);
+      card.container.x = card.homeX;
       this.tweens.add({
         targets: card.container,
-        x: card.container.x + Phaser.Math.Between(-4, 4),
+        x: card.homeX + Phaser.Math.Between(-4, 4),
         duration: 60,
         yoyo: true,
         repeat: 3,
