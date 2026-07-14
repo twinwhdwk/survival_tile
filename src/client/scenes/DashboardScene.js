@@ -60,9 +60,9 @@ export default class DashboardScene extends Phaser.Scene {
 
     // A single title with a drop shadow for the "burning" mood, rather than
     // a second overlapping emoji text — the previous additive-blend glow
-    // copy scaled independently of the main title (flickerTitleGlow) and
-    // drifted out of alignment, reading as a stray duplicate/shadow instead
-    // of a soft glow. See LoginScene for the same fix.
+    // copy scaled independently of the main title and drifted out of
+    // alignment, reading as a stray duplicate/shadow instead of a soft
+    // glow. See LoginScene for the same fix.
     this.titleText = this.add.text(WORLD_WIDTH / 2, 28, `🔥 ${this.stage}라운드 조별 현황`, {
       fontFamily: FONT_DISPLAY,
       fontSize: '22px',

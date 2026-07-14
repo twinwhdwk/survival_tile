@@ -53,8 +53,8 @@ export default class LoginScene extends Phaser.Scene {
 
     // A single title with a drop shadow for the "burning" mood, instead of a
     // second overlapping emoji text whose additive blend + randomized scale
-    // (flickerTitleGlow) drifted out of alignment with the main title and
-    // read as a stray duplicate/shadow rather than a soft glow.
+    // drifted out of alignment with the main title and read as a stray
+    // duplicate/shadow rather than a soft glow.
     const title = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, '🔥 타일 서바이벌 🔥', {
       fontFamily: FONT_DISPLAY,
       fontSize: '28px',

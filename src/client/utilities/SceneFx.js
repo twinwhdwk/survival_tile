@@ -1,5 +1,3 @@
-import Phaser from 'phaser';
-
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 
 // Shared ambient-mood effects reused across every pre/post-round scene
@@ -24,22 +22,4 @@ export function createAmbientEmbers(scene) {
     frequency: 350,
     quantity: 1,
   });
-}
-
-// Recursive rather than a yoyo/repeat tween so each step lands on a fresh
-// random alpha/scale/duration — a real flame jitters unevenly rather than
-// breathing on a steady sine wave. `glow` is the additive-blended title
-// text object sitting behind each scene's solid title text.
-export function flickerTitleGlow(scene, glow) {
-  const step = () => {
-    scene.tweens.add({
-      targets: glow,
-      alpha: Phaser.Math.FloatBetween(0.25, 0.6),
-      scale: Phaser.Math.FloatBetween(1.02, 1.16),
-      duration: Phaser.Math.Between(90, 220),
-      ease: 'Sine.easeInOut',
-      onComplete: step,
-    });
-  };
-  step();
 }
