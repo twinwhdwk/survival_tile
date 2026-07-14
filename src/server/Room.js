@@ -897,26 +897,35 @@ export default class Room {
     });
   }
 
-  // SURVIVAL round only, for the whole round (including after the boundary
-  // starts closing in, not just the pre-boundary grace period — a 36-person
-  // load test showed every single stage-1 room going to a total wipeout
-  // within seconds of the boundary activating, because regen used to switch
-  // off entirely right when it was needed most: several players packed into
-  // a shrinking area burn through standing tiles with their own footsteps
-  // far faster than a fixed-schedule trickle can keep up, independent of
-  // whatever the boundary itself is doing).
+  // Runs for both SURVIVAL and BOSS rounds, for the round's whole duration
+  // (including after SURVIVAL's boundary starts closing in, not just the
+  // pre-boundary grace period — a 36-person load test showed every single
+  // stage-1 room going to a total wipeout within seconds of the boundary
+  // activating, because regen used to switch off entirely right when it
+  // was needed most: several players packed into a shrinking area burn
+  // through standing tiles with their own footsteps far faster than a
+  // fixed-schedule trickle can keep up, independent of whatever the
+  // boundary itself is doing). BOSS rounds have no shrinking boundary at
+  // all — this.safeInset stays 0 for their whole duration, so
+  // getSafeZoneTiles() below naturally covers the entire board instead of
+  // a shrinking rectangle, and the exact same threshold/burst logic just
+  // applies map-wide.
   //
   // Triggered by tile scarcity rather than a fixed timer: once fewer than
   // AUTO_REGEN_SOLID_RATIO_THRESHOLD of the *current safe zone's* tiles are
-  // still SOLID, restore a burst of them. This self-adjusts to however many
-  // players/bots are actually eating through the floor instead of needing a
-  // per-player-count formula tuned by hand. AUTO_REGEN_MIN_INTERVAL_MS just
+  // still SOLID, restore a burst of them, sized to the room's current
+  // alive-player count (see roundConfig.js's AUTO_REGEN_BASE_BURST /
+  // AUTO_REGEN_BURST_PER_ALIVE_PLAYER comment) rather than a fixed number —
+  // this self-adjusts to however many players/bots are actually eating
+  // through the floor right now. AUTO_REGEN_MIN_INTERVAL_MS just
   // rate-limits re-triggering so it doesn't refire every single tick while
   // sitting right at the threshold.
   //
   // Candidates are restricted to the current safe zone (getSafeZoneTiles())
-  // rather than the whole map — regenerating ground *outside* the shrinking
-  // boundary would undermine the entire point of it once it's active.
+  // rather than the whole map — in SURVIVAL, regenerating ground *outside*
+  // the shrinking boundary would undermine the entire point of it once
+  // active; in BOSS, that same call just returns the whole map since
+  // there's no boundary to restrict to.
   autoRegenerateTiles() {
     const zoneTiles = this.getSafeZoneTiles();
     const goneTiles = [];
@@ -964,7 +973,18 @@ export default class Room {
     const elapsed = Date.now() - this.roundStartTime;
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
 
-    if (this.mode === 'SURVIVAL' && elapsed - this.lastRegenAt >= AUTO_REGEN_MIN_INTERVAL_MS) {
+    // Not SURVIVAL-only: BOSS rounds have no shrinking boundary, so
+    // this.safeInset stays 0 for their whole duration and getSafeZoneTiles()
+    // naturally covers the entire board — the same threshold/burst logic
+    // just applies map-wide instead of to a shrinking rectangle. BOSS mode
+    // previously had no auto-regen at all (this check used to require
+    // mode === 'SURVIVAL'), which meant the only tiles that ever came back
+    // during a 3-minute boss fight were whatever eliminated teammates
+    // manually clicked — with everyone still alive and actively chasing a
+    // teleporting boss across a floor that collapses under every footstep,
+    // the whole map could run out of standing ground with no safety net at
+    // all until the first elimination created a ghost.
+    if (elapsed - this.lastRegenAt >= AUTO_REGEN_MIN_INTERVAL_MS) {
       if (this.autoRegenerateTiles()) {
         this.lastRegenAt = elapsed;
       }
