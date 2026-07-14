@@ -9,6 +9,7 @@ import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { fitPanelWidth } from '../utilities/PanelFit';
 
 export default class ResultScene extends Phaser.Scene {
 
@@ -44,8 +45,12 @@ export default class ResultScene extends Phaser.Scene {
       align: 'center',
       stroke: TEXT_STROKE,
       strokeThickness: 4,
-    }).setOrigin(0.5).setScale(0.6).setAlpha(0);
-    this.messagePanel.setSize(this.messageText.width + 48, 46);
+    }).setOrigin(0.5);
+    // Measured at the text's default scale=1, same as LoginScene's title —
+    // doing this after the entrance tween's setScale(0.6) below would size
+    // the panel for the shrunk starting pose instead of the settled text.
+    fitPanelWidth(this.messagePanel, this.messageText, 28);
+    this.messageText.setScale(0.6).setAlpha(0);
 
     this.tweens.add({
       targets: this.messageText,

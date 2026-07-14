@@ -22,6 +22,7 @@ import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { START_COUNTDOWN_MS } from '../../shared/roundConfig';
+import { fitPanelWidth } from '../utilities/PanelFit';
 
 // Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
 // for both a tile's click/hover hit area and the ghost-revive highlight, so
@@ -230,7 +231,7 @@ export default class GameScene extends Phaser.Scene {
       this.hideJoystick();
       this.spectatorBadge.setVisible(true);
       this.spectatorBadgePanel.setVisible(true);
-      this.fitPanelWidth(this.spectatorBadgePanel, this.spectatorBadge, 24);
+      fitPanelWidth(this.spectatorBadgePanel, this.spectatorBadge, 24);
       this.backToDashboardNode.setVisible(this.fromDashboard);
 
       if (!this.spectatorBadgePulse) {
@@ -631,11 +632,6 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  fitPanelWidth(panel, text, paddingX) {
-    const bounds = text.getBounds();
-    panel.setSize(bounds.width + paddingX, panel.height);
-  }
-
   initBossHud(boss) {
     this.boss = boss;
     this.bossHpPanel.setVisible(true);
@@ -780,7 +776,7 @@ export default class GameScene extends Phaser.Scene {
     const changed = score !== this.score;
     this.score = score;
     this.scoreText.setText(`팀 점수 ${score}`);
-    this.fitPanelWidth(this.scorePanel, this.scoreText, 20);
+    fitPanelWidth(this.scorePanel, this.scoreText, 20);
 
     if (changed) {
       this.tweens.killTweensOf(this.scoreText);
@@ -971,7 +967,7 @@ export default class GameScene extends Phaser.Scene {
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         if (this.eliminated) {
           this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
-          this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+          fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
         }
       },
 
@@ -1271,7 +1267,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.ghostHintText.setAlpha(0).setVisible(true);
     this.ghostHintPanel.setVisible(true);
-    this.fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
+    fitPanelWidth(this.ghostHintPanel, this.ghostHintText, 24);
     this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
 
     this.reviveGaugeBarBg.setVisible(true);
@@ -1415,7 +1411,7 @@ export default class GameScene extends Phaser.Scene {
     // on top of otherPlayers here.
     const count = (this.isSpectator ? 0 : 1) + Object.keys(this.otherPlayers).length;
     this.playerCountText.setText(`참가 ${count}명`);
-    this.fitPanelWidth(this.playerCountPanel, this.playerCountText, 20);
+    fitPanelWidth(this.playerCountPanel, this.playerCountText, 20);
   }
 
   // Eases every *other* player's avatar toward its latest server-reported
@@ -1546,7 +1542,7 @@ export default class GameScene extends Phaser.Scene {
       const ss = String(remaining % 60).padStart(2, '0');
       this.timerText.setText(`${mm}:${ss}`);
       this.timerText.setColor(remaining <= 10 ? '#ff5555' : '#ffffff');
-      this.fitPanelWidth(this.timerPanel, this.timerText, 30);
+      fitPanelWidth(this.timerPanel, this.timerText, 30);
     }
 
     this.timeUrgencyVignette.setVisible(remaining <= 10 && remaining > 0);

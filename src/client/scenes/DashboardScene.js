@@ -6,6 +6,7 @@ import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { fitPanelWidth } from '../utilities/PanelFit';
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -70,12 +71,11 @@ export default class DashboardScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    // +36 (text.width) undercounted here — canvas measureText mismeasures
-    // the leading/trailing 🔥 emoji glyphs enough that the stroked text
-    // visibly poked out past the panel border on both sides. Stage numbers
-    // are always a single small digit, so a bit of extra fixed slack is
-    // simpler than a more "accurate" measurement fix.
-    this.titlePanel.setSize(this.titleText.width + 64, 34);
+    // getBounds() (what GameScene's own HUD panels already use) reflects
+    // the emoji glyphs' real drawn extent, unlike plain .width, which
+    // undercounted them enough that the stroked text visibly poked out
+    // past the panel border on both sides.
+    fitPanelWidth(this.titlePanel, this.titleText, 28);
 
     // No mention of C/S here (or anywhere on this screen) — this dashboard
     // gets projected on a TV for everyone to see, and the whole point of

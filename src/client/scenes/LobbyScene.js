@@ -9,6 +9,7 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { fitPanelWidth } from '../utilities/PanelFit';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
@@ -61,10 +62,10 @@ export default class LobbyScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
-    // See LoginScene's title panel fix — a fixed box was narrower than the
-    // actual measured text on some font/DPI combinations because canvas
-    // measureText undercounts the emoji glyph.
-    titlePanel.setSize(this.titleText.width + 64, 34);
+    // See LoginScene's title panel fix — getBounds() (what GameScene's own
+    // HUD panels already use) reflects the emoji glyph's real drawn extent,
+    // unlike plain .width.
+    fitPanelWidth(titlePanel, this.titleText, 28);
 
     this.countText = this.add.text(WORLD_WIDTH / 2, 82, '', {
       fontFamily: FONT_BODY,
