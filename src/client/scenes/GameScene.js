@@ -1381,7 +1381,14 @@ export default class GameScene extends Phaser.Scene {
     this.bannerText.setScale(1);
 
     const bounds = this.bannerText.getBounds();
+    // bannerBackdrop is created at a 10x10 placeholder (origin 0.5,0.5) and
+    // grown here once the actual banner text is known. setSize() alone
+    // leaves _displayOriginX/Y frozen at the old (tiny) size, so the fill
+    // renders offset from where it should be — updateDisplayOrigin() (see
+    // PanelFit.js's fitPanelWidth for the same fix and full explanation)
+    // recomputes that cached origin from the new size.
     this.bannerBackdrop.setSize(bounds.width + 40, bounds.height + 24);
+    this.bannerBackdrop.updateDisplayOrigin();
     this.bannerBackdrop.setVisible(true).setAlpha(1);
 
     this.bannerText.setScale(0.6);

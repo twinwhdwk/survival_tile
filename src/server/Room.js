@@ -179,6 +179,10 @@ export default class Room {
         animalIndex,
         eliminated: false,
         isBot: !!isBot,
+        // Start of the window addSurvivalScore() will next credit — see that
+        // method for why this can't just always be roundStartTime once
+        // ghost respawns are in play.
+        lastScoreCreditAt: this.roundStartTime,
       };
     });
 
@@ -395,9 +399,21 @@ export default class Room {
   // rewards how long each teammate personally lasted (whole seconds, summed
   // across the lineage) — called once per player, either the instant they're
   // eliminated or (for whoever's still standing) at finishRoom time.
+  //
+  // Credits only the window since this player's last credited timestamp
+  // (initialized to roundStartTime, advanced on every credit and on every
+  // ghost respawn — see respawnGhost()), not the full time since round
+  // start. The ghost-revival gauge lets an eliminated player come back and
+  // potentially get eliminated again later in the same round; crediting
+  // from roundStartTime every time would re-count their earlier alive time
+  // (and even their dead-ghost time) on every subsequent elimination —
+  // exploitable by deliberately cycling elimination/respawn for a better
+  // score than just surviving normally.
   addSurvivalScore(player, endTime) {
-    const survivedMs = Math.max(0, endTime - this.roundStartTime);
+    const creditFrom = player.lastScoreCreditAt || this.roundStartTime;
+    const survivedMs = Math.max(0, endTime - creditFrom);
     this.score += Math.floor(survivedMs / 1000) * SURVIVAL_SCORE_PER_SECOND;
+    player.lastScoreCreditAt = endTime;
   }
 
   eliminatePlayer(id) {
@@ -551,7 +567,13 @@ export default class Room {
   // a curious admin mashing it) can't repeatedly re-arm it before that next
   // hit even lands.
   armCriticalHit() {
+    if (this.mode !== 'BOSS') {
+      return;
+    }
     const now = Date.now();
+    if (now - this.roundStartTime < START_COUNTDOWN_MS) {
+      return;
+    }
     if (now - this.lastAdminCriticalAt < ADMIN_CRITICAL_COOLDOWN_MS) {
       return;
     }
@@ -569,7 +591,13 @@ export default class Room {
   // silent handful of tiles quietly vanishing — that's still just boss
   // flavor to players, not a tell that it was admin-triggered.
   triggerBossShatterSkill() {
+    if (this.mode !== 'BOSS') {
+      return;
+    }
     const now = Date.now();
+    if (now - this.roundStartTime < START_COUNTDOWN_MS) {
+      return;
+    }
     if (now - this.lastAdminShatterAt < ADMIN_SHATTER_COOLDOWN_MS) {
       return;
     }
@@ -670,10 +698,17 @@ export default class Room {
       return; // nothing standing anywhere to respawn onto — stay a ghost
     }
     const { x, y } = hexToPixel(tile.row, tile.col);
+    const respawnTime = Date.now();
     player.eliminated = false;
     player.revivalGauge = 0;
     player.x = x;
     player.y = y;
+    // addSurvivalScore() was already called for this player at their most
+    // recent elimination, crediting them up to that moment. Without this,
+    // the *next* elimination would credit all the way back from that old
+    // timestamp again — incorrectly including the dead-ghost time in
+    // between as if they'd been alive and scoring the whole time.
+    player.lastScoreCreditAt = respawnTime;
     this.reviveCooldowns.delete(id);
     this.emit('playerRevived', { playerId: id, x, y });
   }
