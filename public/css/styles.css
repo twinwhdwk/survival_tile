@@ -31,3 +31,14 @@ input, textarea, button {
   -webkit-user-select: auto;
   user-select: auto;
 }
+
+/* Every button in the app sets its own background color inline (ButtonFx.js
+   only handles hover/press feedback), so without this a disabled button
+   -- e.g. "참가하기" while a join request is in flight -- looked pixel-
+   identical to an enabled one. No visual cue that a click won't do
+   anything right now. */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.3);
+}
