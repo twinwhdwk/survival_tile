@@ -9,7 +9,7 @@ import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { drawRoundedPanel } from '../utilities/RoundedPanel';
+import { drawRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 export default class ResultScene extends Phaser.Scene {
 
@@ -173,9 +173,13 @@ export default class ResultScene extends Phaser.Scene {
       if (isMine) {
         // A quiet highlight bar so the viewer's own placement doesn't get
         // lost by eye among a long list — the green text color alone is
-        // easy to skim past once there are 6+ rows.
-        const highlight = this.add.rectangle(WORLD_WIDTH / 2, rowY, 340, 24, 0x55ff88, 0.12)
-          .setStrokeStyle(1, 0x55ff88, 0.4).setAlpha(0);
+        // easy to skim past once there are 6+ rows. Rounded like every
+        // other panel in the app now, rather than the one remaining flat
+        // square-cornered box.
+        const highlight = this.add.graphics().setAlpha(0);
+        drawRoundedRect(highlight, WORLD_WIDTH / 2, rowY, 340, 24, {
+          fillColor: 0x55ff88, fillAlpha: 0.12, strokeWidth: 1, strokeColor: 0x55ff88, strokeAlpha: 0.4, radius: 6,
+        });
         this.tweens.add({ targets: highlight, alpha: 1, delay: i * 90, duration: 260 });
         this.rankingTexts.push(highlight);
       }
