@@ -46,8 +46,9 @@ export default class LoginScene extends Phaser.Scene {
 
     // Same warm ember-bordered panel as every other headline in the app
     // (lobby, dashboard, result screen) — keeps the title grounded instead
-    // of floating bare over the background.
-    this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 230, 40, COLORS.panelFill, COLORS.panelFillAlpha)
+    // of floating bare over the background. Started at a placeholder width
+    // and resized below once the title text exists to measure against.
+    const titlePanel = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 10, 40, COLORS.panelFill, COLORS.panelFillAlpha)
       .setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     // A single title with a drop shadow for the "burning" mood, instead of a
@@ -62,6 +63,15 @@ export default class LoginScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setScale(0.6).setAlpha(0)
       .setShadow(0, 0, '#ff6622', 12, true, true);
+    // A fixed 230px box (this title's old size) was narrower than the
+    // actual rendered text on some font/DPI combinations — canvas
+    // measureText undercounts the two 🔥 emoji glyphs it's straddled by,
+    // so the stroked text visibly poked out past the panel border instead
+    // of sitting inside it. Sizing from the real measured width (with slack
+    // for that undercount, same fix as DashboardScene's title) keeps the
+    // box correctly wrapping the text on every device instead of only the
+    // ones where the mismeasurement happened to be small enough to hide.
+    titlePanel.setSize(title.width + 64, 40);
 
     this.tweens.add({
       targets: title,
@@ -80,7 +90,7 @@ export default class LoginScene extends Phaser.Scene {
     const formHtml = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
         <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)"
-          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:8px;border:2px solid #ffffff;background:#111827;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
+          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:8px;border:2px solid #8a6a45;background:#1c130dcc;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
         <button id="join-button" type="button"
           style="width:220px;padding:12px;font-size:18px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           참가하기
@@ -100,7 +110,7 @@ export default class LoginScene extends Phaser.Scene {
       this.input_.style.boxShadow = '0 0 12px rgba(85,255,170,0.55)';
     });
     this.input_.addEventListener('blur', () => {
-      this.input_.style.borderColor = '#ffffff';
+      this.input_.style.borderColor = '#8a6a45';
       this.input_.style.boxShadow = 'none';
     });
 

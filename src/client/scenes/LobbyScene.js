@@ -46,7 +46,7 @@ export default class LobbyScene extends Phaser.Scene {
     // the app (GameScene's timer/score panels, ResultScene/DashboardScene's
     // headline) — keeps the title grounded instead of floating bare over
     // the background like it was before.
-    this.add.rectangle(WORLD_WIDTH / 2, 38, 130, 34, COLORS.panelFill, COLORS.panelFillAlpha)
+    const titlePanel = this.add.rectangle(WORLD_WIDTH / 2, 38, 10, 34, COLORS.panelFill, COLORS.panelFillAlpha)
       .setOrigin(0.5, 0).setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
 
     // A single title with a drop shadow for the "burning" mood, rather than
@@ -61,6 +61,10 @@ export default class LobbyScene extends Phaser.Scene {
       stroke: TEXT_STROKE,
       strokeThickness: 4,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 12, true, true);
+    // See LoginScene's title panel fix — a fixed box was narrower than the
+    // actual measured text on some font/DPI combinations because canvas
+    // measureText undercounts the emoji glyph.
+    titlePanel.setSize(this.titleText.width + 64, 34);
 
     this.countText = this.add.text(WORLD_WIDTH / 2, 82, '', {
       fontFamily: FONT_BODY,
