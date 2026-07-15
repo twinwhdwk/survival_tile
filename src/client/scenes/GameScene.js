@@ -4,6 +4,7 @@ import { getSocket } from '../net/socket';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { generateTileTextures, generateBackgroundTexture } from '../utilities/EffectTextures';
 import {
+  playClick,
   playWarning,
   playCollapse,
   playRevive,
@@ -1401,6 +1402,15 @@ export default class GameScene extends Phaser.Scene {
     if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
       return;
     }
+
+    // Every other interactive click in the app (DOM buttons, dashboard
+    // cards) gets instant feedback the moment it's tapped -- this one
+    // otherwise only got a sound/vibration later, on the server's
+    // 'tileRevived' reply. Most taps don't actually fill the gauge, so a
+    // ghost tapping under real venue-wifi latency previously got zero
+    // confirmation at all that the tap even registered.
+    playClick();
+    vibrateTap();
 
     const key = `${row}_${col}`;
     this.pendingGhostRevives.add(key);
