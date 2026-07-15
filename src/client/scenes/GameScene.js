@@ -21,7 +21,7 @@ import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vib
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { START_COUNTDOWN_MS, REGEN_GRACE_MS } from '../../shared/roundConfig';
+import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND } from '../../shared/roundConfig';
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
@@ -123,8 +123,10 @@ export default class GameScene extends Phaser.Scene {
     this.isSpectator = false;
     this.fromDashboard = false;
     this.mode = 'SURVIVAL';
+    this.gameMode = 'TEAM';
     this.boss = null;
     this.score = 0;
+    this.lastLiveScoreSecond = null;
     this.bossLowHpTween = null;
     this.lastTimerSecond = null;
     this.lastRemainingSeconds = null;
@@ -244,8 +246,9 @@ export default class GameScene extends Phaser.Scene {
     this.lastFootstepAt = 0;
   }
 
-  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, boss, score, isSpectator, fromDashboard }) {
+  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, score, isSpectator, fromDashboard }) {
     this.roomId = roomId;
+    this.gameMode = gameMode || 'TEAM';
     this.isSpectator = !!isSpectator;
     this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
@@ -827,7 +830,8 @@ export default class GameScene extends Phaser.Scene {
   updateScoreText(score) {
     const changed = score !== this.score;
     this.score = score;
-    this.scoreText.setText(`팀 점수 ${score}`);
+    const label = this.gameMode === 'SOLO' ? '내 점수' : '팀 점수';
+    this.scoreText.setText(`${label} ${score}`);
     fitAnchoredRoundedPanel(this.scorePanel, 6, 8, 0, 0, 24, this.scoreText, 20);
 
     if (changed) {
@@ -1204,7 +1208,7 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
-      playerEliminated: ({ playerId, score }) => {
+      playerEliminated: ({ playerId, score, playerScore }) => {
         // eliminatePlayer() can finish the room in this exact same call
         // (see the roomTransitionHoldUntil constants' own comments) --
         // regardless of whose elimination this is. A spectator (never a
@@ -1219,8 +1223,14 @@ export default class GameScene extends Phaser.Scene {
         // (see Room.js addSurvivalScore), so every elimination in the room —
         // not just the local player's own — can bump the shared team score;
         // BOSS mode eliminations don't change score, so the delta is 0 there
-        // and the popup is skipped.
-        if (Number.isFinite(score) && score !== this.score) {
+        // and the popup is skipped. 개인전 has no shared score at all —
+        // only this player's own elimination should touch the HUD, using
+        // their individual playerScore rather than the room-wide total.
+        if (this.gameMode === 'SOLO') {
+          if (playerId === this.socket.id && Number.isFinite(playerScore)) {
+            this.updateScoreText(playerScore);
+          }
+        } else if (Number.isFinite(score) && score !== this.score) {
           const delta = score - this.score;
           this.updateScoreText(score);
           this.showScoreGainPopup(delta);
@@ -1403,13 +1413,19 @@ export default class GameScene extends Phaser.Scene {
     // interactive. Ghost mode's actual input is tapping collapsed tiles.
     this.hideJoystick();
 
-    this.ghostHintText.setAlpha(0).setVisible(true);
-    this.ghostHintPanel.setVisible(true);
-    fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
-    this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
+    // Team modes get the full ghost-revival HUD (hint text + shared gauge
+    // bar); 개인전 has no revival mechanic at all, so an eliminated solo
+    // player just gets the translucent spectator wash below with nothing
+    // to interact with.
+    if (this.gameMode !== 'SOLO') {
+      this.ghostHintText.setAlpha(0).setVisible(true);
+      this.ghostHintPanel.setVisible(true);
+      fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
+      this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
 
-    this.reviveGaugeBarBg.setVisible(true);
-    this.reviveGaugeBarFill.setVisible(true).setSize(0, 8);
+      this.reviveGaugeBarBg.setVisible(true);
+      this.reviveGaugeBarFill.setVisible(true).setSize(0, 8);
+    }
 
     this.tweens.add({ targets: this.ghostOverlay, alpha: 0.3, duration: 600 });
   }
@@ -1490,7 +1506,10 @@ export default class GameScene extends Phaser.Scene {
   }
 
   handleTileClick(row, col) {
-    if (!this.eliminated || this.roomFinished) {
+    // 개인전 has no ghost tile-revival mechanic at all -- an eliminated
+    // solo player just spectates the rest of their room, so tapping a
+    // collapsed tile is a dead click rather than the team-mode revive tap.
+    if (!this.eliminated || this.roomFinished || this.gameMode === 'SOLO') {
       return;
     }
     if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
@@ -1514,7 +1533,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   handleTileHover(row, col, isOver) {
-    if (!isOver || !this.eliminated || this.roomFinished) {
+    if (!isOver || !this.eliminated || this.roomFinished || this.gameMode === 'SOLO') {
       this.reviveHighlight.setVisible(false);
       this.input.setDefaultCursor('default');
       return;
@@ -1612,6 +1631,7 @@ export default class GameScene extends Phaser.Scene {
   update(time, delta) {
     this.interpolateOtherPlayers(delta);
     this.updateTimerText();
+    this.updateLiveScoreText();
     this.checkPlayerDanger();
 
     if (!this.player || !this.localTileMap || this.eliminated || this.countdownActive) {
@@ -1669,6 +1689,24 @@ export default class GameScene extends Phaser.Scene {
         this.footstepEmitter.explode(2, this.player.x, this.player.y + 14);
       }
     }
+  }
+
+  // 개인전 has no shared score to broadcast on every tick -- the server
+  // only credits a player's real score at their own elimination or the
+  // round's end (Room.js addSurvivalScore). Approximating it locally as
+  // whole seconds since roundStartTime keeps the "내 점수" HUD live while
+  // still alive; once eliminated, the authoritative playerScore from the
+  // 'playerEliminated' event above takes over and this stops touching it.
+  updateLiveScoreText() {
+    if (this.gameMode !== 'SOLO' || this.eliminated || !this.roundStartTime) {
+      return;
+    }
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - this.roundStartTime) / 1000));
+    if (elapsedSeconds === this.lastLiveScoreSecond) {
+      return;
+    }
+    this.lastLiveScoreSecond = elapsedSeconds;
+    this.updateScoreText(elapsedSeconds * SURVIVAL_SCORE_PER_SECOND);
   }
 
   checkPlayerDanger() {

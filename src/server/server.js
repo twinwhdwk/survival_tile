@@ -305,7 +305,7 @@ function mergeAdjacentLineages(results) {
   return merged;
 }
 
-function startStage(lineages, stage) {
+function startStage(lineages, stage, gameMode = 'TEAM') {
   const active = lineages
     .map(({ members, score }) => ({
       members: members.filter((m) => !disconnectedSockets.has(m.socketId)),
@@ -337,7 +337,9 @@ function startStage(lineages, stage) {
         mode,
         stage,
         startingScore: score,
-        onFinished: (advancing, finalScore) => handleRoomFinished(index, roomId, advancing, finalScore),
+        gameMode,
+        onFinished: (advancing, finalScore, reason, playerResults) =>
+          handleRoomFinished(index, roomId, advancing, finalScore, gameMode, playerResults),
       });
       rooms.set(roomId, room);
 
@@ -391,16 +393,43 @@ function startStage(lineages, stage) {
       }
     } catch (error) {
       console.error(`Failed to start room ${roomId} (stage ${stage}, lineage ${index}):`, error);
-      handleRoomFinished(index, roomId, [], score, 'error');
+      handleRoomFinished(index, roomId, [], score, gameMode, []);
     }
   });
 }
 
-function handleRoomFinished(lineageIndex, roomId, advancing, finalScore) {
+function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMode = 'TEAM', playerResults = []) {
   const room = rooms.get(roomId);
   const allMembers = room
     ? Object.values(room.players).map((p) => ({ socketId: p.playerId, nickname: p.nickname }))
     : [];
+
+  // SOLO is always a single flat stage — no lineage to merge into a next
+  // round, so every member of this room gets their own final ranking entry
+  // (one nickname/score each) the moment their room finishes, and once
+  // every solo room in the stage has reported in, the tournament just ends.
+  if (gameMode === 'SOLO') {
+    playerResults.forEach((p) => {
+      finalRankings.push({
+        nicknames: [p.nickname],
+        socketIds: [p.socketId],
+        score: p.score,
+        result: p.eliminated ? 'eliminated' : 'survived',
+        stage: currentStage,
+      });
+    });
+
+    if (room) {
+      Object.values(room.players).forEach((p) => socketRoomMap.delete(p.playerId));
+    }
+    rooms.delete(roomId);
+
+    stagePending -= 1;
+    if (stagePending > 0) {
+      return undefined;
+    }
+    return endTournament();
+  }
 
   stageResults[lineageIndex] = { members: advancing, score: finalScore };
 
@@ -650,10 +679,15 @@ function setServerHandlers() {
       resetServerState();
     });
 
-    socket.on('startTournament', () => {
+    socket.on('startTournament', (payload) => {
       if (!adminSockets.has(socket.id) || globalPhase !== 'LOBBY') {
         return;
       }
+      // 팀전 (TEAM, the default/original bracket) merges adjacent lineages
+      // across stages and shares one score per room; 개인전 (SOLO) is a
+      // single flat SURVIVAL stage with no merging, ranked by each
+      // player's own score — see handleRoomFinished()'s gameMode branch.
+      const gameMode = payload && payload.mode === 'SOLO' ? 'SOLO' : 'TEAM';
       // The admin who starts the match watches it rather than playing —
       // never seated into a room, so they can't die and can't be counted
       // toward hasHumans/allHumansGone. See startStage() for how they're
@@ -674,7 +708,7 @@ function setServerHandlers() {
       globalPhase = 'TOURNAMENT';
       finalRankings = [];
       broadcastLobby();
-      startStage(chunkForInitialRound(members).map((group) => ({ members: group, score: 0 })), 1);
+      startStage(chunkForInitialRound(members).map((group) => ({ members: group, score: 0 })), 1, gameMode);
     });
 
     socket.on('playerMovement', (movementData) => {

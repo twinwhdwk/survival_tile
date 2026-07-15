@@ -150,11 +150,20 @@ function pickWeightedByHeading(candidates, preferredDir) {
  * scoring), which ends the room immediately.
  */
 export default class Room {
-  constructor(id, io, members, { mode, stage, startingScore, onFinished }) {
+  constructor(id, io, members, { mode, stage, startingScore, gameMode, onFinished }) {
     this.id = id;
     this.io = io;
     this.mode = mode || 'SURVIVAL';
     this.stage = stage || 1;
+    // 'TEAM' (default) is the tournament bracket this app was originally
+    // built around: lineages merge across stages, revival/scoring are
+    // shared team resources. 'SOLO' is a single flat SURVIVAL round with
+    // no bracket, no lineage merging, and no ghost tile-revival/respawn —
+    // see reviveTile() and eliminatePlayer()'s lastStandActive guard below
+    // for where that mechanic gets switched off, and addSurvivalScore()
+    // for the per-player score this mode ranks by instead of a shared
+    // room score.
+    this.gameMode = gameMode || 'TEAM';
     this.onFinished = onFinished;
     this.score = startingScore || 0;
     this.roundDurationMs = this.mode === 'BOSS' ? BOSS_ROUND_DURATION_MS : SURVIVAL_ROUND_DURATION_MS;
@@ -220,6 +229,12 @@ export default class Room {
         animalIndex,
         eliminated: false,
         isBot: !!isBot,
+        // Individual score, credited alongside the shared this.score by
+        // addSurvivalScore() below — TEAM mode doesn't rank by this (the
+        // room's combined this.score is what carries forward), but SOLO
+        // mode's finalRankings are built entirely from each player's own
+        // value here (see Room.getPlayerResults()).
+        score: 0,
         // Start of the window addSurvivalScore() will next credit — see that
         // method for why this can't just always be roundStartTime once
         // ghost respawns are in play.
@@ -252,6 +267,7 @@ export default class Room {
     return {
       roomId: this.id,
       mode: this.mode,
+      gameMode: this.gameMode,
       stage: this.stage,
       score: this.score,
       players: this.players,
@@ -279,6 +295,7 @@ export default class Room {
     return {
       roomId: this.id,
       mode: this.mode,
+      gameMode: this.gameMode,
       aliveCount,
       totalCount: players.length,
       score: this.score,
@@ -469,7 +486,11 @@ export default class Room {
   addSurvivalScore(player, endTime) {
     const creditFrom = player.lastScoreCreditAt || this.roundStartTime;
     const survivedMs = Math.max(0, endTime - creditFrom);
-    this.score += Math.floor(survivedMs / 1000) * SURVIVAL_SCORE_PER_SECOND;
+    const gained = Math.floor(survivedMs / 1000) * SURVIVAL_SCORE_PER_SECOND;
+    this.score += gained;
+    // Always credited alongside the shared this.score above (not just in
+    // SOLO) — cheap to keep, and TEAM mode simply never reads it back out.
+    player.score = (player.score || 0) + gained;
     player.lastScoreCreditAt = endTime;
   }
 
@@ -482,10 +503,14 @@ export default class Room {
     if (this.mode === 'SURVIVAL') {
       this.addSurvivalScore(player, Date.now());
     }
-    this.emit('playerEliminated', { playerId: id, score: this.score });
+    this.emit('playerEliminated', { playerId: id, score: this.score, playerScore: player.score || 0 });
 
     const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
-    if (aliveCount === 1 && !this.lastStandActive) {
+    // Last-stand only means anything where ghosts can actually rally to
+    // revive someone (see reviveTile()'s own SOLO guard below) — 개인전 has
+    // no revival at all, so skip the activation/banner entirely there
+    // rather than firing a cue with nothing behind it.
+    if (this.gameMode !== 'SOLO' && aliveCount === 1 && !this.lastStandActive) {
       // Same "last-stand" threshold reviveTile() already waives the ghost
       // cooldown down to (see its aliveCount > 1 check) — this just tells
       // every client that moment has arrived, so ghosts know to tap freely
@@ -697,6 +722,15 @@ export default class Room {
   }
 
   reviveTile(id, row, col) {
+    // 개인전 has no ghost tile-revival/respawn mechanic at all — elimination
+    // is permanent, so there's nothing for a ghost's tap to do. Guarding
+    // here (rather than only hiding the tap UI client-side) is what
+    // actually keeps respawnRandomGhost()/respawnGhost() unreachable in
+    // this mode, since they're only ever invoked from the gauge-fill
+    // branch at the end of this method.
+    if (this.gameMode === 'SOLO') {
+      return;
+    }
     if (!Number.isInteger(row) || !Number.isInteger(col)) {
       return;
     }
@@ -1053,9 +1087,15 @@ export default class Room {
       // wasted teammate and (per the person's own report) reads as "do bots
       // even help revive tiles?" — no, previously; now yes.
       if (player.eliminated) {
-        const target = this.pickRandomGoneTile();
-        if (target) {
-          this.reviveTile(id, target.row, target.col);
+        // reviveTile() already no-ops for SOLO, but skip the
+        // pickRandomGoneTile() scan entirely there too — there's no point
+        // spending a tile scan every tick on a tap that can never do
+        // anything in this mode.
+        if (this.gameMode !== 'SOLO') {
+          const target = this.pickRandomGoneTile();
+          if (target) {
+            this.reviveTile(id, target.row, target.col);
+          }
         }
         return;
       }
@@ -1242,6 +1282,20 @@ export default class Room {
     }
   }
 
+  // Every member's own final standing — SOLO's only source of ranking data
+  // (server.js's handleRoomFinished builds one finalRankings entry per
+  // player straight from this), and harmless extra detail for TEAM, which
+  // still ranks by the shared this.score/advancing list instead.
+  getPlayerResults() {
+    return Object.values(this.players).map((p) => ({
+      socketId: p.playerId,
+      nickname: p.nickname,
+      animalIndex: p.animalIndex,
+      score: p.score || 0,
+      eliminated: p.eliminated,
+    }));
+  }
+
   finishRoom(reason) {
     if (this.finished) {
       return;
@@ -1301,7 +1355,7 @@ export default class Room {
     // fold into this same roomResult broadcast — bundling avoids a race
     // where a separate later 'tournamentEnded' event arrives before this
     // client has finished transitioning off GameScene to listen for it.
-    const tournamentResult = this.onFinished(advancing, this.score, reason);
+    const tournamentResult = this.onFinished(advancing, this.score, reason, this.getPlayerResults());
 
     this.emit('roomResult', {
       survivorIds,

@@ -30,6 +30,11 @@ export default class LobbyScene extends Phaser.Scene {
     this.rosterCells = {};
     this.isAdmin = !!data.isAdmin;
     this.statusPulseTween = null;
+    // 팀전 (TEAM) is the original bracket this app was built around, so it
+    // stays the default — 개인전 (SOLO) is an admin opt-in per tournament,
+    // not a per-player choice (a single lobby roster can't be split into
+    // two simultaneous modes). Sent along with 'startTournament' below.
+    this.selectedGameMode = 'TEAM';
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
@@ -80,6 +85,46 @@ export default class LobbyScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5);
 
+    // Segmented mode toggle, admin-only, sitting just above the action
+    // row — kept as two plain buttons rather than a native <select>/radio
+    // pair so the active state can reuse the same visual language
+    // (filled/outlined) as every other button here instead of a form
+    // control that would look out of place against the rest of the UI.
+    const modeToggleHtml = `
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="mode-team-button" type="button"
+          style="padding:8px 16px;font-size:13px;border-radius:8px;cursor:pointer;font-family:${FONT_BODY};">
+          팀전
+        </button>
+        <button id="mode-solo-button" type="button"
+          style="padding:8px 16px;font-size:13px;border-radius:8px;cursor:pointer;font-family:${FONT_BODY};">
+          개인전
+        </button>
+      </div>
+    `;
+    this.modeToggleNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 76).createFromHTML(modeToggleHtml);
+    this.modeTeamButton = this.modeToggleNode.getChildByID('mode-team-button');
+    this.modeSoloButton = this.modeToggleNode.getChildByID('mode-solo-button');
+    applyButtonFx(this.modeTeamButton);
+    applyButtonFx(this.modeSoloButton);
+
+    const refreshModeButtons = () => {
+      const activeStyle = `background:#f59e0b;color:#1c130d;border:1px solid #f59e0b;`;
+      const inactiveStyle = `background:#1c130dcc;color:#ffd9a0;border:1px solid #ffa94d55;`;
+      this.modeTeamButton.style.cssText += this.selectedGameMode === 'TEAM' ? activeStyle : inactiveStyle;
+      this.modeSoloButton.style.cssText += this.selectedGameMode === 'SOLO' ? activeStyle : inactiveStyle;
+    };
+    refreshModeButtons();
+
+    this.modeTeamButton.addEventListener('click', () => {
+      this.selectedGameMode = 'TEAM';
+      refreshModeButtons();
+    });
+    this.modeSoloButton.addEventListener('click', () => {
+      this.selectedGameMode = 'SOLO';
+      refreshModeButtons();
+    });
+
     const buttonHtml = `
       <div style="display:flex;gap:12px;align-items:center;">
         <button id="reset-server-button" type="button"
@@ -111,7 +156,7 @@ export default class LobbyScene extends Phaser.Scene {
     applyButtonFx(this.resetServerButton);
 
     this.startButton.addEventListener('click', () => {
-      this.socket.emit('startTournament');
+      this.socket.emit('startTournament', { mode: this.selectedGameMode });
     });
     this.addBotButton.addEventListener('click', () => {
       this.socket.emit('addBot');
@@ -148,6 +193,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.addBotButton.style.display = 'none';
       this.clearLobbyButton.style.display = 'none';
       this.resetServerButton.style.display = 'none';
+      this.modeToggleNode.setVisible(false);
     }
 
     this.handleLobbyUpdate = (payload) => this.renderLobby(payload);
@@ -249,12 +295,16 @@ export default class LobbyScene extends Phaser.Scene {
       this.startButton.disabled = true;
       this.addBotButton.disabled = true;
       this.clearLobbyButton.disabled = true;
+      this.modeTeamButton.disabled = true;
+      this.modeSoloButton.disabled = true;
       this.stopStatusPulse();
     } else if (this.isAdmin) {
       this.statusText.setText('');
       this.startButton.disabled = false;
       this.addBotButton.disabled = false;
       this.clearLobbyButton.disabled = false;
+      this.modeTeamButton.disabled = false;
+      this.modeSoloButton.disabled = false;
       this.stopStatusPulse();
     } else {
       this.statusText.setText('관리자가 게임을 시작하기를 기다리는 중...');
