@@ -359,8 +359,15 @@ export default class DashboardScene extends Phaser.Scene {
 
     // Header strip: solid backing so text stays readable over the
     // thumbnail, holding the group label + alive count + timer/score.
-    const headerBar = this.add.rectangle(0, -cardH / 2 + 20, cardW, 40, COLORS.panelFill, 0.82)
-      .setStrokeStyle(COLORS.panelBorderWidth, COLORS.panelBorder, COLORS.panelBorderAlpha);
+    // Rounded on the top two corners only (matching cardBorder's radius:8)
+    // -- flush against the card's own rounded top edge, a plain square-
+    // cornered Rectangle here poked its sharp top corners out past the
+    // smooth curve of the border drawn right behind it.
+    const headerBar = this.add.graphics();
+    drawRoundedRect(headerBar, 0, -cardH / 2 + 20, cardW, 40, {
+      radius: { tl: 8, tr: 8, bl: 0, br: 0 },
+      fillAlpha: 0.82,
+    });
 
     const label = this.add.text(-cardW / 2 + 10, -cardH / 2 + 12, '', {
       fontFamily: FONT_BODY,

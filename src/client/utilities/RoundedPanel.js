@@ -36,8 +36,10 @@ export function drawRoundedRect(graphics, centerX, centerY, width, height, {
   // sitting apart from it. These COLORS.panelInnerLine* tokens existed in
   // Theme.js already (with exactly this description) but nothing actually
   // drew them. Skipped on panels too small for a 3px inset to read as
-  // anything but noise.
-  if (width > 30 && height > 24) {
+  // anything but noise, and on a per-corner radius object (e.g. a header
+  // strip rounded on only its top two corners) -- `radius - inset` below
+  // assumes a plain number.
+  if (typeof radius === 'number' && width > 30 && height > 24) {
     const inset = 3;
     graphics.lineStyle(1, COLORS.panelInnerLine, COLORS.panelInnerLineAlpha);
     graphics.strokeRoundedRect(x + inset, y + inset, width - inset * 2, height - inset * 2, Math.max(radius - inset, 2));
