@@ -83,7 +83,7 @@ export default class LoginScene extends Phaser.Scene {
     this.statusText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 60, '', {
       fontFamily: FONT_BODY,
       fontSize: '14px',
-      color: '#ff5555',
+      color: COLORS.textMuted,
     }).setOrigin(0.5);
 
     const formHtml = `
@@ -182,6 +182,7 @@ export default class LoginScene extends Phaser.Scene {
 
   showError(message) {
     playError();
+    this.statusText.setColor(COLORS.textDanger);
     this.statusText.setText(message);
     this.statusText.x = WORLD_WIDTH / 2;
     this.tweens.add({
@@ -206,6 +207,10 @@ export default class LoginScene extends Phaser.Scene {
       return;
     }
 
+    // Reset color in case a previous attempt left this red from showError()
+    // -- this same text object is reused for both the neutral in-progress
+    // message and actual errors, and used to be stuck on error-red for both.
+    this.statusText.setColor(COLORS.textMuted);
     this.statusText.setText('참가하는 중...');
     this.button.disabled = true;
 
