@@ -1176,7 +1176,7 @@ export default class GameScene extends Phaser.Scene {
         const avatar = this.otherPlayers[playerId];
         if (avatar) {
           this.eliminationEmitter.explode(14, avatar.x, avatar.y);
-          this.showFloatingLabel(avatar.x, avatar.y, '탈락!', '#ff8888');
+          this.showFloatingLabel(avatar.x, avatar.y, '탈락!', COLORS.textDanger);
           this.tweens.add({ targets: avatar, alpha: 0.35, scale: 0.85, duration: 300 });
           playOtherEliminate();
         }
@@ -1304,7 +1304,11 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.player) {
       this.eliminationEmitter.explode(18, this.player.x, this.player.y);
-      this.showFloatingLabel(this.player.x, this.player.y, '탈락!', '#ff5555');
+      // Same red used for the *other*-player elimination label just above
+      // (playerEliminated handler) -- these previously diverged (#ff5555
+      // here vs #ff8888 there) for the exact same message with no
+      // discernible reason to.
+      this.showFloatingLabel(this.player.x, this.player.y, '탈락!', COLORS.textDanger);
       this.tweens.add({ targets: this.player, alpha: 0.35, scale: 0.85, duration: 300 });
       this.startGhostAura(this.player.x, this.player.y);
     }
