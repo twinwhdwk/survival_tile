@@ -106,6 +106,15 @@ function throttle(fn, minIntervalMs) {
 
 export const playClick = () => tone(520, 0.05, { type: 'square', volume: 0.08 });
 
+// A short descending two-note buzz for a rejected action (bad password, join
+// refused, empty nickname) -- every other significant feedback moment in the
+// app already has a matching sound, but a rejected join previously had only
+// the visual shake+red text, silent on speaker-off-by-default mobile joins.
+export const playError = () => {
+  tone(220, 0.1, { type: 'square', volume: 0.1 });
+  tone(160, 0.14, { type: 'square', volume: 0.1, delay: 0.08 });
+};
+
 export const playWarning = throttle(() => tone(660, 0.09, { type: 'triangle', volume: 0.1 }), 90);
 
 export const playCollapse = throttle(() => {

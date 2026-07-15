@@ -6,7 +6,7 @@ import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
 import { createAmbientEmbers } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
-import { unlockAudio } from '../utilities/SoundFx';
+import { unlockAudio, playError } from '../utilities/SoundFx';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
@@ -89,9 +89,9 @@ export default class LoginScene extends Phaser.Scene {
     const formHtml = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
         <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)"
-          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:8px;border:2px solid #8a6a45;background:#1c130dcc;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
+          style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:10px;border:2px solid #8a6a45;background:#1c130dcc;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
         <button id="join-button" type="button"
-          style="width:220px;padding:12px;font-size:18px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+          style="width:220px;padding:12px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           참가하기
         </button>
       </div>
@@ -181,6 +181,7 @@ export default class LoginScene extends Phaser.Scene {
   }
 
   showError(message) {
+    playError();
     this.statusText.setText(message);
     this.statusText.x = WORLD_WIDTH / 2;
     this.tweens.add({
