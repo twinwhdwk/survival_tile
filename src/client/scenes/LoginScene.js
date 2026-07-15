@@ -103,6 +103,14 @@ export default class LoginScene extends Phaser.Scene {
     this.button = this.formNode.getChildByID('join-button');
     applyButtonFx(this.button);
 
+    // Typing a nickname is the only thing to do on this screen, so let
+    // desktop players start typing immediately without an extra click.
+    // Mobile browsers generally only raise the on-screen keyboard from a
+    // focus that happens inside a real user gesture, so this is a no-op
+    // there (no unexpected keyboard popping up on page load) -- a safe
+    // improvement with no downside on either platform.
+    this.input_.focus();
+
     this.input_.style.transition = 'border-color 0.2s ease, box-shadow 0.2s ease';
     this.input_.addEventListener('focus', () => {
       this.input_.style.borderColor = '#55ffaa';
