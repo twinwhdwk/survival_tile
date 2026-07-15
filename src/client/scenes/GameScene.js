@@ -238,7 +238,7 @@ export default class GameScene extends Phaser.Scene {
       this.hideJoystick();
       this.spectatorBadge.setVisible(true);
       this.spectatorBadgePanel.setVisible(true);
-      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 40, 0.5, 0, 24, this.spectatorBadge, 24);
+      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 90, 0.5, 0, 24, this.spectatorBadge, 24);
       this.backToDashboardNode.setVisible(this.fromDashboard);
 
       if (!this.spectatorBadgePulse) {
@@ -449,7 +449,12 @@ export default class GameScene extends Phaser.Scene {
 
     this.spectatorBadgePanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
-    this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 46, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
+    // y=96, not the top HUD strip's row -- spectator mode (stage 3+, per
+    // server.js's startStage()) only ever coexists with BOSS mode, whose
+    // HP bar panel already occupies y=38-82 there; the badge used to sit
+    // at y=40-64, rendering directly on top of the boss HP text and
+    // reading as illegible clutter every single time a room is spectated.
+    this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 96, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
       fontFamily: FONT_BODY,
       fontSize: '13px',
       color: COLORS.textGold,
@@ -467,7 +472,7 @@ export default class GameScene extends Phaser.Scene {
         ← 현황판으로
       </button>
     `;
-    this.backToDashboardNode = this.add.dom(WORLD_WIDTH / 2, 96).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
+    this.backToDashboardNode = this.add.dom(WORLD_WIDTH / 2, 130).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
     this.backToDashboardButton = this.backToDashboardNode.getChildByID('back-to-dashboard-button');
     // Every other button in the app (login, lobby, result) gets this same
     // hover-lift/press feedback plus click sound+haptic via one shared
