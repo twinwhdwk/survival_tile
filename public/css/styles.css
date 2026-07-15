@@ -42,3 +42,40 @@ button:disabled {
   cursor: not-allowed;
   filter: grayscale(0.3);
 }
+
+/* The game world (732x645) is wider than tall, so Phaser.Scale.FIT on a
+   portrait phone -- the default hold for anyone who just tapped a join
+   link -- scales to the narrow width and leaves the canvas squeezed into a
+   thin horizontal strip with huge black bars above and below (measured:
+   only ~52% of a 390x664 iPhone viewport was actual game). A pure CSS
+   media query needs no JS and reacts instantly to orientationchange,
+   unlike a resize-listener approach. */
+#rotate-notice {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #090b18;
+  color: #ffd9a0;
+  font-family: 'Gothic A1', 'Malgun Gothic', sans-serif;
+  text-align: center;
+  padding: 24px;
+}
+#rotate-notice .icon {
+  font-size: 44px;
+  animation: rotateNoticeSpin 1.6s ease-in-out infinite;
+}
+#rotate-notice .label {
+  font-size: 15px;
+}
+@keyframes rotateNoticeSpin {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(90deg); }
+}
+@media (orientation: portrait) and (max-width: 900px) {
+  #rotate-notice { display: flex; }
+}
