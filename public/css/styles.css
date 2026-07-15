@@ -34,10 +34,16 @@ input, textarea, button {
    label (참가하기, 게임 시작, ...) was inheriting this same override, so a
    drag on desktop or a long-press on mobile could pop an iOS-style text
    selection bubble over what's meant to read as a plain app button, not
-   copyable text. Buttons fall back to the global user-select:none above. */
+   copyable text. Buttons fall back to the global user-select:none above.
+   -webkit-touch-callout:none on html/body (above) also inherits down into
+   these fields unless reverted here -- on iOS Safari that's the property
+   that suppresses the long-press Paste/Copy callout menu, so leaving it
+   inherited would have blocked pasting a nickname in on iPhone even
+   though user-select:auto alone lets the text itself be selected. */
 input, textarea {
   -webkit-user-select: auto;
   user-select: auto;
+  -webkit-touch-callout: default;
 }
 
 /* Every button in the app sets its own background color inline (ButtonFx.js
