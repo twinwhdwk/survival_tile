@@ -88,7 +88,7 @@ export default class LoginScene extends Phaser.Scene {
 
     const formHtml = `
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
-        <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)" autocomplete="off"
+        <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)" autocomplete="off" enterkeyhint="go"
           style="width:220px;padding:10px;font-size:18px;text-align:center;border-radius:10px;border:2px solid #8a6a45;background:#1c130dcc;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
         <button id="join-button" type="button"
           style="width:220px;padding:12px;font-size:18px;border-radius:10px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
@@ -125,7 +125,7 @@ export default class LoginScene extends Phaser.Scene {
     // it doesn't clutter the regular join flow — but still legible enough
     // for someone who knows to look for it.
     const adminHtml = `
-      <input id="admin-password-input" type="password" placeholder="관리자" autocomplete="new-password"
+      <input id="admin-password-input" type="password" placeholder="관리자" autocomplete="new-password" enterkeyhint="go"
         style="width:80px;height:22px;font-size:11px;padding:2px 6px;text-align:center;border-radius:5px;border:1px solid #555555;background:#0b0e1ccc;color:#aaaaaa;outline:none;" />
     `;
     this.adminNode = this.add.dom(WORLD_WIDTH - 55, WORLD_HEIGHT - 18).createFromHTML(adminHtml);
