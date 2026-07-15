@@ -65,6 +65,15 @@ const BOSS_DEFEAT_CELEBRATION_MS = 1400;
 // 300ms camera flash with a little room to spare).
 const OWN_ELIMINATION_EFFECT_MS = 900;
 
+// A third instance of the same pattern: eliminatePlayer() can fire
+// 'lastStandActivated' (active: true) and then finish the room in that
+// same call too -- reachable whenever the elimination that drops
+// aliveCount to exactly 1 *also* happens to empty out every human (that
+// lone survivor is a bot). A still-connected ghost watching GameScene
+// would otherwise see the "라스트 스탠드!" banner cut off practically
+// before it appeared.
+const LAST_STAND_BANNER_MS = 1000;
+
 // Time constant (ms) for the exponential smoothing that eases each *other*
 // player's avatar toward its latest server-reported position. Roughly: the
 // avatar closes ~63% of the remaining gap every this-many-ms, so it fully
@@ -1024,6 +1033,7 @@ export default class GameScene extends Phaser.Scene {
           return;
         }
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
+        this.roomTransitionHoldUntil = this.time.now + LAST_STAND_BANNER_MS;
         if (this.eliminated) {
           this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
           fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
