@@ -56,6 +56,15 @@ const BOSS_BAR_WIDTH = 220;
 // scene had already left GameScene, confetti already off, 150ms later).
 const BOSS_DEFEAT_CELEBRATION_MS = 1400;
 
+// Same zero-delay pattern on Room.js's eliminatePlayer() side: it emits
+// 'playerEliminated' and, if this was the last player standing, calls
+// finishRoom('all-eliminated') immediately after -- so a player's own
+// final elimination risks the exact same cutoff as the boss-defeat case,
+// just for handleOwnElimination()'s shorter effects (showFloatingLabel's
+// pop-in + float-and-fade is 180+600=780ms; this covers that plus the
+// 300ms camera flash with a little room to spare).
+const OWN_ELIMINATION_EFFECT_MS = 900;
+
 // Time constant (ms) for the exponential smoothing that eases each *other*
 // player's avatar toward its latest server-reported position. Roughly: the
 // avatar closes ~63% of the remaining gap every this-many-ms, so it fully
@@ -1104,7 +1113,7 @@ export default class GameScene extends Phaser.Scene {
           this.showBanner('보스를 물리쳤습니다! 🎉', '#55ff88');
           playBossDefeat();
           vibrateVictory();
-          this.bossDefeatCelebrationEndsAt = this.time.now + BOSS_DEFEAT_CELEBRATION_MS;
+          this.roomTransitionHoldUntil = this.time.now + BOSS_DEFEAT_CELEBRATION_MS;
         } else {
           this.boss.row = row;
           this.boss.col = col;
@@ -1239,19 +1248,20 @@ export default class GameScene extends Phaser.Scene {
           }
         };
 
-        // The server emits 'bossDamaged' (defeated) and this 'roomResult'
-        // essentially back-to-back with no delay -- if a boss-defeat
-        // celebration just started, hold the actual scene transition open
-        // long enough for it to be seen instead of tearing GameScene down
-        // (confetti, camera flash, banner and all) within milliseconds of
-        // it starting. Any other finish reason (timeout, all-eliminated)
-        // has no pending celebration, so this resolves to 0 and proceeds
-        // immediately exactly as before.
-        const celebrationRemaining = this.bossDefeatCelebrationEndsAt
-          ? Math.max(0, this.bossDefeatCelebrationEndsAt - this.time.now)
+        // The server emits 'bossDamaged'(defeated)/'playerEliminated' and
+        // this 'roomResult' essentially back-to-back with no delay -- if a
+        // boss-defeat celebration or this player's own elimination effect
+        // just started, hold the actual scene transition open long enough
+        // for it to be seen instead of tearing GameScene down (confetti,
+        // camera flash, floating labels and all) within milliseconds of it
+        // starting. Any other finish reason has no pending effect to wait
+        // out, so this resolves to 0 and proceeds immediately exactly as
+        // before.
+        const holdRemaining = this.roomTransitionHoldUntil
+          ? Math.max(0, this.roomTransitionHoldUntil - this.time.now)
           : 0;
-        if (celebrationRemaining > 0) {
-          this.time.delayedCall(celebrationRemaining, proceed);
+        if (holdRemaining > 0) {
+          this.time.delayedCall(holdRemaining, proceed);
         } else {
           proceed();
         }
@@ -1352,6 +1362,11 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.flash(300, 255, 80, 80);
     playEliminate();
     vibrateEliminate();
+    // If this elimination was the room's last (Room.js's eliminatePlayer()
+    // finishes the room in that same call, no delay), hold the upcoming
+    // roomResult's scene transition open long enough to actually see this
+    // -- see the constant's own comment and roomResult's handler above.
+    this.roomTransitionHoldUntil = this.time.now + OWN_ELIMINATION_EFFECT_MS;
 
     // Same reasoning as the spectator case: a ghost has no avatar left to
     // steer (movement is already a no-op once eliminated — see update()),
