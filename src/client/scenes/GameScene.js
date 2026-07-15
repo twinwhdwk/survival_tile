@@ -21,7 +21,7 @@ import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vib
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { START_COUNTDOWN_MS } from '../../shared/roundConfig';
+import { START_COUNTDOWN_MS, REGEN_GRACE_MS } from '../../shared/roundConfig';
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
@@ -79,8 +79,9 @@ const LAST_STAND_BANNER_MS = 1000;
 // player's avatar toward its latest server-reported position. Roughly: the
 // avatar closes ~63% of the remaining gap every this-many-ms, so it fully
 // catches up within ~3x this. Tuned to feel like the old 180ms glide while
-// staying continuous — a bot that only steps once per server tick
-// (BOT_MOVE_INTERVAL_MS in server.js) keeps gliding smoothly between steps
+// staying continuous — a bot that only steps once per its own randomized
+// cadence (BOT_MOVE_INTERVAL_MIN_MS/MAX_MS in Room.js) keeps gliding smoothly
+// between steps
 // instead of the previous restart-a-fresh-tween-every-message hitch (which
 // finished its 180ms tween then sat still until the next step re-triggered it).
 const OTHER_PLAYER_LERP_TAU = 70;
@@ -1190,7 +1191,7 @@ export default class GameScene extends Phaser.Scene {
           // lerp in interpolateOtherPlayers() (driven by update()'s delta)
           // eases the avatar toward it. This replaced killing and
           // allocating a fresh Phaser tween on *every* network message —
-          // for a bot stepping every BOT_MOVE_INTERVAL_MS tick that was a
+          // for a bot stepping on its own randomized cadence that was a
           // new tween per step, each restarting before the previous one
           // had settled. A persistent lerp is both cheaper (no per-message
           // allocation or tween-manager bookkeeping) and smoother
@@ -1796,6 +1797,67 @@ export default class GameScene extends Phaser.Scene {
       tile.activeTween.stop();
       tile.activeTween = null;
     }
+    if (tile.graceAlphaTween) {
+      tile.graceAlphaTween.stop();
+      tile.graceAlphaTween = null;
+    }
+    if (tile.graceTintTween) {
+      tile.graceTintTween.stop();
+      tile.graceTintTween = null;
+      tile.clearTint();
+      tile.setAlpha(1);
+    }
+  }
+
+  // Both Room.reviveTile (a ghost's manual tap) and autoRegenerateTiles()
+  // set the same regenGraceUntil window (REGEN_GRACE_MS) on a tile the
+  // instant it comes back — protected from re-collapsing for that whole
+  // window, but nothing on screen showed it, so a tile that got walked on
+  // right away could just vanish again with no visible reason. Fades the
+  // tile in from fully transparent while tinting it a saturated blue that
+  // settles back to the tile's own natural colors (tint 0xffffff is the
+  // "no tint" identity) — reads as the tile materializing out of a
+  // protective glow rather than an already-solid tile abruptly changing
+  // hue. Two separate tweens, deliberately different lengths: alpha fades
+  // in quickly (300ms, roughly matching the existing scale pop-in below)
+  // so the tile doesn't sit oddly translucent for long, while the tint
+  // itself eases from blue to normal *linearly* across the entire
+  // REGEN_GRACE_MS — an easeOut here would resolve most of the color
+  // shift in the tween's first ~15%, leaving the tile reading as
+  // "already back to normal" for nearly the whole actual grace window,
+  // defeating the original point of being able to tell it's still
+  // protected. Finishing the color shift is what doubles as the visible
+  // countdown to when the tile becomes vulnerable again.
+  playReviveGraceGlow(tile) {
+    const fromColor = Phaser.Display.Color.ValueToColor(0x3aa0ff);
+    const toColor = Phaser.Display.Color.ValueToColor(0xffffff);
+    tile.setTint(0x3aa0ff);
+    tile.setAlpha(0);
+
+    tile.graceAlphaTween = this.tweens.add({
+      targets: tile,
+      alpha: 1,
+      duration: 300,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        tile.graceAlphaTween = null;
+      },
+    });
+
+    tile.graceTintTween = this.tweens.addCounter({
+      from: 0,
+      to: 100,
+      duration: REGEN_GRACE_MS,
+      ease: 'Linear',
+      onUpdate: (tween) => {
+        const step = Phaser.Display.Color.Interpolate.ColorWithColor(fromColor, toColor, 100, tween.getValue());
+        tile.setTint(Phaser.Display.Color.GetColor(step.r, step.g, step.b));
+      },
+      onComplete: () => {
+        tile.clearTint();
+        tile.graceTintTween = null;
+      },
+    });
   }
 
   startWarningPulse(tile) {
@@ -1850,6 +1912,8 @@ export default class GameScene extends Phaser.Scene {
       duration: 320,
       ease: 'Back.easeOut',
     });
+
+    this.playReviveGraceGlow(tile);
   }
 
   setTileState(row, col, state) {

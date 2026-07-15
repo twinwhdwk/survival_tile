@@ -21,6 +21,7 @@ import {
   REGEN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
+  GHOST_RESPAWN_STILLNESS_MS,
 } from '../shared/roundConfig';
 import {
   GHOST_REVIVE_COOLDOWN_MS,
@@ -58,17 +59,27 @@ const MAX_COL_INSET = Math.floor((MAP_COLS - 1) / 2) - 1;
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
 // up and falling back to simple immediate-neighbor avoidance. Deep enough to
 // route around a locally-collapsed pocket, shallow enough to stay cheap
-// running for every bot every tick (BOT_MOVE_INTERVAL_MS in server.js).
+// running for every bot on its own turn (see BOT_MOVE_INTERVAL_MIN_MS below).
 const BOT_SEARCH_DEPTH = 6;
 
-// Chance a bot just stands still on any given movement tick instead of
+// Each bot gets its own random movement interval in this range, assigned
+// once (see moveBotsRandomly()'s botMoveIntervalMs map) rather than every
+// bot in a room stepping in perfect lockstep on server.js's single global
+// BOT_TICK_MS beat — a room full of bots that all move at literally the
+// same instant every time reads as visibly mechanical/synchronized in a way
+// real, independent players never are. 300-600ms mirrors the same range
+// server.js's BOT_TICK_MS previously used as one fixed value for every bot.
+const BOT_MOVE_INTERVAL_MIN_MS = 300;
+const BOT_MOVE_INTERVAL_MAX_MS = 600;
+
+// Chance a bot just stands still on any given movement turn instead of
 // stepping — real players don't move in perfectly steady lockstep, they
-// pause to look around, react, or hesitate. A flat per-tick skip is a
+// pause to look around, react, or hesitate. A flat per-turn skip is a
 // simple stand-in for that. Harmless relative to the boundary's own
 // timescale (BOUNDARY_SHRINK_INTERVAL_MS is 15s; this costs at most one
-// BOT_MOVE_INTERVAL_MS tick), and findStepTowardSafety() recomputes fresh
-// every tick anyway, so a skipped tick never leaves a bot committed to a
-// stale plan.
+// bot's own movement interval, at most BOT_MOVE_INTERVAL_MAX_MS), and
+// findStepTowardSafety() recomputes fresh every turn anyway, so a skipped
+// turn never leaves a bot committed to a stale plan.
 const BOT_HESITATION_CHANCE = 0.2;
 
 // Minimum spacing (ms) between 'playerMoved' broadcasts for a single player.
@@ -79,9 +90,9 @@ const BOT_HESITATION_CHANCE = 0.2;
 // visible cost: the client eases between updates via its own per-frame lerp,
 // for which 20Hz of fresh targets is already smooth. Crucially this throttles
 // *only the broadcast* — collision/collapse/boss logic in movePlayerTo still
-// runs on every single move. Bots (one step per BOT_MOVE_INTERVAL_MS tick,
-// slower than this window) always clear this window, so their cadence and
-// behavior are unchanged.
+// runs on every single move. Bots (one step every BOT_MOVE_INTERVAL_MIN_MS-
+// MAX_MS, always slower than this window even at the fast end) always clear
+// this window, so their cadence and behavior are unchanged.
 const MOVE_BROADCAST_MIN_INTERVAL_MS = 50;
 
 function createSolidTileMap() {
@@ -98,7 +109,7 @@ function createSolidTileMap() {
 // winding, continuous-looking path — hold roughly the same heading for a
 // while, drift gently rather than jitter — instead of picking a brand new
 // random direction on literally every tick, which read as erratic and
-// (per BOT_MOVE_INTERVAL_MS's own comment) burned through tiles faster
+// (per BOT_MOVE_INTERVAL_MIN_MS's own comment) burned through tiles faster
 // than deliberate human movement does. preferredDir === null (a bot's
 // first move, or after a mode transition) falls back to true uniform
 // random, same as before this existed.
@@ -175,6 +186,12 @@ export default class Room {
     // instead of picking a fresh random one every tick. See
     // pickWeightedByHeading().
     this.botHeadings = new Map();
+    // Each bot's own randomized movement cadence (assigned once, on its
+    // first moveBotsRandomly() turn) plus the next timestamp it's actually
+    // due to act — see BOT_MOVE_INTERVAL_MIN_MS/MAX_MS above for why this
+    // is per-bot rather than one shared interval.
+    this.botMoveIntervalMs = new Map();
+    this.botNextMoveAt = new Map();
     this.safeInset = 0;
     this.boundaryShrinkStepsDone = 0;
     this.lastRegenAt = 0;
@@ -786,6 +803,30 @@ export default class Room {
     this.reviveCooldowns.delete(id);
     this.emit('playerRevived', { playerId: id, nickname: player.nickname, x, y });
 
+    // A revived player who just stands there has effectively taken
+    // themselves back out of the round without the tile pressure everyone
+    // else is under — collapse their respawn tile out from under them if
+    // they haven't moved off it within GHOST_RESPAWN_STILLNESS_MS.
+    // Re-reads this.players[id] fresh (not the closed-over `player`) since
+    // by the time this fires they may have been eliminated again, revived
+    // yet again onto a different tile, or disconnected entirely — coords
+    // are compared against the *tile* they respawned onto here, not their
+    // exact x/y, so drifting within the same hex still counts as "hasn't
+    // moved."
+    setTimeout(() => {
+      if (this.finished) {
+        return;
+      }
+      const current = this.players[id];
+      if (!current || current.eliminated) {
+        return;
+      }
+      const coords = this.getTileCoords(current.x, current.y);
+      if (coords.row === tile.row && coords.col === tile.col) {
+        this.triggerTileCollapse(tile.row, tile.col);
+      }
+    }, GHOST_RESPAWN_STILLNESS_MS);
+
     // Mirror image of the activation in eliminatePlayer(): a respawn is the
     // only way aliveCount can go back up mid-round, so this is the one place
     // last-stand can end. Only fires on the true->false transition, and only
@@ -1018,6 +1059,25 @@ export default class Room {
         }
         return;
       }
+
+      // Gate live (non-ghost) movement to this bot's own randomized
+      // cadence rather than server.js's much finer BOT_TICK_MS polling
+      // interval — that tick just needs to run fine enough to never miss
+      // any one bot's due time by much, not dictate how often bots
+      // actually step. Assigned lazily on this bot's first turn so it
+      // starts acting almost immediately rather than waiting out a full
+      // interval before its very first move.
+      const now = Date.now();
+      if (!this.botMoveIntervalMs.has(id)) {
+        const interval = BOT_MOVE_INTERVAL_MIN_MS
+          + Math.random() * (BOT_MOVE_INTERVAL_MAX_MS - BOT_MOVE_INTERVAL_MIN_MS);
+        this.botMoveIntervalMs.set(id, interval);
+        this.botNextMoveAt.set(id, now);
+      }
+      if (now < this.botNextMoveAt.get(id)) {
+        return;
+      }
+      this.botNextMoveAt.set(id, now + this.botMoveIntervalMs.get(id));
 
       const { row: currentRow, col: currentCol } = this.getTileCoords(player.x, player.y);
 

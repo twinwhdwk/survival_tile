@@ -73,7 +73,7 @@ server.listen(port, () => {
 
   setServerHandlers();
   tickInterval = setInterval(tickAllRooms, 1000);
-  botTickInterval = setInterval(tickAllBots, BOT_MOVE_INTERVAL_MS);
+  botTickInterval = setInterval(tickAllBots, BOT_TICK_MS);
 });
 
 // Graceful shutdown. Cloud Run sends SIGTERM before recycling an instance
@@ -171,16 +171,15 @@ function broadcastDashboard() {
 // steady stream of small movements every frame, so bots stepping only once
 // a second read as barely moving by comparison.
 //
-// Was 300ms originally, tuned purely so load-test bots visibly moved — not
-// to model realistic pacing. A real player pauses, hesitates, reads the
-// map; 300ms of nonstop stepping burns through tiles far faster than that
-// (documented in roundConfig.js's AUTO_REGEN comment: worst case ~13
-// tiles/sec per room). Slowed to better approximate a cautious human's
-// pace, which also makes bot-driven test rounds a more realistic proxy for
-// how balance will actually feel with real players — combined with the
-// heading-bias in Room.js's pickWeightedByHeading(), bots now amble in
-// winding paths at roughly human speed instead of jittering at full tilt.
-const BOT_MOVE_INTERVAL_MS = 600;
+// This drives how often tickAllBots() itself runs, not how often any one
+// bot actually steps — each bot now gets its own random movement interval
+// (Room.js's BOT_MOVE_INTERVAL_MIN_MS..MAX_MS, 300-600ms, assigned once per
+// bot) so a room's bots amble at slightly different, more organic paces
+// instead of every single one stepping in lockstep on the same beat. This
+// tick just needs to run finer than the *fastest* possible per-bot interval
+// (300ms) so no bot's own due-time is ever missed by more than a tick's
+// worth of slack.
+const BOT_TICK_MS = 100;
 
 function tickAllBots() {
   rooms.forEach((room) => {

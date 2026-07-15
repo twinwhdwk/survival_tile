@@ -59,8 +59,45 @@ const config = {
 // every requested @font-face has loaded (or failed), so this is a short,
 // bounded wait rather than an open-ended one, with a timeout fallback in
 // case a font fails to load at all so the game never hangs on a bad network.
+//
+// That timeout is exactly the gap that let mismatched text through in
+// practice (spotty venue wifi, per the preloader's own comment, easily
+// exceeds 1.5s for a webfont fetch): if the timeout wins the race, every
+// Text object created before the real webfont finishes loading is
+// permanently stuck rendering in the fallback ('Malgun Gothic') -- Phaser
+// draws text to a static canvas texture once and never re-measures it on
+// its own. Since Black Han Sans is a deliberately heavy poster face and the
+// fallback is comparatively thin, this read as "some labels are bold, some
+// are thin" rather than a clean swap. Fixed with a one-time self-heal: once
+// the real `document.fonts.ready` eventually resolves (immediately, if it
+// already won the race), walk every currently active scene's display list
+// and call `updateText()` on any Text object found -- forcing a re-render
+// with whatever font is actually loaded by then. A single pass is enough:
+// any scene created after this fires is created after fonts are genuinely
+// ready, so its own Text objects are correct from the start.
+function refreshTextFonts(game) {
+  const visit = (list) => {
+    list.forEach((child) => {
+      if (typeof child.updateText === 'function') {
+        child.updateText();
+      }
+      if (child.list) {
+        visit(child.list);
+      }
+    });
+  };
+  game.scene.getScenes(true).forEach((scene) => {
+    if (scene.children && scene.children.list) {
+      visit(scene.children.list);
+    }
+  });
+}
+
 function startGame() {
-  new Phaser.Game(config);
+  const game = new Phaser.Game(config);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => refreshTextFonts(game));
+  }
 }
 
 if (document.fonts && document.fonts.ready) {

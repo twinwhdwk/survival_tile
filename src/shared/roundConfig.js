@@ -78,3 +78,13 @@ export const REGEN_GRACE_MS = 2000;
 // that a single ghost can trivially solo-fill it.
 export const GHOST_REVIVE_GAUGE_PER_TAP = 14;
 export const GHOST_REVIVE_GAUGE_MAX = 100;
+
+// A revived player who stays put has effectively taken themselves out of
+// the round again without the tile pressure everyone else is under —
+// their respawn tile collapses out from under them if they haven't moved
+// off it within this long, same as if they'd just walked onto (and then
+// lingered on) any other tile a normal footstep would already be putting
+// on the collapse clock. Long enough to get their bearings right after
+// coming back, short enough that idling isn't a safe way to wait out a
+// round.
+export const GHOST_RESPAWN_STILLNESS_MS = 3000;
