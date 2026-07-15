@@ -531,6 +531,25 @@ function resetServerState() {
   finalRankings = [];
   disconnectedSockets.clear();
   broadcastLobby();
+
+  // An admin currently parked on DashboardScene or a spectated GameScene
+  // (rather than LobbyScene, where broadcastLobby() above already fully
+  // refreshes them) has no listener that would otherwise notice any of
+  // this — currentStage is back to 0, so the next tick's
+  // broadcastDashboard() call now just early-returns forever, leaving
+  // them staring at a stale room card that no longer exists server-side.
+  // Reusing 'tournamentEnded' (with no rankings, same as the "still
+  // waiting" empty-rankings case) routes them through the exact same
+  // already-tested ResultScene -> 돌아가기 -> LobbyScene path any
+  // spectator already takes when a tournament ends normally, rather than
+  // inventing a new transition. A harmless no-op for an admin who was
+  // already on LobbyScene (no handler there listens for this event).
+  adminSockets.forEach((adminId) => {
+    const adminSocket = io.sockets.sockets[adminId];
+    if (adminSocket) {
+      adminSocket.emit('tournamentEnded', { rankings: [] });
+    }
+  });
 }
 
 /**
