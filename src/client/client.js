@@ -5,6 +5,7 @@ import LobbyScene from './scenes/LobbyScene';
 import ResultScene from './scenes/ResultScene';
 import DashboardScene from './scenes/DashboardScene';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../shared/hexGrid';
+import { FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT } from './theme/Theme';
 
 const config = {
   title:    '타일 서바이벌',
@@ -75,6 +76,21 @@ const config = {
 // with whatever font is actually loaded by then. A single pass is enough:
 // any scene created after this fires is created after fonts are genuinely
 // ready, so its own Text objects are correct from the start.
+//
+// document.fonts.ready alone still isn't the whole story for a CJK webfont
+// like Black Han Sans: Google serves it as dozens of files, each covering
+// only a narrow unicode-range slice of the Hangul block, and a slice is
+// only fetched once something actually asks to render a character inside
+// it. Canvas text doesn't "ask" the way DOM layout does -- Phaser's first
+// draw of a not-yet-fetched character just paints the fallback immediately
+// (no waiting) and triggers the fetch in the background for next time, so
+// `document.fonts.ready` can resolve having never even requested a slice
+// nothing had drawn yet. That let individual characters (e.g. "별" in
+// "1라운드 조별 현황") render in the fallback font even on a fast
+// connection, independent of the timeout race above entirely. Explicitly
+// loading FONT_DISPLAY_SAMPLE_TEXT (every fixed FONT_DISPLAY string used
+// anywhere in the game -- see Theme.js) forces every slice those specific
+// characters need to be requested upfront, before any scene draws them.
 function refreshTextFonts(game) {
   const visit = (list) => {
     list.forEach((child) => {
@@ -98,6 +114,13 @@ function startGame() {
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => refreshTextFonts(game));
   }
+}
+
+if (document.fonts && document.fonts.load) {
+  // Sizes here don't need to match any real Text style -- document.fonts.load
+  // only cares which characters need which unicode-range slice, not the
+  // pixel size they'll eventually render at.
+  document.fonts.load(`24px '${FONT_DISPLAY_FAMILY}'`, FONT_DISPLAY_SAMPLE_TEXT).catch(() => {});
 }
 
 if (document.fonts && document.fonts.ready) {
