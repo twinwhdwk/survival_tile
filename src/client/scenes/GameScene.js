@@ -382,7 +382,10 @@ export default class GameScene extends Phaser.Scene {
     // not a Rectangle — .setScrollFactor(0)/.setDepth(1) still apply the
     // same way, Graphics is a normal GameObject. See fitAnchoredRoundedPanel
     // for how (0.5, 0) below reproduces the old .setOrigin(0.5, 0) anchor.
-    this.timerPanel = this.add.graphics().setScrollFactor(0).setDepth(1);
+    // Depth 29 (not the map/avatar range) so a player standing near the
+    // top map edge — row 0 sits at screen y~21-42, squarely inside this
+    // strip, since the camera never scrolls — never renders on top of it.
+    this.timerPanel = this.add.graphics().setScrollFactor(0).setDepth(29);
 
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
       fontFamily: FONT_BODY,
@@ -392,7 +395,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
-    this.playerCountPanel = this.add.graphics().setScrollFactor(0).setDepth(1);
+    this.playerCountPanel = this.add.graphics().setScrollFactor(0).setDepth(29);
 
     this.playerCountText = this.add.text(WORLD_WIDTH - 10, 12, '', {
       fontFamily: FONT_BODY,
@@ -418,7 +421,7 @@ export default class GameScene extends Phaser.Scene {
     // Fixed size (never resized to fit text the way the other HUD panels
     // are), so this draws once here rather than needing a redraw call
     // anywhere else.
-    this.bossHpPanel = this.add.graphics().setScrollFactor(0).setDepth(1).setVisible(false);
+    this.bossHpPanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
     drawRoundedRect(this.bossHpPanel, WORLD_WIDTH / 2, 38 + 44 / 2, BOSS_BAR_WIDTH + 24, 44, { radius: 6 });
 
     this.bossHpText = this.add.text(WORLD_WIDTH / 2, 50, '', {
@@ -434,7 +437,7 @@ export default class GameScene extends Phaser.Scene {
     this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 8, 0xff4444)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.scorePanel = this.add.graphics().setScrollFactor(0).setDepth(1).setVisible(false);
+    this.scorePanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
     this.scoreText = this.add.text(10, 12, '', {
       fontFamily: FONT_BODY,
