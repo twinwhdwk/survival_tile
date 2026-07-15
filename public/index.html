@@ -2,7 +2,16 @@
 <html lang="ko" dir="ltr">
   <head>
     <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
+    <!-- No viewport-fit=cover: that would let the page extend under an
+         iPhone's notch/rounded corners/home-indicator, and nothing in this
+         app (Phaser-rendered HUD panels, joystick) accounts for
+         env(safe-area-inset-*) to compensate. Now that players are
+         actively steered into landscape (see the rotate-notice prompt),
+         the notch sits on the left/right edge right where the score/
+         player-count HUD panels or the joystick live -- omitting
+         viewport-fit (default: contain) keeps the whole page within the
+         safe area instead, at zero code cost. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 
     <title>타일 서바이벌</title>
 
