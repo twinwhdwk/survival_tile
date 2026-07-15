@@ -169,6 +169,15 @@ export default class LobbyScene extends Phaser.Scene {
     // pop-in animation each time anyone joined/left (e.g. clicking "봇 추가"
     // a few times in a row made the whole roster visibly flicker).
     const seenIds = new Set();
+    // Counts only newly-created cells this pass, separately from `i` (each
+    // entry's position in the *full* roster) -- staggering brand-new cells
+    // by their absolute roster index meant a single bot added on top of an
+    // already-large roster (e.g. the 31st player) wouldn't even start
+    // popping in until i*25 = 750ms after the click, well past what reads
+    // as an instant response to your own action. New cells now stagger
+    // against each other instead, starting at 0 regardless of how many
+    // already-settled cells sit ahead of them in the grid.
+    let newCellIndex = 0;
     entries.forEach(([socketId, entry], i) => {
       seenIds.add(socketId);
       const col = i % GRID_COLS;
@@ -190,10 +199,11 @@ export default class LobbyScene extends Phaser.Scene {
         targets: cell.container,
         scale: 1,
         alpha: 1,
-        delay: i * 25,
+        delay: newCellIndex * 25,
         duration: 220,
         ease: 'Back.easeOut',
       });
+      newCellIndex += 1;
     });
 
     Object.keys(this.rosterCells).forEach((socketId) => {
