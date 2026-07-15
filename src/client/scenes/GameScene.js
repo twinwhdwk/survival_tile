@@ -16,7 +16,6 @@ import {
   playBoundaryAlarm,
   playCountdownTick,
   playCountdownGo,
-  playVictory,
 } from '../utilities/SoundFx';
 import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory, vibrateTap } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
@@ -1375,7 +1374,11 @@ export default class GameScene extends Phaser.Scene {
 
     this.showJoystick();
     this.cameras.main.flash(300, 120, 255, 150);
-    playVictory();
+    // playRevive(), not playVictory() -- a ghost respawning mid-round can
+    // happen several times over a tournament, and reusing the exact same
+    // 5-note fanfare celebrateChampion() plays for the actual tournament
+    // win would blunt that moment's distinctiveness by the time it matters.
+    playRevive();
     vibrateVictory();
     this.updatePlayerCount();
   }
