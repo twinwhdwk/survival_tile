@@ -28,6 +28,14 @@ html, body {
    touch handling so typing a nickname and tapping buttons keeps working. */
 input, textarea, button {
   touch-action: manipulation;
+}
+
+/* Only the actual editable fields need selectable text -- a <button>'s
+   label (참가하기, 게임 시작, ...) was inheriting this same override, so a
+   drag on desktop or a long-press on mobile could pop an iOS-style text
+   selection bubble over what's meant to read as a plain app button, not
+   copyable text. Buttons fall back to the global user-select:none above. */
+input, textarea {
   -webkit-user-select: auto;
   user-select: auto;
 }
