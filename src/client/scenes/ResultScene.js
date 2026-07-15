@@ -159,7 +159,7 @@ export default class ResultScene extends Phaser.Scene {
       this.rankingTexts.push(empty);
     }
 
-    const RANK_COLORS = ['#ffd700', '#c0c0c0', '#cd7f32'];
+    const RANK_COLORS = [COLORS.textGold, COLORS.textSilver, COLORS.textBronze];
     const RANK_MEDALS = ['🥇 ', '🥈 ', '🥉 '];
 
     rankings.forEach((entry, i) => {
