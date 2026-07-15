@@ -296,7 +296,12 @@ export default class DashboardScene extends Phaser.Scene {
     const minimapWidth = MAP_COLS * 4;
     const minimapHeight = MAP_ROWS * 4;
     if (!this.textures.exists(minimapTextureKey)) {
-      this.textures.createCanvas(minimapTextureKey, minimapWidth, minimapHeight);
+      const canvasTexture = this.textures.createCanvas(minimapTextureKey, minimapWidth, minimapHeight);
+      // Default linear filtering blurred every tile-color square into its
+      // neighbors once this tiny (MAP_COLS*4 x MAP_ROWS*4 px) canvas was
+      // scaled up ~5x to fill the card — nearest-neighbor keeps the flat
+      // per-tile fills crisp instead of reading as a smudge.
+      canvasTexture.setFilter(Phaser.Textures.FilterMode.NEAREST);
     }
     const minimapInnerW = cardW - 16;
     const minimapInnerH = cardH - 46;
