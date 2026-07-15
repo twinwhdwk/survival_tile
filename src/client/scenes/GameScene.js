@@ -58,11 +58,12 @@ const BOSS_DEFEAT_CELEBRATION_MS = 1400;
 
 // Same zero-delay pattern on Room.js's eliminatePlayer() side: it emits
 // 'playerEliminated' and, if this was the last player standing, calls
-// finishRoom('all-eliminated') immediately after -- so a player's own
-// final elimination risks the exact same cutoff as the boss-defeat case,
-// just for handleOwnElimination()'s shorter effects (showFloatingLabel's
-// pop-in + float-and-fade is 180+600=780ms; this covers that plus the
-// 300ms camera flash with a little room to spare).
+// finishRoom('all-eliminated') immediately after -- so a room-ending
+// elimination (own or, for a spectator watching, anyone else's) risks
+// the exact same cutoff as the boss-defeat case, just for the shorter
+// elimination effects (showFloatingLabel's pop-in + float-and-fade is
+// 180+600=780ms; this covers that plus the 300ms camera flash the own-
+// elimination path also plays, with a little room to spare).
 const OWN_ELIMINATION_EFFECT_MS = 900;
 
 // A third instance of the same pattern: eliminatePlayer() can fire
@@ -1194,6 +1195,16 @@ export default class GameScene extends Phaser.Scene {
       },
 
       playerEliminated: ({ playerId, score }) => {
+        // eliminatePlayer() can finish the room in this exact same call
+        // (see the roomTransitionHoldUntil constants' own comments) --
+        // regardless of whose elimination this is. A spectator (never a
+        // "player" themselves, so never reaches handleOwnElimination())
+        // watching the room's very last elimination would otherwise see
+        // this other avatar's burst/label cut off just as much as a
+        // player's own would be. Set once here, before branching, so both
+        // the own- and other-player paths below are covered uniformly.
+        this.roomTransitionHoldUntil = this.time.now + OWN_ELIMINATION_EFFECT_MS;
+
         // SURVIVAL rounds score teammates by how long each of them lasted
         // (see Room.js addSurvivalScore), so every elimination in the room —
         // not just the local player's own — can bump the shared team score;
@@ -1372,11 +1383,9 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.flash(300, 255, 80, 80);
     playEliminate();
     vibrateEliminate();
-    // If this elimination was the room's last (Room.js's eliminatePlayer()
-    // finishes the room in that same call, no delay), hold the upcoming
-    // roomResult's scene transition open long enough to actually see this
-    // -- see the constant's own comment and roomResult's handler above.
-    this.roomTransitionHoldUntil = this.time.now + OWN_ELIMINATION_EFFECT_MS;
+    // roomTransitionHoldUntil is already set by playerEliminated (the sole
+    // caller of this method) before branching here -- no need to set it
+    // again.
 
     // Same reasoning as the spectator case: a ghost has no avatar left to
     // steer (movement is already a no-op once eliminated — see update()),
