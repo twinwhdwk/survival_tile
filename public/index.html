@@ -12,6 +12,13 @@
          viewport-fit (default: contain) keeps the whole page within the
          safe area instead, at zero code cost. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+    <!-- Tints the mobile browser's own chrome (Android Chrome's address
+         bar, iOS Safari's toolbar) to match the game's background instead
+         of leaving it a bright default -- without this the dark game sits
+         inside a visibly lighter browser frame, breaking the illusion of a
+         standalone app. Matches body's background-color (styles.css) and
+         the Phaser config's own backgroundColor (client.js). -->
+    <meta name="theme-color" content="#090b18"/>
 
     <title>타일 서바이벌</title>
 
