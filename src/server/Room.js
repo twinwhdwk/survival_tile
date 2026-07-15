@@ -805,18 +805,18 @@ export default class Room {
     });
   }
 
-  // Breadth-first search outward from (startRow, startCol) collecting every
-  // reachable SOLID, non-pending, in-bounds tile within BOT_SEARCH_DEPTH,
-  // then picking among them by a score that favors *margin* from the
-  // current safe-zone edge (safeMargin()) over raw distance — not just the
-  // first-found nearest safe tile. A purely "nearest safe tile" bot reads
-  // as reactive rather than skilled: it happily settles on a tile sitting
-  // right on the current edge as long as it's technically still inside the
-  // boundary *this instant*, then gets caught flat-footed the moment the
-  // next BOUNDARY_SHRINK_INTERVAL_MS tick removes that exact ring. Scoring
-  // by margin instead makes bots drift toward the interior over time as
-  // real pressure builds, the way a cautious human player does, rather
-  // than camping the crumbling edge until it's too late.
+  // Breadth-first search outward from (startRow, startCol) — traversing
+  // only SOLID, non-pending tiles (a WARNING or collapse-scheduled tile is
+  // a hole by the time a second step could land on it, so it's neither a
+  // valid destination nor a valid stepping stone) — collecting every
+  // reachable safe tile within BOT_SEARCH_DEPTH, then picking among them
+  // by a score that favors *margin* from the current safe-zone edge
+  // (safeMargin()) first, local connectivity (few neighboring holes)
+  // second, with a mild penalty for crowding onto other players and a
+  // light tiebreak toward nearer options. A purely "nearest safe tile"
+  // bot reads as reactive rather than skilled: it settles on a tile right
+  // on the current edge, at the tip of a peninsula of holes, or on top of
+  // a teammate — then gets caught out by exactly the hazard it ignored.
   //
   // Returns just the *first step* of the winning path (an adjacent tile,
   // plus its direction index), not the whole route — moveBotsRandomly()
@@ -839,6 +839,21 @@ export default class Room {
     let frontier = [{ row: startRow, col: startCol, firstStep: null, firstStepDir: null }];
     const found = [];
 
+    // Where every *other* still-alive player currently stands — used below
+    // to penalize candidates on/next to occupied tiles. Bots that all
+    // score tiles identically converge on the same interior spots, burn
+    // the shared floor under each other, and box each other into fresh
+    // holes; a human instinctively keeps a little distance for exactly
+    // that reason. Built once per call, not per candidate.
+    const occupied = new Set();
+    Object.values(this.players).forEach((p) => {
+      if (!p.eliminated) {
+        const c = this.getTileCoords(p.x, p.y);
+        occupied.add(`${c.row}_${c.col}`);
+      }
+    });
+    occupied.delete(startKey); // never penalize a bot for its own position
+
     for (let depth = 0; depth < BOT_SEARCH_DEPTH && frontier.length > 0; depth++) {
       const next = [];
 
@@ -852,28 +867,49 @@ export default class Room {
           visited.add(key);
 
           const state = this.tileMap[row][col];
-          if (state === TILE_STATE.GONE) {
-            continue; // can't path through a hole
-          }
 
-          // A tile that's already pending collapse (triggerTileCollapse has
-          // scheduled it, but WARNING_DELAY_MS hasn't elapsed yet) still
-          // reads as SOLID in tileMap — it just hasn't visually flagged as
-          // WARNING yet. Treating it as a valid destination was the actual
-          // bug behind bots repeatedly walking onto tiles that were already
-          // doomed the moment they arrived, well before any tile-scarcity
-          // pressure kicked in.
+          // Only SOLID, non-pending tiles are traversable at all — not
+          // merely excluded as destinations. A bot walks one tile per
+          // 600ms tick while a stepped-on tile is fully GONE 1200ms after
+          // its collapse was scheduled, so any "path" through a WARNING or
+          // pending tile is fiction: by the time the bot's second step
+          // would land there, it's a hole. Worse, the *first step* of the
+          // returned path could itself be such a tile (the old code pushed
+          // them into the frontier as pass-through nodes), sending bots
+          // directly onto ground with <600ms left — one of the main
+          // reasons they kept dying almost immediately.
           const isPending = this.pendingTiles.has(key);
+          if (state !== TILE_STATE.SOLID || isPending) {
+            continue;
+          }
 
           const firstStep = node.firstStep || { row, col };
           const firstStepDir = node.firstStepDir !== null ? node.firstStepDir : dir;
-          if (state === TILE_STATE.SOLID && !isPending && this.isSafeTile(row, col)) {
+          if (this.isSafeTile(row, col)) {
+            // Local connectivity: how many of this tile's own neighbors
+            // are still standing. A high-margin tile at the tip of a
+            // peninsula of holes is a trap a human would read at a glance;
+            // counting solid neighbors is the cheap proxy for that.
+            let solidNeighbors = 0;
+            let crowdedNeighbors = 0;
+            hexNeighbors(row, col).forEach((n) => {
+              const nKey = `${n.row}_${n.col}`;
+              if (this.tileMap[n.row][n.col] === TILE_STATE.SOLID && !this.pendingTiles.has(nKey)) {
+                solidNeighbors++;
+              }
+              if (occupied.has(nKey)) {
+                crowdedNeighbors++;
+              }
+            });
+
             found.push({
               row: firstStep.row,
               col: firstStep.col,
               dir: firstStepDir,
               depth,
               margin: this.safeMargin(row, col),
+              solidNeighbors,
+              crowded: (occupied.has(key) ? 2 : 0) + crowdedNeighbors,
             });
           } else {
             next.push({ row, col, firstStep, firstStepDir });
@@ -887,14 +923,14 @@ export default class Room {
       return null;
     }
 
-    // Margin dominates the score (each extra ring of safety is worth more
-    // than a couple tiles of detour) but isn't the only factor — a far-off
-    // interior tile still loses to a nearby merely-decent one, so bots keep
-    // reacting to immediate local danger rather than beelining across the
-    // whole map on every tick.
+    // Margin still dominates (each ring of safety beats a couple tiles of
+    // detour), with connectivity as a real secondary factor (avoid
+    // peninsulas/dead ends), crowding as a mild repulsion (spread out
+    // instead of stacking onto teammates' tiles), and depth as a light
+    // tiebreak toward nearer options.
     let bestScore = -Infinity;
     found.forEach((c) => {
-      c.score = c.margin * 2 - c.depth * 0.5;
+      c.score = c.margin * 2 + c.solidNeighbors * 0.6 - c.crowded * 0.8 - c.depth * 0.5;
       if (c.score > bestScore) {
         bestScore = c.score;
       }
@@ -951,11 +987,23 @@ export default class Room {
         return;
       }
 
-      if (Math.random() < BOT_HESITATION_CHANCE) {
+      const { row: currentRow, col: currentCol } = this.getTileCoords(player.x, player.y);
+
+      // Every tile a bot stands on is already on the collapse clock (its
+      // own arrival scheduled it — WARNING at +600ms, GONE at +1200ms),
+      // and bots step once per ~600ms tick. Hesitating on such a tile is
+      // therefore a coin-flip with death: one skipped tick pushes the next
+      // move attempt to exactly the 1200ms deadline, two skipped ticks
+      // (4% per pair, compounding over dozens of moves a round) is a
+      // guaranteed drop. A human never "pauses to look around" while the
+      // floor under them is cracking — so hesitation only applies when
+      // the current tile is genuinely stable.
+      const standingOnDoomedTile = this.pendingTiles.has(`${currentRow}_${currentCol}`)
+        || this.tileMap[currentRow][currentCol] !== TILE_STATE.SOLID;
+      if (!standingOnDoomedTile && Math.random() < BOT_HESITATION_CHANCE) {
         return;
       }
 
-      const { row: currentRow, col: currentCol } = this.getTileCoords(player.x, player.y);
       const preferredDir = this.botHeadings.has(id) ? this.botHeadings.get(id) : null;
 
       const step = this.findStepTowardSafety(currentRow, currentCol, preferredDir);
