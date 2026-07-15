@@ -490,6 +490,49 @@ function endTournament() {
   return { rankings };
 }
 
+// Admin-triggered emergency reset (see the 'resetServer' handler) — same
+// end state as endTournament() plus wiping every in-progress room and
+// kicking every connected non-admin, rather than assuming a tournament
+// wrapped up normally.
+function resetServerState() {
+  // Every Room.js setTimeout callback (tile warning/collapse, the
+  // move-broadcast coalescing timer) already checks `this.finished` before
+  // doing anything, since finishRoom() sets it for exactly this reason —
+  // flipping it here is enough to make any already-scheduled callback a
+  // silent no-op once it eventually fires, without needing to track down
+  // and individually cancel each room's own timers.
+  rooms.forEach((room) => {
+    room.finished = true;
+  });
+  rooms.clear();
+  socketRoomMap.clear();
+
+  // Same force-disconnect treatment clearLobby already gives lobby-only
+  // players, just extended to anyone currently seated in a room too —
+  // Object.keys() snapshots the socket list up front, so disconnecting
+  // sockets mid-loop (which mutates io.sockets.sockets) can't skip or
+  // double-visit an entry.
+  Object.keys(io.sockets.sockets).forEach((id) => {
+    if (adminSockets.has(id)) {
+      return;
+    }
+    const liveSocket = io.sockets.sockets[id];
+    if (liveSocket) {
+      liveSocket.disconnect(true);
+    }
+  });
+
+  lobbyPlayers = {};
+  globalPhase = 'LOBBY';
+  currentLineages = [];
+  currentStage = 0;
+  stagePending = 0;
+  stageResults = [];
+  finalRankings = [];
+  disconnectedSockets.clear();
+  broadcastLobby();
+}
+
 /**
  * Setup server event handlers.
  */
@@ -569,6 +612,24 @@ function setServerHandlers() {
         delete lobbyPlayers[id];
       });
       broadcastLobby();
+    });
+
+    // Emergency "start over" for a stuck/misbehaving tournament -- unlike
+    // clearLobby (LOBBY phase only, roster-scoped), this works from any
+    // phase and also tears down every in-progress room, not just the lobby
+    // roster. A soft reset, not a process restart: the Node process and its
+    // event loop/timers keep running untouched, so this is ~instant with no
+    // Cloud Run cold-start downtime -- it clears in-memory game state and
+    // force-disconnects every non-admin socket, same as clearLobby already
+    // does for lobby-only players. It does not recover from an actual
+    // process crash or memory corruption; the existing
+    // uncaughtException/unhandledRejection handlers above are what
+    // protect against those.
+    socket.on('resetServer', () => {
+      if (!adminSockets.has(socket.id)) {
+        return;
+      }
+      resetServerState();
     });
 
     socket.on('startTournament', () => {

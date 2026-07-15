@@ -82,6 +82,10 @@ export default class LobbyScene extends Phaser.Scene {
 
     const buttonHtml = `
       <div style="display:flex;gap:12px;align-items:center;">
+        <button id="reset-server-button" type="button"
+          style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#7f1d1d;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+          서버 초기화
+        </button>
         <button id="clear-lobby-button" type="button"
           style="padding:14px 16px;font-size:14px;border-radius:10px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
           초기화
@@ -100,9 +104,11 @@ export default class LobbyScene extends Phaser.Scene {
     this.startButton = this.buttonNode.getChildByID('start-button');
     this.addBotButton = this.buttonNode.getChildByID('add-bot-button');
     this.clearLobbyButton = this.buttonNode.getChildByID('clear-lobby-button');
+    this.resetServerButton = this.buttonNode.getChildByID('reset-server-button');
     applyButtonFx(this.startButton);
     applyButtonFx(this.addBotButton);
     applyButtonFx(this.clearLobbyButton);
+    applyButtonFx(this.resetServerButton);
 
     this.startButton.addEventListener('click', () => {
       this.socket.emit('startTournament');
@@ -123,11 +129,25 @@ export default class LobbyScene extends Phaser.Scene {
       }
       this.socket.emit('clearLobby');
     });
+    // A soft reset (see server.js's resetServer handler) — the Node process
+    // itself keeps running (no downtime), but every in-progress room and
+    // the whole tournament bracket get torn down, not just the lobby
+    // roster, so this reaches further than 초기화 above and works from any
+    // phase. Meant as an emergency "start over" if a tournament gets stuck,
+    // not routine cleanup — the darker red button color plus its own,
+    // more explicit confirm() wording both signal that distinction.
+    this.resetServerButton.addEventListener('click', () => {
+      if (!window.confirm('서버를 초기화하면 진행 중인 모든 게임이 즉시 종료되고 모든 참가자가 로그인 화면으로 돌아갑니다. 계속할까요?')) {
+        return;
+      }
+      this.socket.emit('resetServer');
+    });
 
     if (!this.isAdmin) {
       this.startButton.style.display = 'none';
       this.addBotButton.style.display = 'none';
       this.clearLobbyButton.style.display = 'none';
+      this.resetServerButton.style.display = 'none';
     }
 
     this.handleLobbyUpdate = (payload) => this.renderLobby(payload);

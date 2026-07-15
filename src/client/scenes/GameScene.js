@@ -89,7 +89,7 @@ const OTHER_PLAYER_LERP_TAU = 70;
 // GHOST_REVIVE_COOLDOWN_MS rate. Swapped out for the "라스트 스탠드" copy while
 // that's active (see the lastStandActivated handler) and restored here once
 // the server signals it's deactivated again.
-const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 무너진 칸을 클릭해 복구하세요 (게이지를 채우면 부활!)';
+const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 무너진 칸을 클릭해 복구하세요 (모두의 게이지가 차면 유령 1명 부활!)';
 
 export default class GameScene extends Phaser.Scene {
 
@@ -1003,11 +1003,16 @@ export default class GameScene extends Phaser.Scene {
         playRevive();
       },
 
-      // Personal to this socket (Room.reviveTile emits this via
-      // io.to(id), not a room-wide broadcast) — only ever received while
-      // this client is actually a ghost.
+      // Room-wide: the revival gauge is a shared team meter now (see
+      // Room.reviveTile / respawnRandomGhost), so every client — alive
+      // players included — watches the same bar fill. Shown whenever it
+      // has any progress and hidden again once a payout resets it to 0
+      // (ghosts keep it visible regardless; see handleOwnElimination).
       reviveGaugeUpdate: ({ gauge, max }) => {
         this.updateReviveGauge(gauge, max);
+        const show = gauge > 0 || this.eliminated;
+        this.reviveGaugeBarBg.setVisible(show);
+        this.reviveGaugeBarFill.setVisible(show);
       },
 
       // Room-wide: everyone hears the moment only one lineage member is
@@ -1036,12 +1041,16 @@ export default class GameScene extends Phaser.Scene {
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         this.roomTransitionHoldUntil = this.time.now + LAST_STAND_BANNER_MS;
         if (this.eliminated) {
-          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지를 채우면 부활!');
+          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지 채워 동료를 부활시키세요!');
           fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
         }
       },
 
-      playerRevived: ({ playerId, x, y }) => {
+      playerRevived: ({ playerId, nickname, x, y }) => {
+        // The team gauge filling is the only way anyone comes back (see
+        // Room.respawnRandomGhost, respawnGhost's sole caller), so this
+        // moment doubles as the "gauge full" announcement for the room.
+        this.showBanner(`💫 부활 게이지 가득!\n${nickname || '유령'} 부활!`, '#88ff99');
         if (playerId === this.socket.id) {
           this.handleOwnRevival(x, y);
           return;

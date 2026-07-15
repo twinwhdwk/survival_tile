@@ -9,6 +9,7 @@ import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { playClick } from '../utilities/SoundFx';
 import { vibrateTap } from '../utilities/Haptics';
+import { applyButtonFx } from '../utilities/ButtonFx';
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -95,6 +96,33 @@ export default class DashboardScene extends Phaser.Scene {
       fontSize: '16px',
       color: COLORS.textMuted,
     }).setOrigin(0.5);
+
+    // Emergency "start over" if a tournament gets stuck mid-event (see
+    // server.js's resetServer handler) — kept small and muted in a corner,
+    // matching this screen's existing "nobody watching can tell an
+    // admin capability is even here" design (same reasoning as the C/S
+    // skills' deliberately unlabeled keys) rather than LobbyScene's louder,
+    // plainly-visible version, since *this* screen is the one that may be
+    // projected on a TV for the whole event to see.
+    const resetButtonHtml = `
+      <button id="dashboard-reset-server-button" type="button"
+        style="width:70px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid #7f1d1d;background:#1c0d0dcc;color:#d99;cursor:pointer;font-family:${FONT_BODY};">
+        서버 초기화
+      </button>
+    `;
+    // Top-left corner, clear of both the centered title/hint text above and
+    // the card grid below (which starts at HEADER_HEIGHT=70) -- the bottom
+    // corners were considered too, but FOOTER_MARGIN (14px) leaves no real
+    // clearance there once the grid actually fills the screen.
+    this.resetServerNode = this.add.dom(40, 15).createFromHTML(resetButtonHtml);
+    this.resetServerButton = this.resetServerNode.getChildByID('dashboard-reset-server-button');
+    applyButtonFx(this.resetServerButton);
+    this.resetServerButton.addEventListener('click', () => {
+      if (!window.confirm('서버를 초기화하면 진행 중인 모든 게임이 즉시 종료되고 모든 참가자가 로그인 화면으로 돌아갑니다. 계속할까요?')) {
+        return;
+      }
+      this.socket.emit('resetServer');
+    });
 
     this.handleDashboardUpdate = (payload) => this.renderDashboard(payload);
     this.handleDashboardStarting = (payload) => this.scene.restart(payload);

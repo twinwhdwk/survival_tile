@@ -58,13 +58,23 @@ export const AUTO_REGEN_MIN_INTERVAL_MS = 1000; // rate-limits how often thresho
 // it reads as "freshly solid ground," not permanent invulnerability.
 export const REGEN_GRACE_MS = 2000;
 
-// A ghost (eliminated player) tapping collapsed tiles builds a personal
-// revival gauge — GAUGE_PER_TAP per successful tap (i.e. one that actually
-// flips a GONE tile back to SOLID; rate-limited the same way normal ghost
-// taps already are, see Room.reviveTile's GHOST_REVIVE_COOLDOWN_MS /
-// GHOST_REVIVE_LAST_STAND_COOLDOWN_MS gates in bossConfig.js).
-// Filling the gauge to GAUGE_MAX respawns that ghost back into the round
-// at a random currently-standing tile, rather than leaving elimination as
-// a permanent state for the rest of the round.
-export const GHOST_REVIVE_GAUGE_PER_TAP = 10;
+// Ghosts (eliminated players) tapping collapsed tiles fill one *shared*,
+// room-wide revival gauge — GAUGE_PER_TAP per successful tap from any
+// ghost (i.e. one that actually flips a GONE tile back to SOLID;
+// rate-limited per ghost by Room.reviveTile's GHOST_REVIVE_COOLDOWN_MS /
+// GHOST_REVIVE_LAST_STAND_COOLDOWN_MS gates in bossConfig.js). Filling
+// the gauge to GAUGE_MAX respawns ONE random ghost back into the round
+// at a random currently-standing tile (Room.respawnRandomGhost), then
+// resets to 0 and starts filling again — a shared team effort rather
+// than each ghost grinding a private meter.
+//
+// The shared-gauge design (replacing separate per-player gauges) already
+// makes this much more reachable once several ghosts exist to tap
+// together, but a SURVIVAL round's very first elimination still has
+// exactly one ghost carrying it alone — at the original value that's 10
+// taps at a 1500ms cooldown, ~17s minimum, against a round where most
+// eliminations land in the final third. Raised from 10 so a lone early
+// ghost has a real shot before the round ends, without dropping so low
+// that a single ghost can trivially solo-fill it.
+export const GHOST_REVIVE_GAUGE_PER_TAP = 14;
 export const GHOST_REVIVE_GAUGE_MAX = 100;

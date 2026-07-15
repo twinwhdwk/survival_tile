@@ -43,8 +43,17 @@ const CENTER_COL = Math.floor(MAP_COLS / 2);
 // bottom out sooner than columns, which is fine: the safe zone becomes a
 // horizontal sliver for the last few steps before finally closing on the
 // column axis too, rather than snapping to a point all at once.
-const MAX_ROW_INSET = Math.floor((MAP_ROWS - 1) / 2);
-const MAX_COL_INSET = Math.floor((MAP_COLS - 1) / 2);
+//
+// Capped one ring short of fully closing (rather than the true geometric
+// max) on both axes — a live audit found the boundary reaching its full
+// extent (a 1-row-tall sliver, ~6 tiles) reliably *before* SURVIVAL's round
+// timer ran out, and standing on a 1-tile-wide strip where every tile you
+// touch is gone 1.2s later isn't survivable no matter how well someone
+// plays: 3 of 4 tested rounds ended in a full wipeout before any room ever
+// reached the boss stage. Leaving one extra ring standing (a ~3-row area)
+// gives a real, if tight, endgame instead of a guaranteed-death final phase.
+const MAX_ROW_INSET = Math.floor((MAP_ROWS - 1) / 2) - 1;
+const MAX_COL_INSET = Math.floor((MAP_COLS - 1) / 2) - 1;
 
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
 // up and falling back to simple immediate-neighbor avoidance. Deep enough to
@@ -145,6 +154,13 @@ export default class Room {
     this.roundStartTime = Date.now();
     this.finished = false;
     this.reviveCooldowns = new Map();
+    // One shared, room-wide revival gauge that every ghost's successful
+    // tap contributes to (see reviveTile), replacing the earlier
+    // per-player gauges — filling it respawns one random ghost
+    // (respawnGhost via respawnRandomGhost), so ghosts are pulling
+    // together toward the next revival instead of each grinding a
+    // private meter.
+    this.teamRevivalGauge = 0;
     // Tile key -> timestamp until which that tile is immune to
     // triggerTileCollapse() re-starting its collapse — set whenever a tile
     // comes back via autoRegenerateTiles() or a ghost's reviveTile(), so a
@@ -446,7 +462,6 @@ export default class Room {
       return;
     }
     player.eliminated = true;
-    player.revivalGauge = 0;
     if (this.mode === 'SURVIVAL') {
       this.addSurvivalScore(player, Date.now());
     }
@@ -711,22 +726,40 @@ export default class Room {
     this.emit('tileRevived', { row, col });
 
     // Every successful tap (ghost or bot alike — see moveBotsRandomly's
-    // eliminated-bot branch) fills this player's own personal revival
-    // gauge. Reaching GHOST_REVIVE_GAUGE_MAX respawns them back into the
-    // round instead of elimination being permanent for the rest of it.
-    player.revivalGauge = Math.min(GHOST_REVIVE_GAUGE_MAX, (player.revivalGauge || 0) + GHOST_REVIVE_GAUGE_PER_TAP);
-    this.io.to(id).emit('reviveGaugeUpdate', { gauge: player.revivalGauge, max: GHOST_REVIVE_GAUGE_MAX });
-    if (player.revivalGauge >= GHOST_REVIVE_GAUGE_MAX) {
-      this.respawnGhost(id);
+    // eliminated-bot branch) fills the room's *shared* revival gauge —
+    // broadcast room-wide so everyone (alive players included) can watch
+    // it climb. Reaching GHOST_REVIVE_GAUGE_MAX brings one random ghost
+    // back (see respawnRandomGhost), rather than each ghost grinding a
+    // private per-player meter as before.
+    this.teamRevivalGauge = Math.min(GHOST_REVIVE_GAUGE_MAX, this.teamRevivalGauge + GHOST_REVIVE_GAUGE_PER_TAP);
+    this.emit('reviveGaugeUpdate', { gauge: this.teamRevivalGauge, max: GHOST_REVIVE_GAUGE_MAX });
+    if (this.teamRevivalGauge >= GHOST_REVIVE_GAUGE_MAX) {
+      this.respawnRandomGhost();
     }
   }
 
-  // Brings an eliminated player back into the round once their revival
-  // gauge fills — not a full re-seat (name/animal/score all stay as they
-  // were), just clearing `eliminated` and dropping them back onto a
-  // currently-standing tile chosen the same way a boss room's rescue spot
-  // would be (pickRandomSolidTile()), since their old position may well
-  // be gone by now.
+  // A filled team gauge revives one ghost chosen at random — random (not
+  // "whoever tapped most") keeps it a genuinely shared effort: a slow
+  // tapper has the same shot at coming back as a fast one, so there's no
+  // incentive to hold back help hoping to bank personal credit.
+  respawnRandomGhost() {
+    const ghosts = Object.keys(this.players).filter((pid) => this.players[pid].eliminated);
+    if (ghosts.length === 0) {
+      return;
+    }
+    // Reset (and tell every client) before the respawn itself, so the bar
+    // on screen empties at the same moment the revival banner fires.
+    this.teamRevivalGauge = 0;
+    this.emit('reviveGaugeUpdate', { gauge: 0, max: GHOST_REVIVE_GAUGE_MAX });
+    const luckyId = ghosts[Math.floor(Math.random() * ghosts.length)];
+    this.respawnGhost(luckyId);
+  }
+
+  // Brings an eliminated player back into the round once the *team*
+  // revival gauge fills (see respawnRandomGhost, its only caller) — not a
+  // full re-seat (name/animal/score all stay as they were), just clearing
+  // `eliminated` and dropping them back onto a currently-standing tile,
+  // since their old position may well be gone by now.
   respawnGhost(id) {
     const player = this.players[id];
     if (!player || !player.eliminated || this.finished) {
@@ -742,7 +775,6 @@ export default class Room {
     const { x, y } = hexToPixel(tile.row, tile.col);
     const respawnTime = Date.now();
     player.eliminated = false;
-    player.revivalGauge = 0;
     player.x = x;
     player.y = y;
     // addSurvivalScore() was already called for this player at their most
@@ -752,7 +784,7 @@ export default class Room {
     // between as if they'd been alive and scoring the whole time.
     player.lastScoreCreditAt = respawnTime;
     this.reviveCooldowns.delete(id);
-    this.emit('playerRevived', { playerId: id, x, y });
+    this.emit('playerRevived', { playerId: id, nickname: player.nickname, x, y });
 
     // Mirror image of the activation in eliminatePlayer(): a respawn is the
     // only way aliveCount can go back up mid-round, so this is the one place
