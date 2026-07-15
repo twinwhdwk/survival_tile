@@ -1279,6 +1279,13 @@ export default class GameScene extends Phaser.Scene {
       });
       this.input.keyboard.off('keydown-C', this.handleKeyC);
       this.input.keyboard.off('keydown-S', this.handleKeyS);
+      // setDefaultCursor() is a canvas-level CSS style, not scene-scoped --
+      // a round that ends (roomResult) while the mouse is still sitting
+      // over a revivable tile tears this scene down without ever firing
+      // that tile's pointerout, which would otherwise leave the *next*
+      // scene (ResultScene/LobbyScene) permanently stuck showing a pointer
+      // cursor everywhere.
+      this.input.setDefaultCursor('default');
     });
   }
 
@@ -1425,14 +1432,23 @@ export default class GameScene extends Phaser.Scene {
   handleTileHover(row, col, isOver) {
     if (!isOver || !this.eliminated || this.roomFinished) {
       this.reviveHighlight.setVisible(false);
+      this.input.setDefaultCursor('default');
       return;
     }
     if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
       this.reviveHighlight.setVisible(false);
+      this.input.setDefaultCursor('default');
       return;
     }
     const { x: hoverX, y: hoverY } = hexToPixel(row, col);
     this.reviveHighlight.setPosition(hoverX, hoverY).setVisible(true);
+    // Every tile is technically interactive at all times (so hover/click
+    // handlers exist unconditionally), but only a GONE tile while eliminated
+    // is ever actually clickable -- on desktop, mousing over one of those
+    // otherwise still showed the plain default arrow, giving no cue this
+    // spot (unlike every other tile) does something. Matches the
+    // reviveHighlight glow's own condition exactly.
+    this.input.setDefaultCursor('pointer');
   }
 
   showBanner(message, color) {
