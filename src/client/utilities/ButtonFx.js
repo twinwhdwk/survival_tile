@@ -61,6 +61,17 @@ export function applyButtonFx(button) {
   // every disabling call site to remember to clear these) clears the
   // inline hover styles the instant disabled flips on, letting the
   // stylesheet's own disabled treatment show through cleanly.
+  // Same specificity problem as the filter/transform reset above, but
+  // permanent rather than hover-triggered: every button's `cursor:pointer`
+  // is baked into its own inline style="..." at creation time (outside
+  // this shared helper's control) and never touched again, so it silently
+  // overrode the stylesheet's `button:disabled { cursor: not-allowed }`
+  // rule for the button's *entire* disabled duration, not just a brief
+  // hover-transition window -- a disabled button always kept showing a
+  // hand cursor, misleadingly suggesting it was still clickable. Explicitly
+  // toggling the inline value both ways (not removeProperty) is required
+  // here since a plain <button> has no pointer cursor by default to fall
+  // back to on re-enable.
   const disabledObserver = new MutationObserver(() => {
     if (button.disabled) {
       // removeProperty, not 'none' -- an inline `filter: none` is still an
@@ -71,6 +82,9 @@ export function applyButtonFx(button) {
       button.style.removeProperty('filter');
       button.style.transform = 'translateY(0)';
       button.style.boxShadow = '0 2px 0 rgba(0,0,0,0.35)';
+      button.style.cursor = 'not-allowed';
+    } else {
+      button.style.cursor = 'pointer';
     }
   });
   disabledObserver.observe(button, { attributes: true, attributeFilter: ['disabled'] });
