@@ -40,6 +40,21 @@ export function getSocket() {
     const el = ensureStatusEl();
     let hadDisconnected = false;
 
+    // A dropped mid-game connection isn't the only way this banner earns
+    // its keep -- if the very first connection attempt fails (server
+    // cold-starting, briefly unreachable), 'disconnect' never fires at all
+    // (there was nothing connected yet to disconnect from), so a player
+    // loading the page during that window saw a perfectly normal-looking
+    // login form with zero indication anything was wrong; clicking 참가하기
+    // would just hang on "참가하는 중..." forever once join() went out over
+    // a socket that was never actually connected. Reuses the same banner
+    // (socket.io v2 keeps retrying connect_error attempts on its own by
+    // default, same as it does for 'disconnect') rather than a second,
+    // separate one.
+    socket.on('connect_error', () => {
+      el.style.transform = 'translateY(0)';
+    });
+
     socket.on('disconnect', (reason) => {
       hadDisconnected = true;
       el.style.transform = 'translateY(0)';
