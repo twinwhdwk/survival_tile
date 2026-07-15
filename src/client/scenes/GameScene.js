@@ -45,6 +45,17 @@ const JOYSTICK_DEADZONE = 8;
 
 const BOSS_BAR_WIDTH = 220;
 
+// Room.js's damageBoss() emits 'bossDamaged' (defeated: true) and then
+// calls finishRoom() on the very next line -- zero delay between them, so
+// 'roomResult' lands at this client within milliseconds of the celebration
+// even starting. Without holding the transition open, playBossDefeatCelebration()
+// (confetti lifespan up to 1000ms, camera flash/shake) and the "보스를
+// 물리쳤습니다!" banner were being torn down by scene.start() before a
+// player could see almost any of it — verified directly (replayed the
+// server's exact same-tick bossDamaged->roomResult sequence and found the
+// scene had already left GameScene, confetti already off, 150ms later).
+const BOSS_DEFEAT_CELEBRATION_MS = 1400;
+
 // Time constant (ms) for the exponential smoothing that eases each *other*
 // player's avatar toward its latest server-reported position. Roughly: the
 // avatar closes ~63% of the remaining gap every this-many-ms, so it fully
@@ -1093,6 +1104,7 @@ export default class GameScene extends Phaser.Scene {
           this.showBanner('보스를 물리쳤습니다! 🎉', '#55ff88');
           playBossDefeat();
           vibrateVictory();
+          this.bossDefeatCelebrationEndsAt = this.time.now + BOSS_DEFEAT_CELEBRATION_MS;
         } else {
           this.boss.row = row;
           this.boss.col = col;
@@ -1193,36 +1205,55 @@ export default class GameScene extends Phaser.Scene {
         }
         this.roomFinished = true;
 
-        if (this.isSpectator) {
-          // Never a player, so never "eliminated" — either the tournament
-          // just ended (rankings present, same bundling as the player
-          // path below) or this room's round wrapped and the bracket is
-          // about to advance to the next stage. In the latter case there's
-          // nothing to transition to yet; just wait here for the
-          // 'gameStarting'/'tournamentEnded' handlers below to fire next.
-          if (rankings) {
-            this.scene.start('ResultScene', { status: 'waiting', rankings });
-          } else {
-            this.showBanner('라운드 종료! 다음 라운드를 준비하는 중...', '#ffd700');
+        const proceed = () => {
+          if (this.isSpectator) {
+            // Never a player, so never "eliminated" — either the tournament
+            // just ended (rankings present, same bundling as the player
+            // path below) or this room's round wrapped and the bracket is
+            // about to advance to the next stage. In the latter case there's
+            // nothing to transition to yet; just wait here for the
+            // 'gameStarting'/'tournamentEnded' handlers below to fire next.
+            if (rankings) {
+              this.scene.start('ResultScene', { status: 'waiting', rankings });
+            } else {
+              this.showBanner('라운드 종료! 다음 라운드를 준비하는 중...', '#ffd700');
+            }
+            return;
           }
-          return;
-        }
 
-        this.eliminated = true;
+          this.eliminated = true;
 
-        // If the tournament ended in this same moment, the final rankings
-        // ride along right here instead of a separate later event, so we
-        // never risk missing a 'tournamentEnded' broadcast that fires
-        // before ResultScene has finished loading.
-        if (rankings) {
-          this.scene.start('ResultScene', { status: 'eliminated', rankings });
-          return;
-        }
+          // If the tournament ended in this same moment, the final rankings
+          // ride along right here instead of a separate later event, so we
+          // never risk missing a 'tournamentEnded' broadcast that fires
+          // before ResultScene has finished loading.
+          if (rankings) {
+            this.scene.start('ResultScene', { status: 'eliminated', rankings });
+            return;
+          }
 
-        if (survivorIds.includes(this.socket.id)) {
-          this.scene.start('ResultScene', { status: 'waiting', message: '생존!' });
+          if (survivorIds.includes(this.socket.id)) {
+            this.scene.start('ResultScene', { status: 'waiting', message: '생존!' });
+          } else {
+            this.scene.start('ResultScene', { status: 'eliminated', message: '탈락했습니다.' });
+          }
+        };
+
+        // The server emits 'bossDamaged' (defeated) and this 'roomResult'
+        // essentially back-to-back with no delay -- if a boss-defeat
+        // celebration just started, hold the actual scene transition open
+        // long enough for it to be seen instead of tearing GameScene down
+        // (confetti, camera flash, banner and all) within milliseconds of
+        // it starting. Any other finish reason (timeout, all-eliminated)
+        // has no pending celebration, so this resolves to 0 and proceeds
+        // immediately exactly as before.
+        const celebrationRemaining = this.bossDefeatCelebrationEndsAt
+          ? Math.max(0, this.bossDefeatCelebrationEndsAt - this.time.now)
+          : 0;
+        if (celebrationRemaining > 0) {
+          this.time.delayedCall(celebrationRemaining, proceed);
         } else {
-          this.scene.start('ResultScene', { status: 'eliminated', message: '탈락했습니다.' });
+          proceed();
         }
       },
 
