@@ -1866,9 +1866,16 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5);
 
+    // The one remaining flat square-cornered chip in the app — every other
+    // text-background chip (LobbyScene's roster cells, every HUD panel)
+    // already got the rounded treatment; this nickname tag just predates
+    // it. No border (strokeAlpha: 0) to match the original plain-fill
+    // Rectangle exactly, just with rounded corners instead of square ones.
     const labelBounds = label.getBounds();
-    const labelBg = this.add.rectangle(0, -26, labelBounds.width + 10, labelBounds.height + 3, 0x0b0e1c, 0.5)
-      .setOrigin(0.5);
+    const labelBg = this.add.graphics();
+    drawRoundedRect(labelBg, 0, -26, labelBounds.width + 10, labelBounds.height + 3, {
+      radius: 4, fillColor: 0x0b0e1c, fillAlpha: 0.5, strokeAlpha: 0,
+    });
     children.push(labelBg, label);
 
     if (playerInfo.isBot) {
