@@ -29,6 +29,19 @@ export function drawRoundedRect(graphics, centerX, centerY, width, height, {
   graphics.fillRoundedRect(x, y, width, height, radius);
   graphics.lineStyle(strokeWidth, strokeColor, strokeAlpha);
   graphics.strokeRoundedRect(x, y, width, height, radius);
+
+  // A second, dimmer inset line just inside the main border -- ties every
+  // panel to the same beveled-highlight material language already drawn on
+  // every hex tile (see EffectTextures.js's drawBeveledHex) instead of
+  // sitting apart from it. These COLORS.panelInnerLine* tokens existed in
+  // Theme.js already (with exactly this description) but nothing actually
+  // drew them. Skipped on panels too small for a 3px inset to read as
+  // anything but noise.
+  if (width > 30 && height > 24) {
+    const inset = 3;
+    graphics.lineStyle(1, COLORS.panelInnerLine, COLORS.panelInnerLineAlpha);
+    graphics.strokeRoundedRect(x + inset, y + inset, width - inset * 2, height - inset * 2, Math.max(radius - inset, 2));
+  }
 }
 
 export function drawRoundedPanel(graphics, centerX, centerY, width, height) {
