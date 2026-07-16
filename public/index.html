@@ -5,12 +5,9 @@
     <!-- No viewport-fit=cover: that would let the page extend under an
          iPhone's notch/rounded corners/home-indicator, and nothing in this
          app (Phaser-rendered HUD panels, joystick) accounts for
-         env(safe-area-inset-*) to compensate. Now that players are
-         actively steered into landscape (see the rotate-notice prompt),
-         the notch sits on the left/right edge right where the score/
-         player-count HUD panels or the joystick live -- omitting
-         viewport-fit (default: contain) keeps the whole page within the
-         safe area instead, at zero code cost. -->
+         env(safe-area-inset-*) to compensate. Omitting viewport-fit
+         (default: contain) keeps the whole page within the safe area
+         instead, at zero code cost. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
     <!-- Tints the mobile browser's own chrome (Android Chrome's address
          bar, iOS Safari's toolbar) to match the game's background instead
@@ -69,6 +66,5 @@
   <body>
     <div id="preloader"><div class="emoji">🔥</div><div class="label">불러오는 중...</div></div>
     <div id="game"></div>
-    <div id="rotate-notice"><div class="icon">📱</div><div class="label">화면을 가로로 돌려주세요</div></div>
   </body>
 </html>
