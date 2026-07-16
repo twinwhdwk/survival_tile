@@ -2,8 +2,8 @@ import { MAP_COLS, MAP_ROWS, HEX_SIZE } from './mapConfig';
 
 // Flat-top hexagons, "odd-q" vertical offset (odd columns shoved down by
 // half a hex-height). Chosen so left/right neighbors sit on a clean
-// horizontal line, matching how this game's wide (20x15) map already
-// reads.
+// horizontal line, matching how this game's wide map (see MAP_COLS/MAP_ROWS
+// in mapConfig.js) already reads.
 //
 // All pixel<->hex math lives here, in one place shared by both the server
 // (Room.js) and the client (GameScene.js) — if each hand-rolled its own

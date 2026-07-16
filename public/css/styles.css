@@ -57,13 +57,12 @@ button:disabled {
   filter: grayscale(0.3);
 }
 
-/* The game world (732x645) is wider than tall, so Phaser.Scale.FIT on a
-   portrait phone -- the default hold for anyone who just tapped a join
-   link -- scales to the narrow width and leaves the canvas squeezed into a
-   thin horizontal strip with huge black bars above and below (measured:
-   only ~52% of a 390x664 iPhone viewport was actual game). A pure CSS
-   media query needs no JS and reacts instantly to orientationchange,
-   unlike a resize-listener approach. */
+/* The game world (see MAP_COLS/MAP_ROWS in mapConfig.js) is wide, so
+   Phaser.Scale.FIT on a portrait phone -- the default hold for anyone who
+   just tapped a join link -- scales to the narrow width and leaves the
+   canvas squeezed into a thin horizontal strip with huge black bars above
+   and below. A pure CSS media query needs no JS and reacts instantly to
+   orientationchange, unlike a resize-listener approach. */
 #rotate-notice {
   display: none;
   position: fixed;
