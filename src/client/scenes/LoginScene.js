@@ -11,7 +11,7 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
 import { fitTitlePanel } from '../utilities/RoundedPanel';
 
 export default class LoginScene extends Phaser.Scene {
@@ -38,6 +38,16 @@ export default class LoginScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     this.createFloatingAnimals();
     createAmbientEmbers(this);
+
+    // Event banner, pinned to the very top of the screen and sized to read
+    // from across the room — separate from the game's own title below it.
+    this.add.text(WORLD_WIDTH / 2, 30, EVENT_BANNER_TEXT, {
+      fontFamily: FONT_DISPLAY,
+      fontSize: '30px',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
+      strokeThickness: 5,
+    }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 10, true, true);
 
     this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 175, `참가 주소: ${PUBLIC_SITE_URL}`, {
       fontFamily: FONT_BODY,

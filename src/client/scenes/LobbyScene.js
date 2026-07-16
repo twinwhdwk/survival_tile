@@ -8,14 +8,16 @@ import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 const GRID_COLS = 8;
 const GRID_CELL_W = 90;
 const GRID_CELL_H = 32;
 const GRID_START_X = (WORLD_WIDTH - GRID_COLS * GRID_CELL_W) / 2 + GRID_CELL_W / 2;
-const GRID_START_Y = 112;
+// Shifted down from the original 112 to leave room for the event banner
+// pinned above the "🔥 대기실" title.
+const GRID_START_Y = 138;
 
 export default class LobbyScene extends Phaser.Scene {
 
@@ -42,7 +44,18 @@ export default class LobbyScene extends Phaser.Scene {
     this.createFloatingAnimals();
     createAmbientEmbers(this);
 
-    this.add.text(WORLD_WIDTH / 2, 20, `참가 주소: ${PUBLIC_SITE_URL}`, {
+    // Event banner, pinned to the very top of the screen and sized to read
+    // from across the room — separate from (and above) the room's own
+    // "🔥 대기실" title below it. See LoginScene for the matching banner.
+    this.add.text(WORLD_WIDTH / 2, 22, EVENT_BANNER_TEXT, {
+      fontFamily: FONT_DISPLAY,
+      fontSize: '28px',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
+      strokeThickness: 5,
+    }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 10, true, true);
+
+    this.add.text(WORLD_WIDTH / 2, 58, `참가 주소: ${PUBLIC_SITE_URL}`, {
       fontFamily: FONT_BODY,
       fontSize: '18px',
       color: COLORS.textInfo,
@@ -59,7 +72,7 @@ export default class LobbyScene extends Phaser.Scene {
     // copy scaled independently of the main title and drifted out of
     // alignment, reading as a stray duplicate/shadow instead of a soft
     // glow. See LoginScene for the same fix.
-    this.titleText = this.add.text(WORLD_WIDTH / 2, 52, '🔥 대기실', {
+    this.titleText = this.add.text(WORLD_WIDTH / 2, 90, '🔥 대기실', {
       fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: '#ffffff',
@@ -70,9 +83,9 @@ export default class LobbyScene extends Phaser.Scene {
     // square-cornered box, and getBounds() (what GameScene's own HUD
     // panels already use) reflects the emoji glyph's real drawn extent,
     // unlike plain .width.
-    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, 55, 34, this.titleText, 28);
+    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, 93, 34, this.titleText, 28);
 
-    this.countText = this.add.text(WORLD_WIDTH / 2, 82, '', {
+    this.countText = this.add.text(WORLD_WIDTH / 2, 120, '', {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,

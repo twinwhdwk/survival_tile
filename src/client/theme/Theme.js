@@ -34,7 +34,11 @@ export const FONT_BODY = "'Gothic A1', 'Malgun Gothic', sans-serif";
 // styled with FONT_DISPLAY across every scene -- a new title/banner string
 // added without a matching entry here is exposed to the same bug.
 export const FONT_DISPLAY_FAMILY = 'Black Han Sans';
+// Shared event banner shown big at the very top of both LoginScene and
+// LobbyScene — one constant so the two screens can't drift out of sync.
+export const EVENT_BANNER_TEXT = 'FIL2 소확행 EVENT';
 export const FONT_DISPLAY_SAMPLE_TEXT = [
+  EVENT_BANNER_TEXT,
   '🔥 타일 서바이벌 🔥',
   '🔥 대기실',
   '라운드 조별 현황',
