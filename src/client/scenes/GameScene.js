@@ -38,10 +38,17 @@ function hexPoints(radius) {
   return points;
 }
 
-const JOYSTICK_X = 70;
-const JOYSTICK_Y = WORLD_HEIGHT - 70;
-const JOYSTICK_RADIUS = 42;
-const JOYSTICK_DEADZONE = 8;
+// The joystick lives as plain DOM elements pinned to the real viewport
+// (position:fixed), not Phaser GameObjects -- see createJoystick()'s own
+// comment for why. Sizes are real CSS pixels, not world units, and are
+// deliberately larger than the old canvas-drawn version (42/18px radii),
+// which read as too small to comfortably steer with a thumb.
+const JOYSTICK_ZONE_WIDTH_VW = 55;
+const JOYSTICK_ZONE_HEIGHT_VH = 55;
+const JOYSTICK_BASE_DIAMETER_PX = 132;
+const JOYSTICK_THUMB_DIAMETER_PX = 60;
+const JOYSTICK_RADIUS_PX = 66;
+const JOYSTICK_DEADZONE_PX = 10;
 
 const BOSS_BAR_WIDTH = 220;
 
@@ -891,102 +898,144 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
+  // Plain DOM elements appended straight to document.body -- deliberately
+  // NOT Phaser GameObjects and NOT this.add.dom() (which Phaser transforms
+  // in lockstep with the scaled canvas, i.e. the same world-coordinate
+  // space a GameObject lives in). Phaser.Scale.FIT centers the canvas and
+  // can letterbox/pillarbox it on any device whose aspect ratio doesn't
+  // exactly match WORLD_WIDTH/HEIGHT, so a joystick anchored to a fixed
+  // *world* position could end up visually inset from the real screen edge
+  // by however wide that margin happens to be on a given device --
+  // position:fixed CSS against the real viewport sidesteps that outright.
+  // It's also dynamic rather than fixed to one exact spot: touching
+  // anywhere inside the bottom-left zone re-anchors the base right where
+  // the thumb landed, rather than only working if the touch happens to
+  // land exactly on one pre-drawn circle -- both closer to how a real
+  // mobile game's virtual joystick behaves, and easier to hit reliably one-
+  // handed than a small fixed target.
   createJoystick() {
     this.joystickVector = { x: 0, y: 0 };
     this.joystickPointerId = null;
+    this.joystickEnabled = true;
 
-    // A soft, slowly-breathing glow ring behind the base — echoes the
-    // ember particles used elsewhere so the joystick doesn't read as a
-    // leftover generic-template control.
-    this.joystickGlow = this.add.circle(JOYSTICK_X, JOYSTICK_Y, JOYSTICK_RADIUS + 6, 0xffaa44, 0.12)
-      .setScrollFactor(0)
-      .setDepth(19);
-    this.tweens.add({
-      targets: this.joystickGlow,
-      scale: 1.15,
-      alpha: 0.05,
-      duration: 1200,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    const zone = document.createElement('div');
+    zone.style.cssText = `position:fixed;left:0;bottom:0;width:${JOYSTICK_ZONE_WIDTH_VW}vw;height:${JOYSTICK_ZONE_HEIGHT_VH}vh;touch-action:none;z-index:500;`;
+    document.body.appendChild(zone);
 
-    this.joystickBase = this.add.circle(JOYSTICK_X, JOYSTICK_Y, JOYSTICK_RADIUS, 0xffaa44, 0.15)
-      .setScrollFactor(0)
-      .setDepth(20)
-      .setStrokeStyle(2, 0xffcc66, 0.5);
+    const glow = document.createElement('div');
+    glow.style.cssText = `position:fixed;width:${JOYSTICK_BASE_DIAMETER_PX + 12}px;height:${JOYSTICK_BASE_DIAMETER_PX + 12}px;border-radius:50%;background:rgba(255,170,68,0.12);transform:translate(-50%,-50%);pointer-events:none;z-index:500;display:none;transition:opacity 120ms;`;
+    document.body.appendChild(glow);
 
-    this.joystickThumb = this.add.circle(JOYSTICK_X, JOYSTICK_Y, 18, 0xffcc66, 0.4)
-      .setScrollFactor(0)
-      .setDepth(21);
+    const base = document.createElement('div');
+    base.style.cssText = `position:fixed;width:${JOYSTICK_BASE_DIAMETER_PX}px;height:${JOYSTICK_BASE_DIAMETER_PX}px;border-radius:50%;background:rgba(255,170,68,0.15);border:3px solid rgba(255,204,102,0.5);transform:translate(-50%,-50%);pointer-events:none;z-index:501;display:none;`;
+    document.body.appendChild(base);
 
-    this.input.on('pointerdown', (pointer) => {
-      const dist = Phaser.Math.Distance.Between(pointer.x, pointer.y, JOYSTICK_X, JOYSTICK_Y);
-      if (this.joystickPointerId === null && dist <= JOYSTICK_RADIUS * 2) {
-        this.joystickPointerId = pointer.id;
-        this.updateJoystick(pointer);
-        this.tweens.killTweensOf(this.joystickBase);
-        this.tweens.add({ targets: this.joystickBase, scale: 1.12, duration: 120, ease: 'Quad.easeOut' });
-        this.joystickThumb.setFillStyle(0xffcc66, 0.65);
-      }
-    });
+    const thumb = document.createElement('div');
+    thumb.style.cssText = `position:fixed;width:${JOYSTICK_THUMB_DIAMETER_PX}px;height:${JOYSTICK_THUMB_DIAMETER_PX}px;border-radius:50%;background:rgba(255,204,102,0.4);transform:translate(-50%,-50%);pointer-events:none;z-index:502;display:none;`;
+    document.body.appendChild(thumb);
 
-    this.input.on('pointermove', (pointer) => {
-      if (pointer.id === this.joystickPointerId) {
-        this.updateJoystick(pointer);
-      }
-    });
+    this.joystickZoneEl = zone;
+    this.joystickGlowEl = glow;
+    this.joystickBaseEl = base;
+    this.joystickThumbEl = thumb;
 
-    const releaseJoystick = (pointer) => {
-      if (pointer.id === this.joystickPointerId) {
-        this.joystickPointerId = null;
-        this.joystickVector = { x: 0, y: 0 };
-        this.tweens.killTweensOf(this.joystickBase);
-        this.tweens.add({ targets: this.joystickBase, scale: 1, duration: 150, ease: 'Quad.easeOut' });
-        this.tweens.killTweensOf(this.joystickThumb);
-        this.tweens.add({ targets: this.joystickThumb, x: JOYSTICK_X, y: JOYSTICK_Y, duration: 150, ease: 'Back.easeOut' });
-        // Back to the same amber as its initial idle color (0xffcc66,
-        // 0.4) -- this was still the pre-recolor white, so after the
-        // first touch-and-release the thumb would stay white in idle for
-        // the rest of the round instead of returning to amber.
-        this.joystickThumb.setFillStyle(0xffcc66, 0.4);
-      }
+    let anchorX = 0;
+    let anchorY = 0;
+
+    const setPos = (el, x, y) => {
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
     };
 
-    this.input.on('pointerup', releaseJoystick);
-    this.input.on('pointerupoutside', releaseJoystick);
+    const updateFromPoint = (x, y) => {
+      const dx = x - anchorX;
+      const dy = y - anchorY;
+      const dist = Math.min(JOYSTICK_RADIUS_PX, Math.hypot(dx, dy));
+      const angle = Math.atan2(dy, dx);
+      setPos(thumb, anchorX + Math.cos(angle) * dist, anchorY + Math.sin(angle) * dist);
+
+      if (dist < JOYSTICK_DEADZONE_PX) {
+        this.joystickVector = { x: 0, y: 0 };
+        return;
+      }
+      const norm = dist / JOYSTICK_RADIUS_PX;
+      this.joystickVector = { x: Math.cos(angle) * norm, y: Math.sin(angle) * norm };
+    };
+
+    const onPointerDown = (e) => {
+      if (!this.joystickEnabled || this.joystickPointerId !== null) {
+        return;
+      }
+      this.joystickPointerId = e.pointerId;
+      anchorX = e.clientX;
+      anchorY = e.clientY;
+      setPos(glow, anchorX, anchorY);
+      setPos(base, anchorX, anchorY);
+      setPos(thumb, anchorX, anchorY);
+      glow.style.display = 'block';
+      base.style.display = 'block';
+      thumb.style.display = 'block';
+      thumb.style.background = 'rgba(255,204,102,0.65)';
+    };
+
+    const onPointerMove = (e) => {
+      if (e.pointerId !== this.joystickPointerId) {
+        return;
+      }
+      updateFromPoint(e.clientX, e.clientY);
+    };
+
+    const onPointerUp = (e) => {
+      if (e.pointerId !== this.joystickPointerId) {
+        return;
+      }
+      this.joystickPointerId = null;
+      this.joystickVector = { x: 0, y: 0 };
+      glow.style.display = 'none';
+      base.style.display = 'none';
+      thumb.style.display = 'none';
+      thumb.style.background = 'rgba(255,204,102,0.4)';
+    };
+
+    zone.addEventListener('pointerdown', onPointerDown);
+    // move/up are on window rather than the zone -- a real thumb routinely
+    // drags outside the zone's own bounds once it's mid-drag (the whole
+    // point of a large drag radius), and only the zone's own bounds would
+    // otherwise stop delivering pointermove the instant the touch crosses
+    // that boundary, silently freezing the vector at whatever it last was.
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    // Torn down from the scene's own 'shutdown' handler (see create()) --
+    // these are raw window-level listeners outside Phaser's own event
+    // system, so nothing else would ever remove them, and a stage
+    // transition/spectator hand-off re-runs create() (and this method)
+    // fresh each time without a page reload in between.
+    this.joystickCleanup = () => {
+      zone.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      zone.remove();
+      glow.remove();
+      base.remove();
+      thumb.remove();
+    };
   }
 
   // A spectator has no avatar to steer, so the joystick would just sit
-  // there doing nothing — hide it rather than leave a dead control on
-  // screen.
+  // there doing nothing — hide/disable it rather than leave a dead control
+  // (and a dead-but-still-touch-intercepting zone) on screen. Disabling the
+  // zone specifically matters for a ghost, whose only real interaction is
+  // tapping collapsed tiles to revive — the zone would otherwise silently
+  // swallow taps meant for the board underneath it.
   hideJoystick() {
-    this.joystickGlow.setVisible(false);
-    this.joystickBase.setVisible(false);
-    this.joystickThumb.setVisible(false);
-  }
-
-  updateJoystick(pointer) {
-    const dx = pointer.x - JOYSTICK_X;
-    const dy = pointer.y - JOYSTICK_Y;
-    const dist = Math.min(JOYSTICK_RADIUS, Math.hypot(dx, dy));
-    const angle = Math.atan2(dy, dx);
-
-    this.joystickThumb.setPosition(
-      JOYSTICK_X + Math.cos(angle) * dist,
-      JOYSTICK_Y + Math.sin(angle) * dist
-    );
-
-    if (dist < JOYSTICK_DEADZONE) {
-      this.joystickVector = { x: 0, y: 0 };
-      return;
-    }
-
-    const norm = dist / JOYSTICK_RADIUS;
-    this.joystickVector = {
-      x: Math.cos(angle) * norm,
-      y: Math.sin(angle) * norm,
-    };
+    this.joystickEnabled = false;
+    this.joystickZoneEl.style.pointerEvents = 'none';
+    this.joystickGlowEl.style.display = 'none';
+    this.joystickBaseEl.style.display = 'none';
+    this.joystickThumbEl.style.display = 'none';
   }
 
   bindSocketEvents() {
@@ -1375,6 +1424,16 @@ export default class GameScene extends Phaser.Scene {
       });
       this.input.keyboard.off('keydown-C', this.handleKeyC);
       this.input.keyboard.off('keydown-S', this.handleKeyS);
+      // The joystick's own window-level pointer listeners and DOM elements
+      // (createJoystick) live outside Phaser's event system entirely, so
+      // nothing else would ever remove them -- without this a stage
+      // transition/spectator hand-off (which re-runs create() on the same
+      // scene instance without a page reload) would pile up a fresh, fully
+      // duplicated joystick and listener set on top of the old one every
+      // single time.
+      if (this.joystickCleanup) {
+        this.joystickCleanup();
+      }
       // setDefaultCursor() is a canvas-level CSS style, not scene-scoped --
       // a round that ends (roomResult) while the mouse is still sitting
       // over a revivable tile tears this scene down without ever firing
@@ -1468,9 +1527,8 @@ export default class GameScene extends Phaser.Scene {
   // spectator, the only other case that hides the joystick) genuinely
   // needs it back.
   showJoystick() {
-    this.joystickGlow.setVisible(true);
-    this.joystickBase.setVisible(true);
-    this.joystickThumb.setVisible(true);
+    this.joystickEnabled = true;
+    this.joystickZoneEl.style.pointerEvents = 'auto';
   }
 
   // Server-authoritative respawn (Room.respawnGhost) landed on this exact
