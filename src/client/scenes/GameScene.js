@@ -49,6 +49,13 @@ const JOYSTICK_BASE_DIAMETER_PX = 132;
 const JOYSTICK_THUMB_DIAMETER_PX = 60;
 const JOYSTICK_RADIUS_PX = 66;
 const JOYSTICK_DEADZONE_PX = 10;
+// norm (joystickVector's magnitude) is linear in how far the thumb has
+// dragged from center, so even a small, easy-to-overshoot drag near the
+// deadzone already produced a large fraction of max speed -- halving it
+// here (applied only to joystick-driven movement, not the keyboard
+// cursors update() also handles) makes a given drag distance translate to
+// gentler, more controllable movement.
+const JOYSTICK_SENSITIVITY = 0.5;
 
 const BOSS_BAR_WIDTH = 220;
 
@@ -112,6 +119,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create(data) {
+    window.__debugScene = this; // TEMP DEBUG - remove before commit
     generateTileTextures(this);
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
 
@@ -1759,8 +1767,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     if (dx === 0 && dy === 0 && (this.joystickVector.x !== 0 || this.joystickVector.y !== 0)) {
-      dx = this.joystickVector.x * speed;
-      dy = this.joystickVector.y * speed;
+      dx = this.joystickVector.x * speed * JOYSTICK_SENSITIVITY;
+      dy = this.joystickVector.y * speed * JOYSTICK_SENSITIVITY;
     }
 
     if (dx === 0 && dy === 0) {
