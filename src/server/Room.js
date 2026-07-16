@@ -524,7 +524,18 @@ export default class Room {
     }
 
     const allEliminated = Object.values(this.players).every((p) => p.eliminated);
-    const allHumansGone = this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
+    // TEAM mode ends the room the instant every real human is gone even if
+    // bots are still "alive" -- bots only exist for admin testing there,
+    // so there's no one left to actually watch the room continue. 개인전
+    // is a real matchmaking mode where a human plays alongside bots and
+    // (per reviveTile's own SOLO guard) has no ghost/revival mechanic —
+    // an eliminated solo player just spectates the rest of the room, so
+    // the round should keep running on its own schedule (round timeout or
+    // every remaining bot also being eliminated) instead of cutting short
+    // the instant the one human dies, which previously ended the whole
+    // game for them the moment they were eliminated.
+    const allHumansGone = this.gameMode !== 'SOLO'
+      && this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
     if (allEliminated || allHumansGone) {
       this.finishRoom('all-eliminated');
     }
