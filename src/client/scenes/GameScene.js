@@ -57,6 +57,14 @@ const JOYSTICK_DEADZONE_PX = 10;
 // gentler, more controllable movement.
 const JOYSTICK_SENSITIVITY = 0.5;
 
+// Mirrors Room.js's own MOVE_BROADCAST_MIN_INTERVAL_MS (50ms) -- the server
+// only ever broadcasts this player's position to everyone else at that
+// granularity, so a held direction key emitting 'playerMovement' on every
+// single rendered frame (~60/sec uncapped) was pure wasted inbound socket
+// traffic past whatever the server was already throttling its own
+// broadcast to. See emitPlayerMovement().
+const MOVEMENT_EMIT_MIN_INTERVAL_MS = 50;
+
 const BOSS_BAR_WIDTH = 220;
 
 // Room.js's damageBoss() emits 'bossDamaged' (defeated: true) and then
@@ -155,6 +163,8 @@ export default class GameScene extends Phaser.Scene {
     this.countdownActive = false;
     this.pendingGhostRevives = new Set();
     this.wasInDanger = false;
+    this.movementEmitLast = 0;
+    this.movementEmitTimer = null;
 
     this.createBackground();
     this.createEffects();
@@ -1792,13 +1802,46 @@ export default class GameScene extends Phaser.Scene {
     }
 
     if (this.player.x !== startX || this.player.y !== startY) {
-      this.socket.emit('playerMovement', { x: this.player.x, y: this.player.y });
+      this.emitPlayerMovement();
 
       const now = this.time.now;
       if (now - this.lastFootstepAt > 120) {
         this.lastFootstepAt = now;
         this.footstepEmitter.explode(2, this.player.x, this.player.y + 14);
       }
+    }
+  }
+
+  // Leading edge fires immediately; if further moves arrive inside the
+  // window they're coalesced and a single trailing emit sends whatever the
+  // latest position ended up being -- mirrors Room.js's own
+  // broadcastPlayerMoved() exactly, just for the client's outbound emit
+  // instead of the server's outbound broadcast. Collision/tile-collapse
+  // logic server-side is unaffected: this.player.x/y (read fresh by the
+  // trailing timer) is always the current position by the time it fires,
+  // and MOVEMENT_EMIT_MIN_INTERVAL_MS's 50ms window is well under the time
+  // it takes to cross a single tile at this game's movement speed, so no
+  // row/col transition can ever be skipped between throttled emits.
+  emitPlayerMovement() {
+    const now = this.time.now;
+    if (now - this.movementEmitLast >= MOVEMENT_EMIT_MIN_INTERVAL_MS) {
+      this.movementEmitLast = now;
+      this.socket.emit('playerMovement', { x: this.player.x, y: this.player.y });
+      return;
+    }
+
+    if (!this.movementEmitTimer) {
+      this.movementEmitTimer = this.time.delayedCall(
+        MOVEMENT_EMIT_MIN_INTERVAL_MS - (now - this.movementEmitLast),
+        () => {
+          this.movementEmitTimer = null;
+          if (this.eliminated || !this.player) {
+            return;
+          }
+          this.movementEmitLast = this.time.now;
+          this.socket.emit('playerMovement', { x: this.player.x, y: this.player.y });
+        },
+      );
     }
   }
 
