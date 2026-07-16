@@ -3,20 +3,24 @@
 // imports this) rather than here, to avoid a circular import back into
 // this file.
 export const HEX_SIZE = 24;
-// Widened from the original 20x15 (aspect ~1.14, nearly square), first to
-// 26x12 (~1.82) and then a further ~20% wider still to 31x12 (~2.17) so
-// the resulting WORLD_WIDTH/WORLD_HEIGHT (see hexGrid.js) closely matches
-// a landscape phone's own aspect ratio (~2.16) under Phaser.Scale.FIT,
-// which now fills almost the entire screen with no black bars. A 16:9
-// desktop monitor (~1.78 aspect) is comparatively narrower than that, so
-// it now letterboxes a bit top/bottom instead of side/side -- an accepted
-// tradeoff for prioritizing the phone experience. Every balance constant
-// tuned against "how many tiles are in play" (auto tile regen burst size,
-// boundary MAX_ROW_INSET/MAX_COL_INSET, etc.) is derived from
-// MAP_COLS/MAP_ROWS directly, so it scales automatically with tile count
-// rather than needing to be re-derived by hand.
-export const MAP_COLS = 31;
-export const MAP_ROWS = 12;
+// Phaser.Scale.FIT always normalizes the whole board to fill the same
+// on-screen footprint regardless of tile count -- so a tile's *visual*
+// size on a real screen is set entirely by how many tiles fit across that
+// footprint, not by HEX_SIZE (raising HEX_SIZE alone while keeping the
+// same tile count just renders at a higher internal resolution with zero
+// visual size change, since FIT scales the bigger canvas back down to the
+// same physical screen). To make every tile -- and everything sized in
+// world-pixel terms alongside it (avatars, HUD text, panels) -- read as
+// twice as large without touching a single one of those sizes by hand,
+// both axes here are halved from 31x12, so half as many (2x bigger) tiles
+// fit across the same footprint. Aspect ratio (~2.17) is preserved to
+// keep the same landscape-phone screen fit this was last tuned for. Every
+// balance constant tuned against "how many tiles are in play" (auto tile
+// regen burst size, boundary MAX_ROW_INSET/MAX_COL_INSET, etc.) is derived
+// from MAP_COLS/MAP_ROWS directly, so it scales automatically with tile
+// count rather than needing to be re-derived by hand.
+export const MAP_COLS = 16;
+export const MAP_ROWS = 6;
 
 export const TILE_STATE = {
   GONE: 0,
