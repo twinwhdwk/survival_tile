@@ -119,7 +119,6 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create(data) {
-    window.__debugScene = this; // TEMP DEBUG - remove before commit
     generateTileTextures(this);
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
 
