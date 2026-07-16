@@ -207,6 +207,23 @@ let botCounter = 0;
 // whoever is holding this.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '3927';
 const adminSockets = new Set();
+// Sticky once true for the life of this process -- deliberately NOT the
+// same thing as "an admin socket is currently connected" (adminSockets.size
+// > 0). That used to be exactly what gated new joins, which meant any
+// momentary drop of the admin's own connection (a backgrounded mobile
+// browser suspending its WebSocket, a brief network hiccup, the
+// disconnect-banner's own forced page reload swapping in a new socket.id
+// before they've logged back in as admin) instantly relocked the door for
+// every other participant with "no-session" until *someone* happened to
+// notice and re-enter the admin password -- reported in practice as
+// players unable to join right after a round had just ended, i.e. exactly
+// when the admin's device is most likely to have gone idle/backgrounded
+// waiting on the round to finish. Once an admin has authenticated even
+// once, the event is presumed genuinely underway and stays open regardless
+// of that specific socket's later connection state; resetServer/clearLobby
+// intentionally don't touch this either, since both exist to keep the same
+// event going, not to close it back up.
+let sessionOpened = false;
 
 // Bracket state: each stage is an array of "lineages" ({ members, score }).
 // Stage 1 lineages are the initial random groups; each later stage merges
@@ -600,11 +617,13 @@ function setServerHandlers() {
       const password = payload && payload.password;
       const isAdminAttempt = !!password;
 
-      // A session is considered "open" the moment at least one admin is
-      // connected — no separate open/close toggle needed. Regular joins
-      // are rejected until then; an admin's own join always goes through
-      // (that's literally what opens the session for everyone else).
-      if (!isAdminAttempt && adminSockets.size === 0) {
+      // A session is considered "open" once any admin has ever
+      // authenticated (see sessionOpened's own comment for why this is
+      // deliberately not the same check as "an admin is connected right
+      // now"). Regular joins are rejected until then; an admin's own join
+      // always goes through (that's literally what opens the session for
+      // everyone else).
+      if (!isAdminAttempt && !sessionOpened) {
         socket.emit('joinRejected', { reason: 'no-session' });
         return;
       }
@@ -615,6 +634,7 @@ function setServerHandlers() {
           return;
         }
         adminSockets.add(socket.id);
+        sessionOpened = true;
       }
 
       lobbyPlayers[socket.id] = { nickname, animalIndex: Math.floor(Math.random() * ANIMAL_COUNT) };

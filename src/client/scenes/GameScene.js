@@ -2123,11 +2123,20 @@ export default class GameScene extends Phaser.Scene {
     container.targetY = playerInfo.y;
     container.setDepth(isSelf ? 4 : 3);
 
+    // playerInfo.eliminated is only ever true here for an admin joining an
+    // already-in-progress room (adminSpectateRoom, or the stage-3+ spectator
+    // hand-off) after some players already died -- a real player's own
+    // gameStarting snapshot always arrives at round start, before anyone can
+    // be eliminated. The live 'playerEliminated' handler below applies this
+    // same alpha/scale dead-look reactively, but a late-joining spectator
+    // never saw that event fire, so without this a long-dead player's
+    // avatar would otherwise spawn in here looking fully alive.
+    const isDead = !!playerInfo.eliminated;
     container.setScale(0.2).setAlpha(0);
     this.tweens.add({
       targets: container,
-      scale: 1,
-      alpha: 1,
+      scale: isDead ? 0.85 : 1,
+      alpha: isDead ? 0.35 : 1,
       delay: Math.random() * 200,
       duration: 400,
       ease: 'Back.easeOut',

@@ -23,6 +23,17 @@ export default class ResultScene extends Phaser.Scene {
     this.socket = getSocket();
     this.status = data.status;
     this.rankingTexts = [];
+    // Phaser reuses the same Scene instance across repeated scene.start()
+    // calls rather than constructing a fresh one -- plain instance
+    // properties like this survive a scene restart even though the actual
+    // GameObjects (including showReturnButton()'s DOM button) are torn down
+    // and recreated. Without resetting this here, an admin/spectator who
+    // sits through more than one tournament in the same browser session
+    // would hit showReturnButton()'s own `if (this.hasReturnButton) return`
+    // guard still sticky true from the *previous* tournament's result
+    // screen, silently skipping the real re-add and leaving this second (or
+    // later) results screen with no button at all.
+    this.hasReturnButton = false;
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);

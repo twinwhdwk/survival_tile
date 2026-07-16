@@ -14,6 +14,18 @@ export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this win
 // early scores worse than one where everyone hangs on longer, even if
 // nobody technically "survives" to the safe zone at the buzzer.
 export const SURVIVAL_SCORE_PER_SECOND = 1;
+// 개인전 has no ghost/revival mechanic (see Room.reviveTile's SOLO guard),
+// so once only one player is left alive nothing can change that outcome —
+// every other participant is already permanently eliminated. Room.js ends
+// the round immediately in that moment rather than idling out the rest of
+// SURVIVAL_ROUND_DURATION_MS with nobody left to threaten the winner. Doing
+// so does cut their own addSurvivalScore() time short, though, which would
+// otherwise unfairly under-score a decisive early win next to another
+// concurrent SOLO room's winner who happened to survive the round's full
+// duration purely by running out the clock — this flat bonus tops the last
+// survivor up so being the one who actually won is never worth less than
+// merely surviving to the buzzer.
+export const SOLO_LAST_SURVIVOR_BONUS_SCORE = 20;
 // A 36-person (9-room) load test showed every room going to a total wipeout
 // within seconds: worst case (at the original BOT_MOVE_INTERVAL_MS=300 in
 // server.js, since raised to 600 for more human-like pacing) was

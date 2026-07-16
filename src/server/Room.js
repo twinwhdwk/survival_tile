@@ -18,6 +18,7 @@ import {
   AUTO_REGEN_SOLID_RATIO_THRESHOLD,
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
+  SOLO_LAST_SURVIVOR_BONUS_SCORE,
   REGEN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
@@ -536,8 +537,27 @@ export default class Room {
     // game for them the moment they were eliminated.
     const allHumansGone = this.gameMode !== 'SOLO'
       && this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
-    if (allEliminated || allHumansGone) {
-      this.finishRoom('all-eliminated');
+
+    // 개인전 has no ghost/revival mechanic (reviveTile's SOLO guard above),
+    // so the instant only one player is left alive the outcome is already
+    // final -- everyone else here is permanently eliminated and nothing can
+    // change that. Ending right here instead of idling out the rest of the
+    // round avoids both the "3 dead players still shown standing" staleness
+    // an admin walking into this room later would otherwise see (their own
+    // avatars simply stop updating once nothing left in the room can
+    // eliminate them) and needlessly making the winner wait out a clock
+    // with no remaining threat. See SOLO_LAST_SURVIVOR_BONUS_SCORE's own
+    // comment for why the winner gets a flat top-up here.
+    const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated && aliveCount === 1;
+    if (soloLastSurvivorStanding) {
+      const winner = Object.values(this.players).find((p) => !p.eliminated);
+      if (winner) {
+        winner.score = (winner.score || 0) + SOLO_LAST_SURVIVOR_BONUS_SCORE;
+      }
+    }
+
+    if (allEliminated || allHumansGone || soloLastSurvivorStanding) {
+      this.finishRoom(soloLastSurvivorStanding ? 'last-survivor' : 'all-eliminated');
     }
   }
 
