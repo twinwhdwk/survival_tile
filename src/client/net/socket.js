@@ -1,5 +1,6 @@
 import SocketIO from 'socket.io-client';
 import { FONT_BODY } from '../theme/Theme';
+import { showToast } from '../utilities/Toast';
 
 let socket = null;
 let statusEl = null;
@@ -82,6 +83,33 @@ export function getSocket() {
         window.location.reload();
       }
     });
+
+    // A backgrounded mobile tab can have its WebSocket silently killed by
+    // the OS/browser without the 'disconnect'/'connect' handlers above ever
+    // getting a chance to run -- both need the JS event loop actually
+    // executing, which a backgrounded tab may not get for minutes at a
+    // time. Without this, picking the phone back up just showed whatever
+    // scene was frozen on screen when it went to sleep, with no indication
+    // anything was wrong, and the only fix was manually pulling to refresh.
+    // Reloading the instant the tab comes back to the foreground and finds
+    // itself disconnected does that automatically.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !socket.connected) {
+        window.location.reload();
+      }
+    });
+
+    // resetServerState() (server.js) deliberately never disconnects the
+    // admin who triggered it, and its lobby broadcast only visibly changes
+    // anything for them if the lobby wasn't already empty -- meaning a
+    // reset against an already-quiet lobby produced literally zero on-
+    // screen feedback, reported in practice as the button "doing nothing".
+    // Wired globally here (not per-scene) since resetServer often also
+    // triggers an immediate scene transition (DashboardScene ->
+    // ResultScene via 'tournamentEnded') that would tear down a per-scene
+    // listener before this event -- emitted right alongside, same tick --
+    // ever reached it.
+    socket.on('resetServerDone', () => showToast('서버가 초기화되었습니다'));
   }
   return socket;
 }

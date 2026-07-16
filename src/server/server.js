@@ -697,6 +697,15 @@ function setServerHandlers() {
         return;
       }
       resetServerState();
+      // resetServerState() deliberately never disconnects the triggering
+      // admin (see its own comment) and broadcastLobby() only visibly
+      // changes anything for them if the lobby wasn't already empty --
+      // meaning a reset triggered against an already-quiet lobby produced
+      // literally zero on-screen feedback, reported in practice as the
+      // button "doing nothing". An explicit ack lets the client show a
+      // one-time confirmation regardless of what the lobby looked like
+      // before or after.
+      socket.emit('resetServerDone');
     });
 
     socket.on('startTournament', (payload) => {
