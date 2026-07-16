@@ -835,7 +835,7 @@ export default class Room {
     // between as if they'd been alive and scoring the whole time.
     player.lastScoreCreditAt = respawnTime;
     this.reviveCooldowns.delete(id);
-    this.emit('playerRevived', { playerId: id, nickname: player.nickname, x, y });
+    this.emit('playerRevived', { playerId: id, nickname: player.nickname, score: player.score || 0, x, y });
 
     // A revived player who just stands there has effectively taken
     // themselves back out of the round without the tile pressure everyone

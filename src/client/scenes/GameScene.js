@@ -117,6 +117,13 @@ export default class GameScene extends Phaser.Scene {
 
     this.roomId = null;
     this.roundStartTime = null;
+    // 개인전's live "내 점수" ticker (updateLiveScoreText) counts up from
+    // these rather than raw elapsed-since-roundStartTime, so a revival
+    // partway through the round doesn't make it jump to "as if alive the
+    // whole time" — reset to the player's real score-so-far and Date.now()
+    // on every revival (see handleOwnRevival).
+    this.liveScoreBaseline = 0;
+    this.liveScoreSince = null;
     this.roundDuration = null;
     this.eliminated = false;
     this.roomFinished = false;
@@ -288,6 +295,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     this.roundStartTime = roundStartTime;
+    this.liveScoreBaseline = 0;
+    this.liveScoreSince = roundStartTime;
     this.roundDuration = roundDuration;
     this.mode = mode || 'SURVIVAL';
 
@@ -1051,13 +1060,13 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
-      playerRevived: ({ playerId, nickname, x, y }) => {
+      playerRevived: ({ playerId, nickname, score, x, y }) => {
         // The team gauge filling is the only way anyone comes back (see
         // Room.respawnRandomGhost, respawnGhost's sole caller), so this
         // moment doubles as the "gauge full" announcement for the room.
         this.showBanner(`💫 부활 게이지 가득!\n${nickname || '유령'} 부활!`, '#88ff99');
         if (playerId === this.socket.id) {
-          this.handleOwnRevival(x, y);
+          this.handleOwnRevival(x, y, score);
           return;
         }
         const avatar = this.otherPlayers[playerId];
@@ -1418,10 +1427,25 @@ export default class GameScene extends Phaser.Scene {
     // player just gets the translucent spectator wash below with nothing
     // to interact with.
     if (this.gameMode !== 'SOLO') {
-      this.ghostHintText.setAlpha(0).setVisible(true);
+      this.ghostHintText.setAlpha(0).setVisible(true).setScale(1);
       this.ghostHintPanel.setVisible(true);
       fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
       this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel], alpha: 1, duration: 400 });
+
+      // A one-time fade-in reads as decoration, not an instruction — this
+      // is the only thing telling a ghost what to actually do, so it keeps
+      // a slow, continuous breathing pulse for as long as ghost mode lasts
+      // (stopped in handleOwnRevival), instead of going still and easy to
+      // tune out the moment the fade-in finishes.
+      this.ghostHintPulse = this.tweens.add({
+        targets: this.ghostHintText,
+        scale: 1.08,
+        duration: 550,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: 400,
+      });
 
       this.reviveGaugeBarBg.setVisible(true);
       this.reviveGaugeBarFill.setVisible(true).setSize(0, 8);
@@ -1452,8 +1476,18 @@ export default class GameScene extends Phaser.Scene {
   // Server-authoritative respawn (Room.respawnGhost) landed on this exact
   // client — reverses everything handleOwnElimination did, rather than
   // re-running the create()/applySnapshot() setup from scratch.
-  handleOwnRevival(x, y) {
+  handleOwnRevival(x, y, score) {
     this.eliminated = false;
+
+    // Re-anchor 개인전's live "내 점수" ticker to this exact moment (see
+    // updateLiveScoreText's comment) — otherwise it would resume counting
+    // from roundStartTime and briefly display every other alive player's
+    // identical number until the next elimination corrected it.
+    if (this.gameMode === 'SOLO') {
+      this.liveScoreBaseline = Number.isFinite(score) ? score : 0;
+      this.liveScoreSince = Date.now();
+      this.lastLiveScoreSecond = null;
+    }
 
     if (this.player) {
       this.player.setPosition(x, y);
@@ -1464,6 +1498,12 @@ export default class GameScene extends Phaser.Scene {
     if (this.ghostAuraEmitter) {
       this.ghostAuraEmitter.stop();
       this.ghostAuraEmitter = null;
+    }
+
+    if (this.ghostHintPulse) {
+      this.ghostHintPulse.stop();
+      this.ghostHintPulse = null;
+      this.ghostHintText.setScale(1);
     }
 
     this.tweens.add({ targets: [this.ghostHintText, this.ghostHintPanel, this.reviveGaugeBarBg, this.reviveGaugeBarFill], alpha: 0, duration: 300, onComplete: () => {
@@ -1521,9 +1561,15 @@ export default class GameScene extends Phaser.Scene {
     // otherwise only got a sound/vibration later, on the server's
     // 'tileRevived' reply. Most taps don't actually fill the gauge, so a
     // ghost tapping under real venue-wifi latency previously got zero
-    // confirmation at all that the tap even registered.
+    // confirmation at all that the tap even registered. A full-screen
+    // gold flash on every tap (not just successful ones) gives tapping
+    // itself a satisfying "hit," the way a rhythm game flashes on every
+    // beat regardless of score — waiting for the server's reply to know
+    // whether to flash would just reintroduce the same latency gap this
+    // is meant to close.
     playClick();
     vibrateTap();
+    this.cameras.main.flash(160, 255, 205, 60);
 
     const key = `${row}_${col}`;
     this.pendingGhostRevives.add(key);
@@ -1692,21 +1738,29 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // 개인전 has no shared score to broadcast on every tick -- the server
-  // only credits a player's real score at their own elimination or the
-  // round's end (Room.js addSurvivalScore). Approximating it locally as
-  // whole seconds since roundStartTime keeps the "내 점수" HUD live while
-  // still alive; once eliminated, the authoritative playerScore from the
-  // 'playerEliminated' event above takes over and this stops touching it.
+  // only credits a player's real score at their own elimination, revival,
+  // or the round's end (Room.js addSurvivalScore). Approximating it
+  // locally as whole seconds since liveScoreSince (reset to Date.now(),
+  // with liveScoreBaseline set to the authoritative score at that moment,
+  // on every revival — see handleOwnRevival) keeps the "내 점수" HUD live
+  // while still alive; using raw roundStartTime here instead would make
+  // this converge to the exact same number for every currently-alive
+  // player the instant any revival happened anywhere in the room, since
+  // it's the same shared timestamp for everyone — every reviving player's
+  // "elapsed since round start" HUD score would identically match every
+  // other alive player's, all appearing tied for 1st. Once eliminated,
+  // the authoritative playerScore from the 'playerEliminated' event above
+  // takes over and this stops touching it.
   updateLiveScoreText() {
-    if (this.gameMode !== 'SOLO' || this.eliminated || !this.roundStartTime) {
+    if (this.gameMode !== 'SOLO' || this.eliminated || !this.liveScoreSince) {
       return;
     }
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - this.roundStartTime) / 1000));
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - this.liveScoreSince) / 1000));
     if (elapsedSeconds === this.lastLiveScoreSecond) {
       return;
     }
     this.lastLiveScoreSecond = elapsedSeconds;
-    this.updateScoreText(elapsedSeconds * SURVIVAL_SCORE_PER_SECOND);
+    this.updateScoreText(this.liveScoreBaseline + elapsedSeconds * SURVIVAL_SCORE_PER_SECOND);
   }
 
   checkPlayerDanger() {
