@@ -26,6 +26,13 @@ export const SURVIVAL_SCORE_PER_SECOND = 1;
 // survivor up so being the one who actually won is never worth less than
 // merely surviving to the buzzer.
 export const SOLO_LAST_SURVIVOR_BONUS_SCORE = 20;
+// Once every real player in a 개인전 room is eliminated, nothing further a
+// remaining bot does is worth simulating in real time for an empty room —
+// the human never even looks at bot scores. Room.randomizeBotResults()
+// instead gives every bot a random score in [0, this), purely cosmetic
+// filler for the results screen's ranking list rather than a real measure
+// of anything.
+export const SOLO_BOT_PLACEHOLDER_SCORE_MAX = 80;
 // A 36-person (9-room) load test showed every room going to a total wipeout
 // within seconds: worst case (at the original BOT_MOVE_INTERVAL_MS=300 in
 // server.js, since raised to 600 for more human-like pacing) was

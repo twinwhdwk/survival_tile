@@ -19,6 +19,7 @@ import {
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
   SOLO_LAST_SURVIVOR_BONUS_SCORE,
+  SOLO_BOT_PLACEHOLDER_SCORE_MAX,
   REGEN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
@@ -527,28 +528,33 @@ export default class Room {
     const allEliminated = Object.values(this.players).every((p) => p.eliminated);
     // TEAM mode ends the room the instant every real human is gone even if
     // bots are still "alive" -- bots only exist for admin testing there,
-    // so there's no one left to actually watch the room continue. 개인전
-    // is a real matchmaking mode where a human plays alongside bots and
-    // (per reviveTile's own SOLO guard) has no ghost/revival mechanic —
-    // an eliminated solo player just spectates the rest of the room, so
-    // the round should keep running on its own schedule (round timeout or
-    // every remaining bot also being eliminated) instead of cutting short
-    // the instant the one human dies, which previously ended the whole
-    // game for them the moment they were eliminated.
+    // so there's no one left to actually watch the room continue.
     const allHumansGone = this.gameMode !== 'SOLO'
       && this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
 
-    // 개인전 has no ghost/revival mechanic (reviveTile's SOLO guard above),
-    // so the instant only one player is left alive the outcome is already
-    // final -- everyone else here is permanently eliminated and nothing can
-    // change that. Ending right here instead of idling out the rest of the
-    // round avoids both the "3 dead players still shown standing" staleness
-    // an admin walking into this room later would otherwise see (their own
-    // avatars simply stop updating once nothing left in the room can
-    // eliminate them) and needlessly making the winner wait out a clock
-    // with no remaining threat. See SOLO_LAST_SURVIVOR_BONUS_SCORE's own
-    // comment for why the winner gets a flat top-up here.
-    const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated && aliveCount === 1;
+    // 개인전: once every real player in the room is gone, nobody is left who
+    // would ever see how the remaining bots' round actually plays out, so
+    // rather than keep ticking them forward in real time for no one to
+    // watch, the round ends right here and randomizeBotResults() replaces
+    // every bot's own final score/standing with a placeholder -- see its
+    // own comment for why that's preferable to just freezing them at
+    // whatever mid-round state they happened to be in.
+    const soloAllHumansEliminated = this.gameMode === 'SOLO' && !allEliminated
+      && this.hasHumans
+      && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.eliminated);
+    if (soloAllHumansEliminated) {
+      this.randomizeBotResults();
+    }
+
+    // 개인전's own last-survivor case: only reachable with a *human* as the
+    // sole remaining player now -- soloAllHumansEliminated above already
+    // ends the round the instant the last human dies, so a bot can never
+    // again be the one left standing alone by the time this check runs.
+    // Still worth ending early (rather than idling out the rest of the
+    // round with no bots left to threaten them) and topping the winner's
+    // score up — see SOLO_LAST_SURVIVOR_BONUS_SCORE's own comment.
+    const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated
+      && !soloAllHumansEliminated && aliveCount === 1;
     if (soloLastSurvivorStanding) {
       const winner = Object.values(this.players).find((p) => !p.eliminated);
       if (winner) {
@@ -556,9 +562,30 @@ export default class Room {
       }
     }
 
-    if (allEliminated || allHumansGone || soloLastSurvivorStanding) {
-      this.finishRoom(soloLastSurvivorStanding ? 'last-survivor' : 'all-eliminated');
+    if (allEliminated || allHumansGone || soloAllHumansEliminated || soloLastSurvivorStanding) {
+      const reason = soloAllHumansEliminated ? 'solo-human-eliminated'
+        : (soloLastSurvivorStanding ? 'last-survivor' : 'all-eliminated');
+      this.finishRoom(reason);
     }
+  }
+
+  // 개인전 only: once every real player is gone (see soloAllHumansEliminated,
+  // this method's sole caller), there is no one left in the room whose
+  // opinion of the bots' "accuracy" matters — the operator's own call here
+  // was that continuing to simulate them in real time for an empty audience
+  // isn't worth it, and the human never looks at bot scores anyway. Forcing
+  // every bot to `eliminated: true` (regardless of whether they technically
+  // still had a live avatar the instant the round ended) keeps
+  // getPlayerResults()' shape uniform — a real mid-round bot state mixed in
+  // among faked ones would look inconsistent for no benefit, since nothing
+  // downstream distinguishes "genuinely eliminated" from "round ended
+  // around them" for a bot anyway.
+  randomizeBotResults() {
+    const bots = Object.values(this.players).filter((p) => p.isBot);
+    bots.forEach((bot) => {
+      bot.eliminated = true;
+      bot.score = Math.floor(Math.random() * SOLO_BOT_PLACEHOLDER_SCORE_MAX);
+    });
   }
 
   movePlayerTo(id, x, y) {
