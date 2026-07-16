@@ -20,6 +20,8 @@ import {
   SURVIVAL_SCORE_PER_SECOND,
   SOLO_LAST_SURVIVOR_BONUS_SCORE,
   SOLO_BOT_PLACEHOLDER_SCORE_MAX,
+  SOLO_BOT_SCORE_GAP_MIN,
+  SOLO_BOT_SCORE_GAP_MAX,
   REGEN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
@@ -582,9 +584,24 @@ export default class Room {
   // around them" for a bot anyway.
   randomizeBotResults() {
     const bots = Object.values(this.players).filter((p) => p.isBot);
+    // Shuffle first (Fisher-Yates) -- this shuffled order *is* the random
+    // ranking among the bots. Assigning each bot its own fully independent
+    // random score (the previous approach) could easily land two bots on
+    // the exact same value, which read on the results screen as a tie
+    // despite nothing about a "last survivor, everyone else already dead"
+    // outcome actually being tied. Walking the shuffled order and strictly
+    // decreasing the score every step guarantees a clean 1st/2nd/3rd/...
+    // ranking with no possible tie, while still keeping which bot lands
+    // where entirely random.
+    for (let i = bots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bots[i], bots[j]] = [bots[j], bots[i]];
+    }
+    let score = SOLO_BOT_PLACEHOLDER_SCORE_MAX;
     bots.forEach((bot) => {
       bot.eliminated = true;
-      bot.score = Math.floor(Math.random() * SOLO_BOT_PLACEHOLDER_SCORE_MAX);
+      bot.score = Math.max(0, score);
+      score -= SOLO_BOT_SCORE_GAP_MIN + Math.floor(Math.random() * (SOLO_BOT_SCORE_GAP_MAX - SOLO_BOT_SCORE_GAP_MIN + 1));
     });
   }
 
