@@ -11,9 +11,7 @@ import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
-// 5 (not the original 8) so 5*GRID_CELL_W stays inside the now-narrower
-// portrait-shaped WORLD_WIDTH (see mapConfig.js) with room to spare.
-const GRID_COLS = 5;
+const GRID_COLS = 8;
 const GRID_CELL_W = 90;
 const GRID_CELL_H = 32;
 const GRID_START_X = (WORLD_WIDTH - GRID_COLS * GRID_CELL_W) / 2 + GRID_CELL_W / 2;
