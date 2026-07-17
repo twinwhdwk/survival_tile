@@ -261,6 +261,8 @@ export default class LoginScene extends Phaser.Scene {
         this.showError('관리자 비밀번호가 틀렸습니다.');
       } else if (reason === 'no-session') {
         this.showError('아직 세션이 열리지 않았습니다. 관리자 접속을 기다려주세요.');
+      } else if (reason === 'lobby-full') {
+        this.showError('최대 인원(40명)이 가득 찼습니다.');
       } else {
         this.showError('참가할 수 없습니다.');
       }

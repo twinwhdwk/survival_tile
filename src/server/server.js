@@ -6,7 +6,9 @@ import SocketIO from 'socket.io';
 import Compression from 'compression';
 
 import { ANIMAL_COUNT } from '../shared/animals';
-import { MAX_PLAYERS, NICKNAME_MAX_LENGTH } from '../shared/roomConfig';
+import {
+  NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, STAGE_1_GROUP_COUNT,
+} from '../shared/roomConfig';
 import Room from './Room';
 
 // A crash from one bad message (or an edge case this file didn't
@@ -252,6 +254,13 @@ function sanitizeNickname(raw) {
   return raw.trim().slice(0, NICKNAME_MAX_LENGTH);
 }
 
+// MAX_LOBBY_PLAYERS caps real players + bots combined -- admins are a
+// separate spectator/operator role, never seated into a room (see
+// startStage()'s own comment on that), so they don't count toward it.
+function countNonAdminLobbyPlayers() {
+  return Object.keys(lobbyPlayers).filter((id) => !adminSockets.has(id)).length;
+}
+
 function broadcastLobby() {
   // players/phase are identical for every recipient -- only isAdmin
   // varies. A previous version personalized the *entire* payload per
@@ -281,15 +290,15 @@ function broadcastLobby() {
   io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
 }
 
-// Round 1: aim for every group to land on exactly MAX_PLAYERS (4) or
-// MAX_PLAYERS + 1 (5) members, spreading any remainder as +1 across
-// multiple groups instead of dumping it all onto a single trailing group —
-// the old fixed-chunk-then-merge-the-leftover approach could balloon one
-// group well past 5 (e.g. 11 players used to become groups of [4, 7]).
-// A handful of totals (6, 7, 11) have no exact 4-or-5 tiling at all (see
-// the coin problem for {4,5}); those fall back to one oversized last group,
-// which only matters for tiny ad-hoc tests since real tournaments run with
-// far more players than that.
+// Round 1 always targets exactly STAGE_1_GROUP_COUNT (8) groups, sized as
+// evenly as possible -- an operator running a fixed-format event wants a
+// predictable stage 1 shape regardless of how close turnout lands to
+// MAX_LOBBY_PLAYERS (40), rather than however many fixed-MAX_PLAYERS-size
+// groups an unbounded headcount used to produce. Any remainder from an
+// uneven split is spread as +1 across multiple groups instead of dumping
+// it all onto a single trailing group. Only degrades below 8 groups when
+// there are literally fewer than 8 people at all (never more groups than
+// people) -- a small ad-hoc test session, not a real capped-at-40 event.
 function chunkForInitialRound(members) {
   const shuffled = [...members].sort(() => Math.random() - 0.5);
   const total = shuffled.length;
@@ -297,16 +306,18 @@ function chunkForInitialRound(members) {
     return [];
   }
 
-  const numGroups = Math.max(1, Math.floor(total / MAX_PLAYERS));
-  const sizes = new Array(numGroups).fill(MAX_PLAYERS);
-  let remaining = total - numGroups * MAX_PLAYERS;
-
+  const numGroups = Math.max(1, Math.min(STAGE_1_GROUP_COUNT, total));
+  const baseSize = Math.floor(total / numGroups);
+  const sizes = new Array(numGroups).fill(baseSize);
+  // total = numGroups * baseSize + remaining, and by definition of that
+  // division remaining is always < numGroups -- so this loop alone always
+  // fully spreads it (never leaves a trailing remainder to dump on the
+  // last group the way the old MAX_PLAYERS-divided version occasionally
+  // needed to).
+  let remaining = total - numGroups * baseSize;
   for (let g = 0; g < numGroups && remaining > 0; g++) {
     sizes[g] += 1;
     remaining -= 1;
-  }
-  if (remaining > 0) {
-    sizes[numGroups - 1] += remaining;
   }
 
   const groups = [];
@@ -650,12 +661,27 @@ function setServerHandlers() {
         sessionOpened = true;
       }
 
+      // Admins never occupy a player slot (checked above via
+      // countNonAdminLobbyPlayers' own filter), so only a regular join can
+      // ever hit this -- an admin's own join always goes through.
+      if (!isAdminAttempt && countNonAdminLobbyPlayers() >= MAX_LOBBY_PLAYERS) {
+        socket.emit('joinRejected', { reason: 'lobby-full' });
+        return;
+      }
+
       lobbyPlayers[socket.id] = { nickname, animalIndex: Math.floor(Math.random() * ANIMAL_COUNT) };
       broadcastLobby();
     });
 
     socket.on('addBot', () => {
       if (!adminSockets.has(socket.id) || globalPhase !== 'LOBBY') {
+        return;
+      }
+      // Silently no-op at the cap, matching this handler's existing
+      // early-return style for every other invalid state above -- the
+      // roster grid the admin is already looking at makes "it stopped
+      // growing" self-evident without a separate rejection event.
+      if (countNonAdminLobbyPlayers() >= MAX_LOBBY_PLAYERS) {
         return;
       }
       botCounter += 1;
