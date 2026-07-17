@@ -9,18 +9,19 @@ export const HEX_SIZE = 24;
 // footprint, not by HEX_SIZE (raising HEX_SIZE alone while keeping the
 // same tile count just renders at a higher internal resolution with zero
 // visual size change, since FIT scales the bigger canvas back down to the
-// same physical screen). To make every tile -- and everything sized in
-// world-pixel terms alongside it (avatars, HUD text, panels) -- read as
-// twice as large without touching a single one of those sizes by hand,
-// both axes here are halved from 31x12, so half as many (2x bigger) tiles
-// fit across the same footprint. Aspect ratio (~2.17) is preserved to
-// keep the same landscape-phone screen fit this was last tuned for. Every
-// balance constant tuned against "how many tiles are in play" (auto tile
-// regen burst size, boundary MAX_ROW_INSET/MAX_COL_INSET, etc.) is derived
-// from MAP_COLS/MAP_ROWS directly, so it scales automatically with tile
-// count rather than needing to be re-derived by hand.
-export const MAP_COLS = 16;
-export const MAP_ROWS = 6;
+// same physical screen). The tile grid is one shared, server-authoritative
+// board -- every viewer of a room (mobile players and an admin spectating
+// from a PC) sees the exact same cells, so there's no way to give the
+// admin a more detailed grid without every mobile player's tiles shrinking
+// by the same amount too. 18x7 (up slightly from 16x6) is a compromise
+// nudge in that direction, not a full reversion to the original 31x12.
+// Aspect ratio (~2.12) stays close to a landscape phone's own (~2.16).
+// Every balance constant tuned against "how many tiles are in play" (auto
+// tile regen burst size, boundary MAX_ROW_INSET/MAX_COL_INSET, etc.) is
+// derived from MAP_COLS/MAP_ROWS directly, so it scales automatically with
+// tile count rather than needing to be re-derived by hand.
+export const MAP_COLS = 18;
+export const MAP_ROWS = 7;
 
 export const TILE_STATE = {
   GONE: 0,
