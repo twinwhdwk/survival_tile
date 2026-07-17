@@ -67,6 +67,19 @@ const MOVEMENT_EMIT_MIN_INTERVAL_MS = 50;
 
 const BOSS_BAR_WIDTH = 220;
 
+// The generic mid-round announcement banner (round start, last stand,
+// boss defeated, ...) was pinned at WORLD_HEIGHT/2 - 60. That's harmless
+// on a tall canvas, but WORLD_HEIGHT is derived from MAP_COLS/MAP_ROWS
+// (mapConfig.js), which have been re-tuned for gameplay-tile-size reasons
+// down to as little as ~270px -- at that size WORLD_HEIGHT/2 - 60 (75)
+// lands almost directly on top of the boss HP panel (~y 38-82, BOSS mode
+// only), so the two visibly overlapped. A fixed offset from the top (like
+// LoginScene/ResultScene/LobbyScene's own fixes for the same root cause)
+// keeps the banner clear of that panel regardless of how short
+// WORLD_HEIGHT gets, at the cost of no longer being truly centered on a
+// much taller canvas.
+const BANNER_Y = 128;
+
 // Room.js's damageBoss() emits 'bossDamaged' (defeated: true) and then
 // calls finishRoom() on the very next line -- zero delay between them, so
 // 'roomResult' lands at this client within milliseconds of the celebration
@@ -472,7 +485,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
 
-    this.bannerText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, '', {
+    this.bannerText = this.add.text(WORLD_WIDTH / 2, BANNER_Y, '', {
       fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: COLORS.textPrimary,
@@ -1685,7 +1698,7 @@ export default class GameScene extends Phaser.Scene {
     // — redraws outright to the new size rather than resizing a persistent
     // shape, so there's no display-origin caching to fight with the way a
     // Rectangle would have needed.
-    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 60, bounds.width + 40, bounds.height + 24, {
+    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, BANNER_Y, bounds.width + 40, bounds.height + 24, {
       fillColor: 0x000000, fillAlpha: 0.45, radius: 10,
     });
     this.bannerBackdrop.setVisible(true).setAlpha(1);
