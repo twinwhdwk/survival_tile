@@ -25,19 +25,6 @@ import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND } from '.
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
-// Flat-top hexagon outline, in local coordinates centered on (0,0) — reused
-// for both a tile's click/hover hit area and the ghost-revive highlight, so
-// interaction only triggers inside the actual hexagon rather than its
-// rectangular bounding box.
-function hexPoints(radius) {
-  const points = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i);
-    points.push(radius * Math.cos(angle), radius * Math.sin(angle));
-  }
-  return points;
-}
-
 // The joystick lives as plain DOM elements pinned to the real viewport
 // (position:fixed), not Phaser GameObjects -- see createJoystick()'s own
 // comment for why. Sizes are real CSS pixels, not world units, and are
@@ -138,7 +125,15 @@ const OTHER_PLAYER_LERP_TAU = 70;
 // GHOST_REVIVE_COOLDOWN_MS rate. Swapped out for the "라스트 스탠드" copy while
 // that's active (see the lastStandActivated handler) and restored here once
 // the server signals it's deactivated again.
-const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 무너진 칸을 클릭해 복구하세요 (모두의 게이지가 차면 유령 1명 부활!)';
+const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치하세요 (모두의 게이지가 차면 유령 1명 부활!)';
+
+// Throttles both the golden tap effect and the server emit while a ghost
+// keeps their finger down and drags across the screen (see
+// handleGhostScreenTap()) -- comfortably below GHOST_REVIVE_LAST_STAND_COOLDOWN_MS
+// (bossConfig.js, 400ms) so a last-stand ghost's faster server cooldown is
+// never the bottleneck, while still nowhere near firing on every single
+// pointermove pixel.
+const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 
 export default class GameScene extends Phaser.Scene {
 
@@ -187,7 +182,7 @@ export default class GameScene extends Phaser.Scene {
     this.lastRemainingSeconds = null;
     this.currentSafeBounds = null;
     this.countdownActive = false;
-    this.pendingGhostRevives = new Set();
+    this.lastGhostTapEffectAt = 0;
     this.wasInDanger = false;
     this.movementEmitLast = 0;
     this.movementEmitTimer = null;
@@ -197,6 +192,21 @@ export default class GameScene extends Phaser.Scene {
     this.createHud();
     this.createJoystick();
     this.bindSocketEvents();
+
+    // Ghost mode's entire input surface — see handleGhostScreenTap() for
+    // why this is a scene-level listener (fires for every touch/drag
+    // anywhere on screen) rather than a per-tile one. Registered
+    // unconditionally; the handler itself gates on this.eliminated so it's
+    // a no-op for anyone still alive. Phaser tears down and rebuilds a
+    // fresh InputPlugin (and all its listeners) on every scene
+    // create/shutdown cycle, so this never double-registers across the
+    // stage-2+ re-entries into this same scene.
+    this.input.on('pointerdown', (pointer) => this.handleGhostScreenTap(pointer));
+    this.input.on('pointermove', (pointer) => {
+      if (pointer.isDown) {
+        this.handleGhostScreenTap(pointer);
+      }
+    });
     this.applySnapshot(data);
   }
 
@@ -250,6 +260,21 @@ export default class GameScene extends Phaser.Scene {
       alpha: { start: 1, end: 0 },
       gravityY: 260,
       tint: [0xff6633, 0xff2222, 0x8a1a0a],
+      quantity: 0,
+      on: false,
+    });
+
+    // One-shot golden burst at wherever a ghost's finger actually is (see
+    // handleGhostScreenTap) — same shape as hitEmitter, just gold instead of
+    // the boss-hit red, so a ghost's own tap reads as a distinct kind of
+    // impact rather than reusing the "something got hurt" color.
+    this.ghostTapEmitter = this.add.particles('particle_spark').setDepth(20).createEmitter({
+      speed: { min: 60, max: 160 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 220, max: 380 },
+      scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      tint: 0xffd700,
       quantity: 0,
       on: false,
     });
@@ -592,11 +617,6 @@ export default class GameScene extends Phaser.Scene {
       .setDepth(17);
 
     this.bannerBackdrop = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
-
-    this.reviveHighlight = this.add.polygon(0, 0, hexPoints(HEX_WIDTH / 2 - 2), 0x88ccff, 0.25)
-      .setStrokeStyle(2, 0x88ccff, 0.9)
-      .setDepth(0)
-      .setVisible(false);
 
     this.boundaryOutline = this.add.graphics().setDepth(2).setVisible(false);
     this.boundaryOutlineRect = null;
@@ -1085,14 +1105,13 @@ export default class GameScene extends Phaser.Scene {
         playCollapse();
       },
 
-      tileRevived: ({ row, col }) => {
-        // Auto-regen bursts also fire this same event, so without tracking
-        // which tiles *this* ghost actually clicked, a successful click and
-        // an unrelated ambient regen elsewhere would look identical — this
-        // gives the deliberate action its own distinct payoff.
-        const key = `${row}_${col}`;
-        if (this.pendingGhostRevives.has(key)) {
-          this.pendingGhostRevives.delete(key);
+      tileRevived: ({ row, col, causedBy }) => {
+        // Auto-regen bursts (and other players'/bots' taps) also fire this
+        // same event with no causedBy of their own — Room.reviveTile() only
+        // sets it for a real ghost tap, so this is the only case that gets
+        // the deliberate-action payoff below rather than looking identical
+        // to an unrelated ambient regen elsewhere on the board.
+        if (causedBy === this.socket.id) {
           const { x: reviveX, y: reviveY } = hexToPixel(row, col);
           this.showFloatingLabel(reviveX, reviveY, '복구!', '#88ccff');
           vibrateTap();
@@ -1139,7 +1158,7 @@ export default class GameScene extends Phaser.Scene {
         this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
         this.roomTransitionHoldUntil = this.time.now + LAST_STAND_BANNER_MS;
         if (this.eliminated) {
-          this.ghostHintText.setText('지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지 채워 동료를 부활시키세요!');
+          this.ghostHintText.setText('지금 미친듯이 화면을 터치하세요! 게이지 채워 동료를 부활시키세요!');
           fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
         }
       },
@@ -1661,59 +1680,39 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  handleTileClick(row, col) {
+  // Ghost mode's whole input surface, registered once in create() as a
+  // scene-level 'pointerdown'/'pointermove' listener (not a per-tile one —
+  // there's no longer a specific tile to aim for) — a ghost just keeps
+  // touching/dragging across the screen and every point they touch fills
+  // the shared revival gauge a little, with the server itself picking which
+  // collapsed tile actually comes back (see Room.reviveTile()'s auto-pick
+  // branch). Throttled to GHOST_TAP_EFFECT_INTERVAL_MS so a held drag
+  // doesn't spawn a golden burst (or a socket emit) on every single
+  // rendered pointermove sample.
+  handleGhostScreenTap(pointer) {
     // 개인전 has no ghost tile-revival mechanic at all -- an eliminated
-    // solo player just spectates the rest of their room, so tapping a
-    // collapsed tile is a dead click rather than the team-mode revive tap.
+    // solo player just spectates the rest of their room, so touching the
+    // screen is inert rather than the team-mode revive gesture.
     if (!this.eliminated || this.roomFinished || this.gameMode === 'SOLO') {
       return;
     }
-    if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
+
+    const now = this.time.now;
+    if (now - this.lastGhostTapEffectAt < GHOST_TAP_EFFECT_INTERVAL_MS) {
       return;
     }
+    this.lastGhostTapEffectAt = now;
 
-    // Every other interactive click in the app (DOM buttons, dashboard
-    // cards) gets instant feedback the moment it's tapped -- this one
-    // otherwise only got a sound/vibration later, on the server's
-    // 'tileRevived' reply. Most taps don't actually fill the gauge, so a
-    // ghost tapping under real venue-wifi latency previously got zero
-    // confirmation at all that the tap even registered. A full-screen
-    // gold flash on every tap (not just successful ones) gives tapping
-    // itself a satisfying "hit," the way a rhythm game flashes on every
-    // beat regardless of score — waiting for the server's reply to know
-    // whether to flash would just reintroduce the same latency gap this
-    // is meant to close.
+    // Same reasoning as the old per-tile click's own flash: instant
+    // feedback on every touch regardless of whether the server's cooldown
+    // will actually accept it, rather than waiting on a round-trip to know
+    // whether to react at all.
     playClick();
     vibrateTap();
-    this.cameras.main.flash(160, 255, 205, 60);
+    this.spawnImpactRing(pointer.worldX, pointer.worldY, { color: 0xffd700, endScale: 3, duration: 300 });
+    this.ghostTapEmitter.explode(8, pointer.worldX, pointer.worldY);
 
-    const key = `${row}_${col}`;
-    this.pendingGhostRevives.add(key);
-    this.time.delayedCall(1500, () => this.pendingGhostRevives.delete(key));
-
-    this.socket.emit('reviveTile', { row, col });
-  }
-
-  handleTileHover(row, col, isOver) {
-    if (!isOver || !this.eliminated || this.roomFinished || this.gameMode === 'SOLO') {
-      this.reviveHighlight.setVisible(false);
-      this.input.setDefaultCursor('default');
-      return;
-    }
-    if (!this.localTileMap || this.localTileMap[row][col] !== TILE_STATE.GONE) {
-      this.reviveHighlight.setVisible(false);
-      this.input.setDefaultCursor('default');
-      return;
-    }
-    const { x: hoverX, y: hoverY } = hexToPixel(row, col);
-    this.reviveHighlight.setPosition(hoverX, hoverY).setVisible(true);
-    // Every tile is technically interactive at all times (so hover/click
-    // handlers exist unconditionally), but only a GONE tile while eliminated
-    // is ever actually clickable -- on desktop, mousing over one of those
-    // otherwise still showed the plain default arrow, giving no cue this
-    // spot (unlike every other tile) does something. Matches the
-    // reviveHighlight glow's own condition exactly.
-    this.input.setDefaultCursor('pointer');
+    this.socket.emit('reviveTile', {});
   }
 
   showBanner(message, color) {
@@ -1987,13 +1986,6 @@ export default class GameScene extends Phaser.Scene {
     this.tileSprites = {};
     this.localTileMap = tileMap;
 
-    // A hex tile's texture image is a rectangular canvas (HEX_WIDTH x
-    // HEX_HEIGHT) with transparent corners, so the default rectangular
-    // hit area from a bare setInteractive() would let clicks in those
-    // transparent corners register on the wrong tile — an explicit hex
-    // polygon hit area (same shape drawn into the texture) fixes that.
-    const hitArea = new Phaser.Geom.Polygon(hexPoints(HEX_WIDTH / 2 - 1));
-
     for (let row = 0; row < MAP_ROWS; row++) {
       for (let col = 0; col < MAP_COLS; col++) {
         const { x, y } = hexToPixel(row, col);
@@ -2006,10 +1998,6 @@ export default class GameScene extends Phaser.Scene {
         tile.col = col;
         tile.setDepth(-1);
         tile.setVisible(state !== TILE_STATE.GONE);
-        tile.setInteractive(hitArea, Phaser.Geom.Polygon.Contains);
-        tile.on('pointerdown', () => this.handleTileClick(row, col));
-        tile.on('pointerover', () => this.handleTileHover(row, col, true));
-        tile.on('pointerout', () => this.handleTileHover(row, col, false));
         this.tileSprites[`${row}_${col}`] = tile;
 
         if (state === TILE_STATE.WARNING) {

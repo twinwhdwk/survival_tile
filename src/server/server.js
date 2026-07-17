@@ -281,15 +281,18 @@ function broadcastLobby() {
   io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
 }
 
-// Round 1: aim for every group to land on exactly MAX_PLAYERS (4) or
-// MAX_PLAYERS + 1 (5) members, spreading any remainder as +1 across
-// multiple groups instead of dumping it all onto a single trailing group —
-// the old fixed-chunk-then-merge-the-leftover approach could balloon one
-// group well past 5 (e.g. 11 players used to become groups of [4, 7]).
-// A handful of totals (6, 7, 11) have no exact 4-or-5 tiling at all (see
-// the coin problem for {4,5}); those fall back to one oversized last group,
-// which only matters for tiny ad-hoc tests since real tournaments run with
-// far more players than that.
+// Round 1: groups are capped at MAX_PLAYERS (4), full stop — never landed
+// on previously, since the old approach folded any remainder into an
+// existing group instead of opening a new one (5 players used to become a
+// single group of 5, 11 became [5, 6] — both already over the cap this
+// function's own name implies). Now: however many MAX_PLAYERS-sized groups
+// fit is the starting count, plus one more only if there's a remainder at
+// all (5 players -> 2 groups, not 1), and the total is then spread as
+// evenly as possible across however many groups that ends up being (sizes
+// differing by at most 1) rather than cramming the leftover onto whichever
+// group happened to be first/last. ceil(total / ceil(total / MAX_PLAYERS))
+// never exceeds MAX_PLAYERS for any total, so the cap holds regardless of
+// headcount.
 function chunkForInitialRound(members) {
   const shuffled = [...members].sort(() => Math.random() - 0.5);
   const total = shuffled.length;
@@ -297,17 +300,16 @@ function chunkForInitialRound(members) {
     return [];
   }
 
-  const numGroups = Math.max(1, Math.floor(total / MAX_PLAYERS));
-  const sizes = new Array(numGroups).fill(MAX_PLAYERS);
-  let remaining = total - numGroups * MAX_PLAYERS;
-
-  for (let g = 0; g < numGroups && remaining > 0; g++) {
-    sizes[g] += 1;
-    remaining -= 1;
-  }
-  if (remaining > 0) {
-    sizes[numGroups - 1] += remaining;
-  }
+  const numGroups = Math.max(1, Math.ceil(total / MAX_PLAYERS));
+  const base = Math.floor(total / numGroups);
+  let extra = total % numGroups;
+  const sizes = new Array(numGroups).fill(base).map((size) => {
+    if (extra > 0) {
+      extra -= 1;
+      return size + 1;
+    }
+    return size;
+  });
 
   const groups = [];
   let cursor = 0;
@@ -768,10 +770,12 @@ function setServerHandlers() {
       room.movePlayerTo(socket.id, movementData.x, movementData.y);
     });
 
+    // A ghost's tap is now a bare "I touched the screen" signal with no
+    // target of its own (see GameScene's handleGhostScreenTap) — Room.js's
+    // reviveTile() picks which collapsed tile actually comes back itself
+    // when row/col aren't a valid, currently-GONE tile, so an empty payload
+    // is the normal case here, not a malformed one.
     socket.on('reviveTile', (payload) => {
-      if (!payload || !Number.isInteger(payload.row) || !Number.isInteger(payload.col)) {
-        return;
-      }
       const roomId = socketRoomMap.get(socket.id);
       if (!roomId) {
         return;
@@ -780,7 +784,8 @@ function setServerHandlers() {
       if (!room) {
         return;
       }
-      room.reviveTile(socket.id, payload.row, payload.col);
+      const hasCoords = payload && Number.isInteger(payload.row) && Number.isInteger(payload.col);
+      room.reviveTile(socket.id, hasCoords ? payload.row : undefined, hasCoords ? payload.col : undefined);
     });
 
     // Admin-only "balance lever" triggered from the dashboard (or a
