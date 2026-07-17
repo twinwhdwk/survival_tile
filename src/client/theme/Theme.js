@@ -78,6 +78,7 @@ export const FONT_DISPLAY_SAMPLE_TEXT = [
 // Text object, so they were never exposed to this bug in the first place.
 export const FONT_BODY_SAMPLE_TEXT = [
   '더블클릭: 게임 화면 보기',
+  '탈락 - 다른 조의 경기를 지켜보는 중',
   '현황을 불러오는 중...',
   '👁 관전 모드 - 참가자들의 게임을 지켜보는 중',
   '유령 모드 - 무너진 칸을 클릭해 복구하세요 (모두의 게이지가 차면 유령 1명 부활!)',
@@ -104,9 +105,9 @@ export const FONT_BODY_SAMPLE_TEXT = [
   '조 생존',
   '점수 남은시간',
   '1위 🥇🥈🥉',
-  '타일을 클릭하면 PRA에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)',
+  '타일을 클릭하면 불량에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)',
   '공격 0회',
-  'PRA 처치! 잠시 후 초기화됩니다',
+  '불량 처치! 잠시 후 초기화됩니다',
   '1팀 2팀 3팀 4팀',
 ].join(' ');
 
