@@ -330,8 +330,9 @@ export default class Room {
     // shrinks tiles out from under some of them.
     this.bombTiles = [];
     const bombTileCount = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
+    const initialZoneTiles = this.getSafeZoneTiles();
     for (let i = 0; i < bombTileCount; i++) {
-      const spot = this.pickBombTileSpot();
+      const spot = this.pickBombTileSpot(initialZoneTiles);
       if (spot) {
         this.bombTiles.push(spot);
       }
@@ -531,9 +532,13 @@ export default class Room {
   // Bomb tiles always live inside the current safe zone (same reasoning as
   // pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
   // behind outside it would strand a hazard nobody can reach) and never
-  // overlap another already-armed bomb tile.
-  pickBombTileSpot() {
-    const candidates = this.getSafeZoneTiles().filter(({ row, col }) => {
+  // overlap another already-armed bomb tile. zoneTiles is optional -- a
+  // single call can let it default to a fresh scan, but a caller placing
+  // several bomb tiles in one pass (the constructor, maintainBombTiles())
+  // computes the (unchanging, mid-tick) zone once and passes it in rather
+  // than re-scanning the full board on every iteration.
+  pickBombTileSpot(zoneTiles = this.getSafeZoneTiles()) {
+    const candidates = zoneTiles.filter(({ row, col }) => {
       if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
         return false;
       }
@@ -666,13 +671,21 @@ export default class Room {
     let changed = this.bombTiles.length !== before;
 
     const target = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
-    while (this.bombTiles.length < target) {
-      const spot = this.pickBombTileSpot();
-      if (!spot) {
-        break;
+    if (this.bombTiles.length < target) {
+      // Computed once for the whole top-up pass rather than re-scanning the
+      // full board inside pickBombTileSpot() on every iteration -- the
+      // zone's own bounds/tile states can't change mid-call (no collapse
+      // happens synchronously here), only this.bombTiles itself does, and
+      // pickBombTileSpot() still reads that fresh each call.
+      const zoneTiles = this.getSafeZoneTiles();
+      while (this.bombTiles.length < target) {
+        const spot = this.pickBombTileSpot(zoneTiles);
+        if (!spot) {
+          break;
+        }
+        this.bombTiles.push(spot);
+        changed = true;
       }
-      this.bombTiles.push(spot);
-      changed = true;
     }
 
     if (changed) {
@@ -1431,11 +1444,22 @@ export default class Room {
         // reviveTile() already no-ops for SOLO, but skip the
         // pickRandomGoneTile() scan entirely there too — there's no point
         // spending a tile scan every tick on a tap that can never do
-        // anything in this mode.
+        // anything in this mode. Same reasoning for the cooldown check
+        // below: reviveTile() re-derives and checks this exact same
+        // cooldown internally before touching a target, so without this a
+        // ghost bot was paying for a full 7x18 grid scan (pickRandomGoneTile)
+        // on every BOT_TICK_MS tick (100ms) even while its own tap could
+        // never land -- live (non-ghost) bots already gate their own
+        // movement scan the same way via botNextMoveAt.
         if (this.gameMode !== 'SOLO') {
-          const target = this.pickRandomGoneTile();
-          if (target) {
-            this.reviveTile(id, target.row, target.col);
+          const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+          const cooldownMs = aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
+          const lastRevive = this.reviveCooldowns.get(id) || 0;
+          if (Date.now() - lastRevive >= cooldownMs) {
+            const target = this.pickRandomGoneTile();
+            if (target) {
+              this.reviveTile(id, target.row, target.col);
+            }
           }
         }
         return;
