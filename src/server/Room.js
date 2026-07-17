@@ -69,14 +69,16 @@ const SQUARE_EDGE = Math.min(MAP_ROWS - 2 * MAX_ROW_INSET, MAP_COLS - 2 * MAX_CO
 // Past the square point above, the boundary used to just stop for the
 // rest of the round — MAX_ROW_INSET/MAX_COL_INSET each independently stop
 // their own axis "one ring short of fully closing" (see their own comment
-// below), but neither one accounts for the *other* axis having already
-// caught up. Once that happens, further shrink ticks now inset both axes
-// together instead (computeInsets()'s `extra` term) so a square boundary
-// keeps closing in exactly like the rectangle did before it, down to a
-// floor of SQUARE_MIN_EDGE tiles per side — same "leave one ring standing
-// rather than a guaranteed-death sliver" reasoning as the rectangle phase,
-// just applied to the square phase too.
-const SQUARE_MIN_EDGE = 2;
+// below), but neither one accounted for the *other* axis having already
+// caught up. computeInsets()'s `extra` term below fixes that generally
+// (further shrink ticks past the square point inset both axes together,
+// instead of one axis freezing while the other kept going), but a 4x4
+// square was judged tight enough on its own — SQUARE_MIN_EDGE equal to
+// SQUARE_EDGE keeps EXTRA_SQUARE_INSET_MAX at 0 for the current map size,
+// i.e. the square still holds there for the rest of the round, same as
+// before. Lower this (2, for instance) to let the square itself keep
+// closing in further once reached.
+const SQUARE_MIN_EDGE = SQUARE_EDGE;
 const EXTRA_SQUARE_INSET_MAX = Math.max(0, Math.floor((SQUARE_EDGE - SQUARE_MIN_EDGE) / 2));
 
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
