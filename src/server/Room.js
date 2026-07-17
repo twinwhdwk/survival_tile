@@ -228,7 +228,9 @@ export default class Room {
     this.lastAdminCriticalAt = 0;
     this.lastAdminShatterAt = 0;
 
-    members.forEach(({ socketId, nickname, animalIndex, isBot }) => {
+    members.forEach(({
+      socketId, nickname, animalIndex, isBot, score,
+    }) => {
       const spawn = this.getRandomSpawn();
       this.players[socketId] = {
         x: spawn.x,
@@ -247,11 +249,15 @@ export default class Room {
         disconnected: false,
         isBot: !!isBot,
         // Individual score, credited alongside the shared this.score by
-        // addSurvivalScore() below — TEAM mode doesn't rank by this (the
-        // room's combined this.score is what carries forward), but SOLO
+        // addSurvivalScore() below — TEAM mode doesn't rank by this for
+        // finalRankings, but each player's own carried-in value (their
+        // prior stage's total, seeded here from `score` on their members
+        // entry -- see formStage2Groups()/finishRoom()'s `advancing` list
+        // in server.js) is exactly how a stage-2+ room continues crediting
+        // someone's earlier-stage score instead of resetting it. SOLO
         // mode's finalRankings are built entirely from each player's own
         // value here (see Room.getPlayerResults()).
-        score: 0,
+        score: score || 0,
         // Start of the window addSurvivalScore() will next credit — see that
         // method for why this can't just always be roundStartTime once
         // ghost respawns are in play.
@@ -1474,10 +1480,16 @@ export default class Room {
 
     const totalHumans = Object.keys(this.players).length;
 
+    // `score` here is each player's own individual total (not this.score,
+    // the room's shared pool) -- carried forward so a stage-2+ room's
+    // constructor can seed it back into player.score, giving every survivor
+    // an additive running total across stages instead of resetting at each
+    // new room. See formStage2Groups() in server.js, the first consumer.
     const advancing = survivorIds.map((id) => ({
       socketId: id,
       nickname: this.players[id].nickname,
       animalIndex: this.players[id].animalIndex,
+      score: this.players[id].score || 0,
     }));
 
     // onFinished may end the whole tournament right here (this was the last

@@ -8,6 +8,7 @@ import Compression from 'compression';
 import { ANIMAL_COUNT } from '../shared/animals';
 import {
   NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, STAGE_1_GROUP_COUNT,
+  STAGE_2_GROUP_COUNT, STAGE_2_MAX_ROOM_SIZE,
 } from '../shared/roomConfig';
 import Room from './Room';
 
@@ -346,6 +347,65 @@ function mergeAdjacentLineages(results) {
   return merged;
 }
 
+// Stage 2 pools every stage-1 survivor across all STAGE_1_GROUP_COUNT rooms
+// (rather than mergeAdjacentLineages' pairwise merge) and randomly
+// redistributes them into exactly STAGE_2_GROUP_COUNT new groups, evenly
+// sized and capped at STAGE_2_MAX_ROOM_SIZE per room. Each returning
+// lineage's own `score` is always 0 -- a fresh shared team score for the
+// reshuffled group, not a continuation of any one stage-1 room's pool. Each
+// pooled member already carries their own individual `score` (their stage-1
+// total, added onto finishRoom()'s `advancing` list in Room.js) which rides
+// along untouched so Room's constructor can seed it back into player.score
+// -- see roomConfig.js's own comment on these two constants.
+function formStage2Groups(results) {
+  const pool = [];
+  results.forEach((lineage) => {
+    if (!lineage || lineage.members.length === 0) {
+      return;
+    }
+    lineage.members.forEach((m) => pool.push(m));
+  });
+  if (pool.length === 0) {
+    return [];
+  }
+
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const total = shuffled.length;
+  const numGroups = Math.max(1, Math.min(STAGE_2_GROUP_COUNT, total));
+  const baseSize = Math.floor(total / numGroups);
+  const sizes = new Array(numGroups).fill(baseSize);
+  let remaining = total - numGroups * baseSize;
+  for (let g = 0; g < numGroups && remaining > 0; g++) {
+    sizes[g] += 1;
+    remaining -= 1;
+  }
+
+  // baseSize can't realistically exceed STAGE_2_MAX_ROOM_SIZE (40 stage-1
+  // entrants max / 4 groups = 10 even at 100% survival), but guard
+  // explicitly rather than assume -- any group that would overflow spills
+  // its excess into extra trailing group(s) instead of overloading a room.
+  const cappedSizes = [];
+  sizes.forEach((size) => {
+    let remainingSize = size;
+    while (remainingSize > STAGE_2_MAX_ROOM_SIZE) {
+      cappedSizes.push(STAGE_2_MAX_ROOM_SIZE);
+      remainingSize -= STAGE_2_MAX_ROOM_SIZE;
+    }
+    cappedSizes.push(remainingSize);
+  });
+
+  const groups = [];
+  let cursor = 0;
+  cappedSizes.forEach((size) => {
+    if (size === 0) {
+      return;
+    }
+    groups.push({ members: shuffled.slice(cursor, cursor + size), score: 0 });
+    cursor += size;
+  });
+  return groups;
+}
+
 function startStage(lineages, stage, gameMode = 'TEAM') {
   const active = lineages
     .map(({ members, score }) => ({
@@ -528,6 +588,20 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
       });
     }
     return endTournament();
+  }
+
+  // Stage 1 -> 2 pools and randomly reshuffles all survivors into exactly
+  // STAGE_2_GROUP_COUNT groups (see formStage2Groups) instead of merging
+  // adjacent lineages pairwise -- the fixed 8-group-then-4-group bracket
+  // shape the operator wants, replacing the old unbounded pairwise-merge
+  // bracket for this specific transition.
+  if (currentStage === 1) {
+    const stage2Groups = formStage2Groups(stageResults);
+    if (stage2Groups.length === 0) {
+      return endTournament();
+    }
+    startStage(stage2Groups, 2, 'TEAM');
+    return undefined;
   }
 
   const merged = mergeAdjacentLineages(stageResults);
