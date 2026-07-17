@@ -5,4 +5,4 @@
 // Cloud Run URL, not this one. Any on-screen "참가 주소" display should use
 // this constant instead of `window.location.origin` so it always matches the
 // address that was actually shared with participants.
-export const PUBLIC_SITE_URL = 'https://survival-tile-game.web.app';
+export const PUBLIC_SITE_URL = 'https://fil2.web.app';
