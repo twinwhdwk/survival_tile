@@ -53,10 +53,18 @@ export function generateParticleTextures(scene) {
 }
 
 export function generateTileTextures(scene) {
+  // Warm bronze/stone tones -- previously a cool navy/periwinkle-blue pair,
+  // the same "generic cold UI" palette Theme.js's own panels moved away
+  // from in favor of a warm ember family. The board is the single most
+  // visible thing on screen during actual play, so leaving it on the old
+  // cool palette while every HUD panel around it went warm was the biggest
+  // remaining source of the app reading as visually unfinished/inconsistent.
+  // tile_warning stays a hot coral-red -- already warm, and needs to read
+  // as "danger" clearly against the new warmer solid tiles regardless.
   const defs = {
-    tile_solid: { top: 0x454b6e, bottom: 0x282c46, border: 0x767fb8 },
-    tile_solid_b: { top: 0x3c4162, bottom: 0x22253d, border: 0x6b73a3 },
-    tile_warning: { top: 0xff6b5b, bottom: 0xa82c1a, border: 0xffc4b0 },
+    tile_solid: { top: 0x6b5636, bottom: 0x2e2115, border: 0xd9a95f },
+    tile_solid_b: { top: 0x5c4a2e, bottom: 0x281d10, border: 0xc79752 },
+    tile_warning: { top: 0xff7a52, bottom: 0xa8321a, border: 0xffc9a0 },
   };
 
   Object.entries(defs).forEach(([key, { top, bottom, border }]) => {
@@ -79,12 +87,16 @@ export function generateBackgroundTexture(scene, key, width, height) {
 
   const canvasTexture = scene.textures.createCanvas(key, width, height);
   const ctx = canvasTexture.getContext();
+  // Warm dark bronze fading to near-black -- was a cool navy blue, the same
+  // mismatch as the tile textures above (see generateTileTextures' own
+  // comment); this is what shows through every collapsed tile's hole, so it
+  // needs to match the board's new warm palette, not the old cool one.
   const gradient = ctx.createRadialGradient(
     width / 2, height / 2, 0,
     width / 2, height / 2, Math.max(width, height) / 1.25
   );
-  gradient.addColorStop(0, '#242b52');
-  gradient.addColorStop(1, '#090b18');
+  gradient.addColorStop(0, '#2e2015');
+  gradient.addColorStop(1, '#0d0805');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
   canvasTexture.refresh();

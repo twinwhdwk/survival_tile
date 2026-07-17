@@ -1897,9 +1897,9 @@ export default class GameScene extends Phaser.Scene {
 
   tileTintForTexture(key) {
     if (key === 'tile_warning') {
-      return 0xff6b5b;
+      return 0xff7a52;
     }
-    return 0x767fb8;
+    return 0xd9a95f;
   }
 
   stopTileTween(tile) {

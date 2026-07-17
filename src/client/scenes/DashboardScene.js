@@ -26,9 +26,11 @@ const DOUBLE_CLICK_MS = 350;
 // Colors for the live per-room tile thumbnail. Deliberately distinct from
 // the board's own beveled-hex palette (EffectTextures.js) rather than
 // reusing it exactly — at thumbnail size the bevel/gradient detail would
-// be lost anyway, so flat, high-contrast fills read better small.
+// be lost anyway, so flat, high-contrast fills read better small. Still the
+// same warm family as the board itself now (was a cool blue-indigo, left
+// over from before the board's own tiles were reskinned warm).
 const MINIMAP_COLORS = {
-  [TILE_STATE.SOLID]: '#4b5aa0',
+  [TILE_STATE.SOLID]: '#9c7a45',
   [TILE_STATE.WARNING]: '#ff6b4a',
   [TILE_STATE.GONE]: '#05060c',
 };
