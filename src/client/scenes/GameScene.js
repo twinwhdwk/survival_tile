@@ -360,9 +360,12 @@ export default class GameScene extends Phaser.Scene {
     } else {
       // SURVIVAL rounds now score teammates by survival time too (see
       // Room.js addSurvivalScore), so the readout needs to be visible from
-      // the start here as well, not just once a boss fight begins.
-      this.scorePanel.setVisible(true);
-      this.scoreText.setVisible(true);
+      // the start here as well, not just once a boss fight begins. Skipped
+      // for a spectating admin -- "내 점수"/"팀 점수" both read as if the
+      // viewer were a participant, which they never are (see applySnapshot's
+      // own comment above on why a spectator's id never ends up in `players`).
+      this.scorePanel.setVisible(!this.isSpectator);
+      this.scoreText.setVisible(!this.isSpectator);
     }
     this.updateScoreText(score || 0);
 
@@ -756,8 +759,11 @@ export default class GameScene extends Phaser.Scene {
     this.bossHpPanel.setVisible(true);
     this.bossHpBarBg.setVisible(true);
     this.bossHpBarFill.setVisible(true);
-    this.scorePanel.setVisible(true);
-    this.scoreText.setVisible(true);
+    // Same "not a participant" reasoning as applySnapshot's SURVIVAL branch
+    // -- the boss HP bar is still meaningful to a spectator, an individual/
+    // team score readout isn't.
+    this.scorePanel.setVisible(!this.isSpectator);
+    this.scoreText.setVisible(!this.isSpectator);
     this.updateBossHpBar();
 
     const { x, y } = hexToPixel(boss.row, boss.col);
@@ -916,7 +922,11 @@ export default class GameScene extends Phaser.Scene {
   // space (they follow a tile or avatar); the score readout is a fixed HUD
   // element (scrollFactor 0), so the popup needs to live in that same space.
   showScoreGainPopup(amount) {
-    if (!(amount > 0)) {
+    // The score panel itself is hidden for a spectator (see applySnapshot/
+    // initBossHud) -- without this guard a TEAM-mode elimination would still
+    // pop a "+N" next to where that now-invisible panel would have been,
+    // reading as a stray floating number with nothing anchoring it.
+    if (!(amount > 0) || this.isSpectator) {
       return;
     }
     const text = this.add.text(this.scoreText.x + this.scoreText.width + 12, this.scoreText.y + 6, `+${amount}`, {
