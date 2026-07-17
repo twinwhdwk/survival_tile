@@ -59,6 +59,25 @@ const CENTER_COL = Math.floor(MAP_COLS / 2);
 // gives a real, if tight, endgame instead of a guaranteed-death final phase.
 const MAX_ROW_INSET = Math.floor((MAP_ROWS - 1) / 2) - 1;
 const MAX_COL_INSET = Math.floor((MAP_COLS - 1) / 2) - 1;
+// How far the shared safeInset counter (below) has to climb before *both*
+// axes have hit their own per-axis cap above — i.e. the point where the
+// safe rectangle has finished closing on its shorter axis and become an
+// (approximately) square SQUARE_EDGE x SQUARE_EDGE box.
+const RECT_MAX_INSET = Math.max(MAX_ROW_INSET, MAX_COL_INSET);
+const SQUARE_EDGE = Math.min(MAP_ROWS - 2 * MAX_ROW_INSET, MAP_COLS - 2 * MAX_COL_INSET);
+
+// Past the square point above, the boundary used to just stop for the
+// rest of the round — MAX_ROW_INSET/MAX_COL_INSET each independently stop
+// their own axis "one ring short of fully closing" (see their own comment
+// below), but neither one accounts for the *other* axis having already
+// caught up. Once that happens, further shrink ticks now inset both axes
+// together instead (computeInsets()'s `extra` term) so a square boundary
+// keeps closing in exactly like the rectangle did before it, down to a
+// floor of SQUARE_MIN_EDGE tiles per side — same "leave one ring standing
+// rather than a guaranteed-death sliver" reasoning as the rectangle phase,
+// just applied to the square phase too.
+const SQUARE_MIN_EDGE = 2;
+const EXTRA_SQUARE_INSET_MAX = Math.max(0, Math.floor((SQUARE_EDGE - SQUARE_MIN_EDGE) / 2));
 
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
 // up and falling back to simple immediate-neighbor avoidance. Deep enough to
@@ -331,9 +350,21 @@ export default class Room {
     return pixelToHex(x, y);
   }
 
+  // Row/col inset derived from the single shared safeInset counter. Below
+  // RECT_MAX_INSET the two axes converge independently (see MAX_ROW_INSET/
+  // MAX_COL_INSET above); once safeInset passes that point the extra term
+  // grows both axes together instead, continuing to shrink the now-square
+  // safe zone symmetrically rather than leaving it frozen there.
+  computeInsets(inset = this.safeInset) {
+    const extra = Math.min(Math.max(0, inset - RECT_MAX_INSET), EXTRA_SQUARE_INSET_MAX);
+    return {
+      rowInset: Math.min(inset, MAX_ROW_INSET) + extra,
+      colInset: Math.min(inset, MAX_COL_INSET) + extra,
+    };
+  }
+
   isSafeTile(row, col) {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
+    const { rowInset, colInset } = this.computeInsets();
     return row >= rowInset && row <= MAP_ROWS - 1 - rowInset
       && col >= colInset && col <= MAP_COLS - 1 - colInset;
   }
@@ -346,8 +377,7 @@ export default class Room {
   // now," so they aren't caught flat-footed by the next shrink step the
   // way a purely reactive "nearest safe tile" search would leave them.
   safeMargin(row, col) {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
+    const { rowInset, colInset } = this.computeInsets();
     return Math.min(
       row - rowInset,
       (MAP_ROWS - 1 - rowInset) - row,
@@ -361,8 +391,7 @@ export default class Room {
   // currently safe, rather than players only finding out tile-by-tile as
   // each one flashes a warning right before it burns.
   getSafeBounds() {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
+    const { rowInset, colInset } = this.computeInsets();
     return {
       rowStart: rowInset,
       rowEnd: MAP_ROWS - 1 - rowInset,
@@ -372,8 +401,7 @@ export default class Room {
   }
 
   getSafeZoneTiles(inset = this.safeInset) {
-    const rowInset = Math.min(inset, MAX_ROW_INSET);
-    const colInset = Math.min(inset, MAX_COL_INSET);
+    const { rowInset, colInset } = this.computeInsets(inset);
     const tiles = [];
     for (let row = rowInset; row <= MAP_ROWS - 1 - rowInset; row++) {
       for (let col = colInset; col <= MAP_COLS - 1 - colInset; col++) {
@@ -985,7 +1013,7 @@ export default class Room {
   // no special "safe zone" tile state or color; isSafeTile() alone
   // decides what still counts as inside the shrinking boundary.
   shrinkBoundary() {
-    if (this.safeInset >= MAX_ROW_INSET && this.safeInset >= MAX_COL_INSET) {
+    if (this.safeInset >= RECT_MAX_INSET + EXTRA_SQUARE_INSET_MAX) {
       return;
     }
 
