@@ -182,3 +182,18 @@ export const GHOST_REVIVE_COOLDOWN_MS = 1500;
 // real server load from a room full of people spam-tapping at once, so
 // this stays a real (if much shorter) rate limit rather than none at all.
 export const GHOST_REVIVE_LAST_STAND_COOLDOWN_MS = 400;
+
+// Bomb tiles: an environmental hazard layered on top of the normal tile
+// map (any mode, not gated to SURVIVAL/FINAL specifically) -- stepping on
+// one arms it, and after BOMB_FUSE_MS it blasts every tile within
+// BOMB_BLAST_RADIUS rings of it (see Room.explodeBombTile()) through the
+// same triggerTileCollapse() path an ordinary footstep already uses, so a
+// tile caught in the blast still gets its normal warning pulse before
+// actually collapsing, and anyone still standing there when it does is
+// eliminated exactly like any other collapse. Count scales with room size
+// (~1 per BOMB_TILES_PER_PLAYERS players) rather than a fixed number, the
+// same reasoning as the removed attack-tile mechanic's own scaling.
+export const BOMB_TILES_PER_PLAYERS = 6;
+export const BOMB_FUSE_MS = 2000;
+// 1 ring = a 3x3 area centered on the bomb tile.
+export const BOMB_BLAST_RADIUS = 1;

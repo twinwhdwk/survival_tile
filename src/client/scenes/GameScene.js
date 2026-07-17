@@ -13,12 +13,14 @@ import {
   playBoundaryAlarm,
   playCountdownTick,
   playCountdownGo,
+  playBombArm,
+  playBombExplode,
 } from '../utilities/SoundFx';
-import { vibrateWarning, vibrateEliminate, vibrateVictory, vibrateTap } from '../utilities/Haptics';
+import { vibrateWarning, vibrateEliminate, vibrateVictory, vibrateTap, vibrateBombExplode } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND } from '../../shared/roundConfig';
+import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND, BOMB_FUSE_MS } from '../../shared/roundConfig';
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
@@ -158,6 +160,8 @@ export default class GameScene extends Phaser.Scene {
     this.mode = 'SURVIVAL';
     this.gameMode = 'TEAM';
     this.score = 0;
+    this.bombTileMarkers = [];
+    this.bombFuseMarkers = {};
     this.lastLiveScoreSecond = null;
     this.lastTimerSecond = null;
     this.lastRemainingSeconds = null;
@@ -298,18 +302,19 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin,
+    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
     this.isSpectator = !!isSpectator;
     // Distinct from isSpectator now that a real player cut from the bracket
     // can also reach this scene as a spectator (see DashboardScene's own
-    // isAdmin comment) -- admin-only skill keys below must gate on this,
-    // not just "am I spectating."
+    // isAdmin comment) -- backToDashboardNode's visibility below must gate
+    // on this, not just "am I spectating."
     this.isAdmin = !!isAdmin;
     this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
+    this.initBombTiles(bombTiles);
 
     // A spectator's own socket id is never a key in `players` (the server
     // never seats an admin into a room — see startTournament/startStage in
@@ -722,6 +727,36 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
+  // Rebuilds every armed-but-not-yet-stepped-on bomb tile's marker from
+  // scratch on each bombTiles snapshot -- mirrors the removed boss mode's
+  // own attack-tile marker lifecycle (clear-then-recreate), which is simple
+  // and cheap enough at this scale (a handful of tiles) rather than diffing.
+  initBombTiles(bombTiles) {
+    (this.bombTileMarkers || []).forEach((marker) => marker.destroy());
+    this.bombTileMarkers = [];
+    (bombTiles || []).forEach((tile) => {
+      this.bombTileMarkers.push(this.createBombTileMarker(tile));
+    });
+  }
+
+  createBombTileMarker(tile) {
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    const marker = this.add.text(x, y, '💣', {
+      fontSize: '22px',
+    }).setOrigin(0.5).setDepth(12);
+
+    this.tweens.add({
+      targets: marker,
+      scale: 1.18,
+      duration: 480,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return marker;
+  }
+
   showFloatingDamage(x, y, amount) {
     const text = this.add.text(x, y - 10, `-${amount}`, {
       fontFamily: FONT_BODY,
@@ -1076,6 +1111,55 @@ export default class GameScene extends Phaser.Scene {
         this.cameras.main.shake(200, 0.004);
         this.updateBoundaryOutline(safeBounds);
         playBoundaryAlarm();
+      },
+
+      // Room.armBombTile() sends this both when a bomb is stepped on (its
+      // spot leaves this.bombTiles) and again right after with a fresh
+      // replacement spot already appended -- always just a full re-render
+      // rather than trying to diff which single tile changed.
+      bombTilesUpdate: ({ bombTiles }) => {
+        this.initBombTiles(bombTiles);
+      },
+
+      // The tile that was just armed already left the bombTiles list (see
+      // bombTilesUpdate above), so its calm pulsing 💣 marker is already
+      // gone by the time this fires -- this instead plants an urgent
+      // fuse-countdown marker right on top of it for the BOMB_FUSE_MS
+      // window until bombExploded below cleans it up.
+      bombArmed: ({ row, col }) => {
+        const key = `${row}_${col}`;
+        if (this.bombFuseMarkers[key]) {
+          this.bombFuseMarkers[key].destroy();
+        }
+        const { x, y } = hexToPixel(row, col);
+        const marker = this.add.text(x, y, '💥', {
+          fontSize: '26px',
+        }).setOrigin(0.5).setDepth(13);
+        this.tweens.add({
+          targets: marker,
+          scale: 1.4,
+          duration: BOMB_FUSE_MS,
+          ease: 'Cubic.easeIn',
+        });
+        this.bombFuseMarkers[key] = marker;
+        playBombArm();
+        vibrateTap();
+      },
+
+      bombExploded: ({ row, col }) => {
+        const key = `${row}_${col}`;
+        if (this.bombFuseMarkers[key]) {
+          this.bombFuseMarkers[key].destroy();
+          delete this.bombFuseMarkers[key];
+        }
+        const { x, y } = hexToPixel(row, col);
+        this.cameras.main.shake(300, 0.01);
+        this.cameras.main.flash(200, 255, 140, 40);
+        this.spawnImpactRing(x, y, { color: 0xffaa33, endScale: 5, duration: 400 });
+        this.spawnImpactRing(x, y, { color: 0xff5555, startRadius: 6, endScale: 7, duration: 550 });
+        this.shatterEmitter.explode(24, x, y);
+        playBombExplode();
+        vibrateBombExplode();
       },
 
       playerMoved: (playerInfo) => {

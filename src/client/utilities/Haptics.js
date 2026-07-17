@@ -23,3 +23,10 @@ export function vibrateEliminate() {
 export function vibrateVictory() {
   vibrate([60, 40, 60, 40, 120]);
 }
+
+// A building rumble rather than one flat buzz, for a bomb tile's blast --
+// meant to land as "something big just happened," distinct from the single
+// short tap a bomb tile's own arming gets.
+export function vibrateBombExplode() {
+  vibrate([50, 30, 50, 30, 200]);
+}

@@ -140,6 +140,21 @@ export function playBoundaryAlarm() {
   tone(880, 0.14, { type: 'sawtooth', volume: 0.09, delay: 0.18 });
 }
 
+// A short, sharp beep the instant a bomb tile is stepped on -- distinct
+// from the deeper playBombExplode() rumble below, so arming and actually
+// detonating read as two separate moments rather than one long effect.
+export function playBombArm() {
+  tone(660, 0.09, { type: 'square', volume: 0.12 });
+}
+
+// A deep rumble/boom for a bomb tile's blast -- a low descending tone
+// under a heavy low-passed noise burst, meant to read as a real explosion
+// rather than the light "tink" of a regular tile collapse.
+export function playBombExplode() {
+  noiseBurst(0.4, { volume: 0.28, filterFreq: 350 });
+  tone(110, 0.5, { type: 'sawtooth', volume: 0.2, endFreq: 35 });
+}
+
 export function playCountdownTick(urgent) {
   tone(urgent ? 880 : 660, 0.08, { type: 'sine', volume: 0.1 });
 }

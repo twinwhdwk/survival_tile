@@ -33,6 +33,9 @@ import {
   ROUND_START_STILLNESS_MS,
   GHOST_REVIVE_COOLDOWN_MS,
   GHOST_REVIVE_LAST_STAND_COOLDOWN_MS,
+  BOMB_TILES_PER_PLAYERS,
+  BOMB_FUSE_MS,
+  BOMB_BLAST_RADIUS,
 } from '../shared/roundConfig';
 
 const CENTER_ROW = Math.floor(MAP_ROWS / 2);
@@ -319,6 +322,20 @@ export default class Room {
     // ALL bots from the start (possible in a big admin test where humans
     // land in other rooms) is unaffected and plays out normally.
     this.hasHumans = Object.values(this.players).some((p) => !p.isBot);
+
+    // Environmental hazard, independent of mode/gameMode -- see
+    // BOMB_TILES_PER_PLAYERS' own comment in roundConfig.js for the
+    // scaling reasoning. maintainBombTiles() (called every checkRoundState
+    // tick) keeps this topped back up to the same target as the boundary
+    // shrinks tiles out from under some of them.
+    this.bombTiles = [];
+    const bombTileCount = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
+    for (let i = 0; i < bombTileCount; i++) {
+      const spot = this.pickBombTileSpot();
+      if (spot) {
+        this.bombTiles.push(spot);
+      }
+    }
   }
 
   getSnapshot() {
@@ -332,6 +349,7 @@ export default class Room {
       tileMap: this.tileMap,
       roundStartTime: this.roundStartTime,
       roundDuration: this.roundDurationMs,
+      bombTiles: this.bombTiles,
     };
   }
 
@@ -510,6 +528,23 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
+  // Bomb tiles always live inside the current safe zone (same reasoning as
+  // pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
+  // behind outside it would strand a hazard nobody can reach) and never
+  // overlap another already-armed bomb tile.
+  pickBombTileSpot() {
+    const candidates = this.getSafeZoneTiles().filter(({ row, col }) => {
+      if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
+        return false;
+      }
+      return !this.bombTiles.some((t) => t.row === row && t.col === col);
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   getRandomSpawn() {
     const tiles = [];
     for (let row = 0; row < MAP_ROWS; row++) {
@@ -567,6 +602,82 @@ export default class Room {
         this.eliminatePlayer(id);
       }
     });
+  }
+
+  // Stepping on a bomb tile arms it -- removed from the active list
+  // immediately (movePlayerTo's own findIndex lookup, this method's only
+  // caller, can't double-trigger the same tile from a second player
+  // walking onto it during the fuse) and replaced right away so the room's
+  // live bomb count doesn't dip for the whole BOMB_FUSE_MS window. The
+  // armed tile itself stays a completely ordinary SOLID tile until the fuse
+  // actually goes off -- 'bombArmed' is purely a heads-up cue for clients
+  // to render a countdown at that spot, not a state change of its own.
+  armBombTile(index) {
+    const bomb = this.bombTiles[index];
+    this.bombTiles.splice(index, 1);
+    this.emit('bombArmed', { row: bomb.row, col: bomb.col });
+
+    const spot = this.pickBombTileSpot();
+    if (spot) {
+      this.bombTiles.push(spot);
+    }
+    this.emit('bombTilesUpdate', { bombTiles: this.bombTiles });
+
+    setTimeout(() => {
+      if (this.finished) {
+        return;
+      }
+      this.explodeBombTile(bomb.row, bomb.col);
+    }, BOMB_FUSE_MS);
+  }
+
+  // Every tile within BOMB_BLAST_RADIUS rings (1 = 3x3) of the bomb's own
+  // position goes through the exact same triggerTileCollapse() path an
+  // ordinary footstep already uses -- still gets its normal warning pulse
+  // before actually collapsing, and dropPlayersOnTile() (called from
+  // inside that same path once a tile actually goes GONE) still handles
+  // eliminating anyone caught standing on one when it does, with no
+  // bomb-specific elimination logic needed here at all.
+  explodeBombTile(centerRow, centerCol) {
+    this.emit('bombExploded', { row: centerRow, col: centerCol });
+    for (let dr = -BOMB_BLAST_RADIUS; dr <= BOMB_BLAST_RADIUS; dr++) {
+      for (let dc = -BOMB_BLAST_RADIUS; dc <= BOMB_BLAST_RADIUS; dc++) {
+        const row = centerRow + dr;
+        const col = centerCol + dc;
+        if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) {
+          continue;
+        }
+        this.triggerTileCollapse(row, col);
+      }
+    }
+  }
+
+  // Called once per checkRoundState() tick -- prunes any bomb tile the
+  // shrinking boundary has since swept out from under (no longer SOLID, or
+  // no longer inside the current safe zone; see pickBombTileSpot()'s own
+  // comment for why a bomb outside the safe zone is a stranded, unreachable
+  // hazard) and tops the count back up to this room's own target, the same
+  // way autoRegenerateTiles() keeps the floor itself topped up.
+  maintainBombTiles() {
+    const before = this.bombTiles.length;
+    this.bombTiles = this.bombTiles.filter(
+      ({ row, col }) => this.tileMap[row][col] === TILE_STATE.SOLID && this.isSafeTile(row, col),
+    );
+    let changed = this.bombTiles.length !== before;
+
+    const target = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
+    while (this.bombTiles.length < target) {
+      const spot = this.pickBombTileSpot();
+      if (!spot) {
+        break;
+      }
+      this.bombTiles.push(spot);
+      changed = true;
+    }
+
+    if (changed) {
+      this.emit('bombTilesUpdate', { bombTiles: this.bombTiles });
+    }
   }
 
   // SURVIVAL/FINAL rounds have no other scoring mechanic, so the score
@@ -746,6 +857,11 @@ export default class Room {
     player.y = y;
     this.broadcastPlayerMoved(player);
     this.triggerTileCollapse(row, col);
+
+    const bombIndex = this.bombTiles.findIndex((t) => t.row === row && t.col === col);
+    if (bombIndex !== -1) {
+      this.armBombTile(bombIndex);
+    }
   }
 
   // Rate-limited, trimmed movement broadcast (see MOVE_BROADCAST_MIN_INTERVAL_MS).
@@ -1467,6 +1583,8 @@ export default class Room {
 
     const elapsed = Date.now() - this.roundStartTime;
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
+
+    this.maintainBombTiles();
 
     // Not SURVIVAL-only: getSafeZoneTiles() naturally covers the entire
     // board when every edge inset is still 0 (FINAL's own grace period,
