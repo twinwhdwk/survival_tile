@@ -78,7 +78,20 @@ const BOSS_BAR_WIDTH = 220;
 // keeps the banner clear of that panel regardless of how short
 // WORLD_HEIGHT gets, at the cost of no longer being truly centered on a
 // much taller canvas.
-const BANNER_Y = 128;
+//
+// At that same ~270px WORLD_HEIGHT, the gap this sits in is only ~70px
+// tall (boss panel's bottom edge at ~82 down to the ghost hint panel's top
+// edge at ~152, see BANNER_BACKDROP_HEIGHT_PADDING below) -- a 2-line
+// banner (last stand, revive) at the original 24px padding needed ~86px
+// and visibly overlapped the ghost hint panel underneath it. 117 is the
+// vertical midpoint of that 70px gap, not an arbitrary number -- if
+// BANNER_BACKDROP_HEIGHT_PADDING or the ghost hint panel's own position
+// ever move, recheck this still centers between them.
+const BANNER_Y = 117;
+// Only the backdrop's *height* padding needs trimming to fit that gap --
+// its width padding (see the drawRoundedRect call below) is unrelated to
+// this collision and stays as it was.
+const BANNER_BACKDROP_HEIGHT_PADDING = 10;
 
 // Room.js's damageBoss() emits 'bossDamaged' (defeated: true) and then
 // calls finishRoom() on the very next line -- zero delay between them, so
@@ -1703,7 +1716,7 @@ export default class GameScene extends Phaser.Scene {
     // — redraws outright to the new size rather than resizing a persistent
     // shape, so there's no display-origin caching to fight with the way a
     // Rectangle would have needed.
-    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, BANNER_Y, bounds.width + 40, bounds.height + 24, {
+    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, BANNER_Y, bounds.width + 40, bounds.height + BANNER_BACKDROP_HEIGHT_PADDING, {
       fillColor: 0x000000, fillAlpha: 0.45, radius: 10,
     });
     this.bannerBackdrop.setVisible(true).setAlpha(1);
