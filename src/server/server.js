@@ -7,8 +7,7 @@ import Compression from 'compression';
 
 import { ANIMAL_COUNT } from '../shared/animals';
 import {
-  NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, MAX_PLAYERS,
-  STAGE_2_GROUP_COUNT, STAGE_2_MAX_ROOM_SIZE,
+  NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, MAX_PLAYERS, STAGE_2_MAX_GROUP_SIZE,
 } from '../shared/roomConfig';
 import Room from './Room';
 
@@ -268,9 +267,10 @@ let sessionOpened = false;
 // Bracket state: each stage is an array of "lineages" ({ members, score }).
 // A fixed 3-stage shape: stage 1's lineages are however many MAX_PLAYERS-
 // capped random groups chunkForInitialRound() produces (grows with turnout,
-// not a fixed count); stage 2's are STAGE_2_GROUP_COUNT groups formed by
-// pooling and reshuffling every stage-1 survivor (formStage2Groups); stage 3
-// is a single pooled SOLO room (formStage3Group) that ends the tournament
+// not a fixed count); stage 2's are however many STAGE_2_MAX_GROUP_SIZE-
+// capped groups formStage2Groups() produces from pooling and reshuffling
+// every stage-1 survivor, the same shape at a bigger cap; stage 3 is a
+// single pooled SOLO room (formStage3Group) that ends the tournament
 // itself. A lineage that loses every member before its stage transition is
 // locked into the final ranking immediately and does not pass its score on.
 let currentStage = 0;
@@ -377,16 +377,19 @@ function chunkForInitialRound(members) {
 }
 
 // Stage 2 pools every stage-1 survivor across however many stage-1 rooms
-// chunkForInitialRound() actually produced (rather than mergeAdjacentLineages'
-// pairwise merge) and randomly
-// redistributes them into exactly STAGE_2_GROUP_COUNT new groups, evenly
-// sized and capped at STAGE_2_MAX_ROOM_SIZE per room. Each returning
-// lineage's own `score` is always 0 -- a fresh shared team score for the
-// reshuffled group, not a continuation of any one stage-1 room's pool. Each
-// pooled member already carries their own individual `score` (their stage-1
-// total, added onto finishRoom()'s `advancing` list in Room.js) which rides
-// along untouched so Room's constructor can seed it back into player.score
-// -- see roomConfig.js's own comment on these two constants.
+// chunkForInitialRound() actually produced and randomly redistributes them
+// into fresh groups, capped at STAGE_2_MAX_GROUP_SIZE -- the exact same
+// ceil(total/cap)-plus-an-extra-group shape chunkForInitialRound() uses for
+// stage 1 (see that function's own comment), just with a bigger cap: stage
+// 2 plays the identical closing-boundary SURVIVAL round as stage 1 now (no
+// separate boss/combat mechanic), so a bigger, more crowded room is what's
+// meant to produce more eliminations there, not a different ruleset. Each
+// returning lineage's own `score` is always 0 -- a fresh shared team score
+// for the reshuffled group, not a continuation of any one stage-1 room's
+// pool. Each pooled member already carries their own individual `score`
+// (their stage-1 total, added onto finishRoom()'s `advancing` list in
+// Room.js) which rides along untouched so Room's constructor can seed it
+// back into player.score.
 function formStage2Groups(results) {
   const pool = [];
   results.forEach((lineage) => {
@@ -401,43 +404,28 @@ function formStage2Groups(results) {
 
   const shuffled = [...pool].sort(() => Math.random() - 0.5);
   const total = shuffled.length;
-  const numGroups = Math.max(1, Math.min(STAGE_2_GROUP_COUNT, total));
-  const baseSize = Math.floor(total / numGroups);
-  const sizes = new Array(numGroups).fill(baseSize);
-  let remaining = total - numGroups * baseSize;
-  for (let g = 0; g < numGroups && remaining > 0; g++) {
-    sizes[g] += 1;
-    remaining -= 1;
-  }
-
-  // baseSize can't realistically exceed STAGE_2_MAX_ROOM_SIZE (40 stage-1
-  // entrants max / 4 groups = 10 even at 100% survival), but guard
-  // explicitly rather than assume -- any group that would overflow spills
-  // its excess into extra trailing group(s) instead of overloading a room.
-  const cappedSizes = [];
-  sizes.forEach((size) => {
-    let remainingSize = size;
-    while (remainingSize > STAGE_2_MAX_ROOM_SIZE) {
-      cappedSizes.push(STAGE_2_MAX_ROOM_SIZE);
-      remainingSize -= STAGE_2_MAX_ROOM_SIZE;
+  const numGroups = Math.max(1, Math.ceil(total / STAGE_2_MAX_GROUP_SIZE));
+  const base = Math.floor(total / numGroups);
+  let extra = total % numGroups;
+  const sizes = new Array(numGroups).fill(base).map((size) => {
+    if (extra > 0) {
+      extra -= 1;
+      return size + 1;
     }
-    cappedSizes.push(remainingSize);
+    return size;
   });
 
   const groups = [];
   let cursor = 0;
-  cappedSizes.forEach((size) => {
-    if (size === 0) {
-      return;
-    }
+  sizes.forEach((size) => {
     groups.push({ members: shuffled.slice(cursor, cursor + size), score: 0 });
     cursor += size;
   });
   return groups;
 }
 
-// Stage 3 pools every stage-2 survivor across all STAGE_2_GROUP_COUNT rooms
-// into exactly ONE final room, with no size cap -- a fixed decision (not a
+// Stage 3 pools every stage-2 survivor across however many stage-2 rooms
+// existed into exactly ONE final room, with no size cap -- a fixed decision (not a
 // tunable constant), since the whole point of the final stage is one
 // decisive free-for-all decider, not several parallel "finals" that would
 // each crown their own separate winner. Each member's own `score` already
@@ -651,16 +639,15 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     return undefined;
   }
 
-  // Stage 1 -> 2 pools and randomly reshuffles all survivors into exactly
-  // STAGE_2_GROUP_COUNT groups (see formStage2Groups) instead of merging
-  // adjacent lineages pairwise -- the fixed 8-group-then-4-group-then-1-
-  // group bracket shape the operator wants, replacing the old unbounded
+  // Stage 1 -> 2 pools and randomly reshuffles all survivors into fresh
+  // STAGE_2_MAX_GROUP_SIZE-capped groups (see formStage2Groups) instead of
+  // merging adjacent lineages pairwise -- replacing the old unbounded
   // pairwise-merge bracket that used to run until only one lineage (or
   // none) was left. Both fixed transitions below run unconditionally on
   // reaching their stage, regardless of how many lineages/groups survived
-  // it -- unlike the old design, surviving down to a single group here
-  // does NOT mean "crown a champion now," it just means stage 2 (or 3)
-  // starts with fewer groups than usual.
+  // it -- surviving down to a single group here does NOT mean "crown a
+  // champion now," it just means stage 2 (or 3) starts with fewer groups
+  // than usual.
   if (currentStage === 1) {
     const stage2Groups = formStage2Groups(stageResults);
     if (stage2Groups.length === 0) {
