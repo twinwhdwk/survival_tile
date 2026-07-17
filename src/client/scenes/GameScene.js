@@ -327,26 +327,7 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.isSpectator) {
       this.hideJoystick();
-      this.spectatorBadge.setVisible(true);
-      this.spectatorBadgePanel.setVisible(true);
-      // fillAlpha bumped well above the shared 0.68 default -- this panel
-      // sits over the actual play area (not tucked in a corner like the
-      // other HUD chips), and at the map's current short WORLD_HEIGHT a
-      // player avatar routinely wanders directly behind it, visibly
-      // bleeding through the standard semi-transparent fill.
-      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 90, 0.5, 0, 24, this.spectatorBadge, 24, { fillAlpha: 0.95 });
       this.backToDashboardNode.setVisible(this.fromDashboard);
-
-      if (!this.spectatorBadgePulse) {
-        this.spectatorBadgePulse = this.tweens.add({
-          targets: this.spectatorBadge,
-          alpha: 0.6,
-          duration: 900,
-          yoyo: true,
-          repeat: -1,
-          ease: 'Sine.easeInOut',
-        });
-      }
     }
 
     this.roundStartTime = roundStartTime;
@@ -371,6 +352,12 @@ export default class GameScene extends Phaser.Scene {
 
     this.cameras.main.fadeIn(400, 9, 11, 24);
     this.showStartCountdown(() => {
+      // Both messages are player instructions ("버티세요", "물리치세요") --
+      // meaningless to an admin who's only watching, so skip the banner
+      // entirely for spectators rather than showing it to no functional end.
+      if (this.isSpectator) {
+        return;
+      }
       if (this.mode === 'BOSS') {
         this.showBanner('보스전 시작!\n협력해서 보스를 물리치세요!', '#ff8888');
       } else {
@@ -548,32 +535,22 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
 
-    this.spectatorBadgePanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
-
-    // y=96, not the top HUD strip's row -- spectator mode (stage 3+, per
-    // server.js's startStage()) only ever coexists with BOSS mode, whose
-    // HP bar panel already occupies y=38-82 there; the badge used to sit
-    // at y=40-64, rendering directly on top of the boss HP text and
-    // reading as illegible clutter every single time a room is spectated.
-    this.spectatorBadge = this.add.text(WORLD_WIDTH / 2, 96, '👁 관전 모드 - 참가자들의 게임을 지켜보는 중', {
-      fontFamily: FONT_BODY,
-      fontSize: '13px',
-      color: COLORS.textGold,
-      stroke: TEXT_STROKE,
-      strokeThickness: 3,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
-
     // Only shown when the admin reached this room by clicking a card on
     // the multi-room dashboard (see applySnapshot's `fromDashboard` flag) —
     // the stage-3+ auto-spectate case has no dashboard to go back to, so
     // that path never sets fromDashboard and this stays hidden for it.
+    // Anchored to a bottom-left corner rather than dead center — centered
+    // sat right on top of the play area an admin is trying to actually
+    // watch, which (along with a separate "관전 모드" badge that used to
+    // live here too, since removed entirely as unnecessary clutter for an
+    // admin who already knows they're spectating) blocked the view.
     const backButtonHtml = `
       <button id="back-to-dashboard-button" type="button"
-        style="padding:8px 14px;font-size:13px;border-radius:8px;border:none;background:#1c130dcc;color:#ffd9a0;cursor:pointer;font-family:${FONT_BODY};border:1px solid #ffa94d88;">
+        style="padding:6px 12px;font-size:12px;border-radius:7px;border:none;background:#1c130dcc;color:#ffd9a0;cursor:pointer;font-family:${FONT_BODY};border:1px solid #ffa94d88;">
         ← 현황판으로
       </button>
     `;
-    this.backToDashboardNode = this.add.dom(WORLD_WIDTH / 2, 130).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
+    this.backToDashboardNode = this.add.dom(90, WORLD_HEIGHT - 24).createFromHTML(backButtonHtml).setScrollFactor(0).setDepth(30).setVisible(false);
     this.backToDashboardButton = this.backToDashboardNode.getChildByID('back-to-dashboard-button');
     // Every other button in the app (login, lobby, result) gets this same
     // hover-lift/press feedback plus click sound+haptic via one shared

@@ -35,12 +35,20 @@ const config = {
     pixelArt:   false,
     antialias:  true,
     antialiasGL: true,
-    // Renders the internal drawing buffer at device pixel density so hex
-    // bevels, gradients, and text all stay sharp on high-DPI screens
-    // instead of just the CSS canvas being stretched. Text objects default
-    // their own `resolution` to 0 ("inherit the Game Config's resolution"
-    // — see Phaser.GameObjects.TextStyle's own docs), so this one setting
-    // is enough on its own; no per-TextStyle override is needed.
+    // NOTE: config.resolution is a documented no-op in this Phaser version
+    // (3.23) -- Phaser.Scale.ScaleManager.setGameSize() hardcodes
+    // `this.resolution = 1` unconditionally ("fixed at 1 on purpose...
+    // changing it will break all user input. Wait for another release to
+    // solve this issue" — see node_modules/phaser/src/scale/ScaleManager.js
+    // around setGameSize()). A PC/large-screen-targeted resolution value
+    // was tried here and verified (via canvas.width in a real headless
+    // browser test) to have zero effect on the actual canvas backing-store
+    // size — kept at a plain constant rather than a formula that silently
+    // does nothing. A real per-device resolution boost would need a
+    // different mechanism entirely (e.g. an oversized scale.width/height
+    // combined with compensating camera zoom) — non-trivial and not
+    // attempted here since it risks desyncing input coordinates across
+    // every scene; left for a dedicated pass if this is worth pursuing.
     resolution: Math.min(window.devicePixelRatio || 1, 2),
   },
   // Matches the CSS body background and the outer edge of every scene's
