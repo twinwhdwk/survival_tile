@@ -10,6 +10,8 @@ import {
   SURVIVAL_ROUND_DURATION_MS,
   BOSS_ROUND_DURATION_MS,
   FINAL_ROUND_DURATION_MS,
+  FINAL_ROAM_STEP_MS,
+  FINAL_ROAM_WINDOW_SIZE,
   START_COUNTDOWN_MS,
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
@@ -219,6 +221,16 @@ export default class Room {
     this.colInset = 0;
     this.boundaryShrinkStepsDone = 0;
     this.lastRegenAt = 0;
+    // FINAL mode only (stage 3's solo finale): once the rapid shrink phase
+    // reaches a fixed FINAL_ROAM_WINDOW_SIZE-square window, finalRoamActive
+    // flips on and getSafeBounds() switches from the inset rectangle above
+    // to this movable window instead — see shrinkTowardFinalWindow()/
+    // enterFinalRoamPhase()/roamBoundary().
+    this.finalRoamActive = false;
+    this.finalWindowRowStart = 0;
+    this.finalWindowColStart = 0;
+    this.finalRoamDirIndex = 0;
+    this.lastFinalRoamAt = 0;
     // Tracks the 0-alive -> 1-alive "last stand" state as an explicit
     // false->true->false transition (see eliminatePlayer()/respawnGhost())
     // rather than re-deriving it from aliveCount alone — the ghost-revive
@@ -372,8 +384,9 @@ export default class Room {
   }
 
   isSafeTile(row, col) {
-    return row >= this.rowInset && row <= MAP_ROWS - 1 - this.rowInset
-      && col >= this.colInset && col <= MAP_COLS - 1 - this.colInset;
+    const bounds = this.getSafeBounds();
+    return row >= bounds.rowStart && row <= bounds.rowEnd
+      && col >= bounds.colStart && col <= bounds.colEnd;
   }
 
   // How many rings inside the current safe rectangle (row, col) sits —
@@ -384,11 +397,12 @@ export default class Room {
   // now," so they aren't caught flat-footed by the next shrink step the
   // way a purely reactive "nearest safe tile" search would leave them.
   safeMargin(row, col) {
+    const bounds = this.getSafeBounds();
     return Math.min(
-      row - this.rowInset,
-      (MAP_ROWS - 1 - this.rowInset) - row,
-      col - this.colInset,
-      (MAP_COLS - 1 - this.colInset) - col,
+      row - bounds.rowStart,
+      bounds.rowEnd - row,
+      col - bounds.colStart,
+      bounds.colEnd - col,
     );
   }
 
@@ -396,7 +410,22 @@ export default class Room {
   // with the boundary events so the client can draw an outline of what's
   // currently safe, rather than players only finding out tile-by-tile as
   // each one flashes a warning right before it burns.
+  //
+  // FINAL mode's roam phase (see roamBoundary()) uses a fixed-size window
+  // that can sit anywhere on the map, not a rectangle symmetrically inset
+  // from all 4 edges the way SURVIVAL/BOSS/FINAL's own shrink phase do —
+  // this is the one place that distinction has to be made explicit, since
+  // every other boundary-aware method (isSafeTile, safeMargin,
+  // getSafeZoneTiles) all go through this.
   getSafeBounds() {
+    if (this.mode === 'FINAL' && this.finalRoamActive) {
+      return {
+        rowStart: this.finalWindowRowStart,
+        rowEnd: this.finalWindowRowStart + FINAL_ROAM_WINDOW_SIZE - 1,
+        colStart: this.finalWindowColStart,
+        colEnd: this.finalWindowColStart + FINAL_ROAM_WINDOW_SIZE - 1,
+      };
+    }
     return {
       rowStart: this.rowInset,
       rowEnd: MAP_ROWS - 1 - this.rowInset,
@@ -405,10 +434,10 @@ export default class Room {
     };
   }
 
-  getSafeZoneTiles(rowInset = this.rowInset, colInset = this.colInset) {
+  getSafeZoneTiles(bounds = this.getSafeBounds()) {
     const tiles = [];
-    for (let row = rowInset; row <= MAP_ROWS - 1 - rowInset; row++) {
-      for (let col = colInset; col <= MAP_COLS - 1 - colInset; col++) {
+    for (let row = bounds.rowStart; row <= bounds.rowEnd; row++) {
+      for (let col = bounds.colStart; col <= bounds.colEnd; col++) {
         tiles.push({ row, col });
       }
     }
@@ -575,6 +604,12 @@ export default class Room {
       return;
     }
     player.eliminated = true;
+    // Only meaningful for FINAL (stage 3's own ranking is by elimination
+    // order, not score -- see handleRoomFinished's SOLO branch and
+    // endTournament()'s stage-3-aware sort in server.js), but harmless to
+    // always record: whoever never gets eliminated stays null, which reads
+    // as "still alive" / "the winner" wherever this is read back.
+    player.eliminatedAt = Date.now();
     // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
     // its own eventual ranking is by elimination order, not this score
     // (see the FINAL branch of handleRoomFinished's SOLO case), but the
@@ -1140,22 +1175,109 @@ export default class Room {
     if (this.colInset < MAX_COL_INSET) {
       const oldColInset = this.colInset;
       this.colInset += 1;
-      this.collapseTilesLeavingSafeZone(this.rowInset, oldColInset);
+      this.collapseTilesLeavingSafeZone(this.insetBounds(this.rowInset, oldColInset));
       return;
     }
 
     if (this.rowInset < MAX_ROW_INSET) {
       const oldRowInset = this.rowInset;
       this.rowInset = MAX_ROW_INSET;
-      this.collapseTilesLeavingSafeZone(oldRowInset, this.colInset);
+      this.collapseTilesLeavingSafeZone(this.insetBounds(oldRowInset, this.colInset));
     }
   }
 
-  // Shared by both branches of shrinkBoundary() above — burns every tile
-  // that was inside the safe zone at (oldRowInset, oldColInset) but isn't
-  // anymore at the room's current (this.rowInset, this.colInset).
-  collapseTilesLeavingSafeZone(oldRowInset, oldColInset) {
-    this.getSafeZoneTiles(oldRowInset, oldColInset).forEach(({ row, col }) => {
+  // FINAL mode's own rapid-shrink phase (see checkRoundState) closes the
+  // column ring exactly the same way shrinkBoundary() does, but stops once
+  // colInset reaches whatever value leaves exactly FINAL_ROAM_WINDOW_SIZE
+  // (6) columns, instead of continuing on to MAX_COL_INSET — and never
+  // touches rowInset at all, unlike shrinkBoundary()'s eventual one-shot
+  // row squeeze. A 6-tall window already fits inside MAP_ROWS (7) with 1
+  // row of slack from the start; there's no further row squeeze needed, or
+  // even possible via a symmetric inset (7 is odd, so an evenly-inset
+  // 6-tall band isn't representable as an integer rowInset at all). Once
+  // the target is reached, checkRoundState() calls enterFinalRoamPhase()
+  // to switch from this inset-based rectangle to the movable window.
+  finalShrinkTargetColInset() {
+    return Math.floor((MAP_COLS - FINAL_ROAM_WINDOW_SIZE) / 2);
+  }
+
+  shrinkTowardFinalWindow() {
+    const target = this.finalShrinkTargetColInset();
+    if (this.colInset >= target) {
+      return true;
+    }
+    const oldColInset = this.colInset;
+    this.colInset += 1;
+    this.collapseTilesLeavingSafeZone(this.insetBounds(this.rowInset, oldColInset));
+    return this.colInset >= target;
+  }
+
+  // Ends the shrink phase and switches getSafeBounds() (and everything
+  // built on it) over to the movable window. rowStart is centered in
+  // whatever slack MAP_ROWS - FINAL_ROAM_WINDOW_SIZE leaves (0, given the
+  // current 7-tall map — i.e. rows 0-5, excluding just the bottom row);
+  // colStart picks up exactly where the shrink phase's colInset left off,
+  // so the window's initial position is a seamless continuation of the
+  // rectangle that was already shrinking, not a jump to a new spot.
+  enterFinalRoamPhase() {
+    const oldBounds = this.getSafeBounds(); // still inset-based at this point
+    this.finalWindowRowStart = Math.floor((MAP_ROWS - FINAL_ROAM_WINDOW_SIZE) / 2);
+    this.finalWindowColStart = this.colInset;
+    this.finalRoamDirIndex = 0;
+    this.finalRoamActive = true; // getSafeBounds() now reads the window instead
+    this.collapseTilesLeavingSafeZone(oldBounds);
+  }
+
+  // right -> down -> left, then repeats (not a 4-leg loop back through
+  // "up") -- the operator's own description never addressed what happens
+  // after "left" is exhausted, so this just cycles back to "right" rather
+  // than introducing a 4th leg they didn't ask for. Each tick tries the
+  // current direction; if the window's already at that edge, it advances
+  // to the next leg and retries immediately (same tick) rather than
+  // wasting a full FINAL_ROAM_STEP_MS doing nothing -- the map's aspect
+  // ratio gives the horizontal legs ~12 columns of travel room but the
+  // vertical ("down") leg only 1, so hitting an edge well before "using up"
+  // a leg is the normal case here, not an exception.
+  roamBoundary() {
+    const directions = [{ dr: 0, dc: 1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }];
+    for (let attempt = 0; attempt < directions.length; attempt++) {
+      const dir = directions[this.finalRoamDirIndex % directions.length];
+      const newRowStart = this.finalWindowRowStart + dir.dr;
+      const newColStart = this.finalWindowColStart + dir.dc;
+      const fits = newRowStart >= 0 && newRowStart + FINAL_ROAM_WINDOW_SIZE - 1 <= MAP_ROWS - 1
+        && newColStart >= 0 && newColStart + FINAL_ROAM_WINDOW_SIZE - 1 <= MAP_COLS - 1;
+      if (fits) {
+        const oldBounds = this.getSafeBounds();
+        this.finalWindowRowStart = newRowStart;
+        this.finalWindowColStart = newColStart;
+        this.collapseTilesLeavingSafeZone(oldBounds);
+        return;
+      }
+      this.finalRoamDirIndex += 1;
+    }
+    // All 3 directions blocked this tick -- shouldn't normally happen given
+    // the window always has room to move somewhere, but no-op rather than
+    // loop forever if it ever does.
+  }
+
+  // { rowStart, rowEnd, colStart, colEnd } for a given (rowInset, colInset)
+  // pair -- used to describe the *old* rectangle to collapseTilesLeavingSafeZone
+  // right after rowInset/colInset has already moved on to its new value.
+  insetBounds(rowInset, colInset) {
+    return {
+      rowStart: rowInset,
+      rowEnd: MAP_ROWS - 1 - rowInset,
+      colStart: colInset,
+      colEnd: MAP_COLS - 1 - colInset,
+    };
+  }
+
+  // Shared by shrinkBoundary(), shrinkTowardFinalWindow(),
+  // enterFinalRoamPhase(), and roamBoundary() above — burns every tile that
+  // was inside the safe zone at `oldBounds` but isn't anymore per the
+  // room's current (already-updated) getSafeBounds().
+  collapseTilesLeavingSafeZone(oldBounds) {
+    this.getSafeZoneTiles(oldBounds).forEach(({ row, col }) => {
       if (this.isSafeTile(row, col) || this.tileMap[row][col] !== TILE_STATE.SOLID) {
         return;
       }
@@ -1540,6 +1662,43 @@ export default class Room {
           this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
         }
       }
+    } else if (this.mode === 'FINAL' && boundaryActive && !this.finalRoamActive) {
+      // Phase 1: same cadence/ring mechanic as SURVIVAL/BOSS, just aimed at
+      // a fixed FINAL_ROAM_WINDOW_SIZE-wide stopping point instead of
+      // MAX_COL_INSET — see shrinkTowardFinalWindow()'s own comment.
+      const stepsDue = Math.floor((elapsed - BOUNDARY_SHRINK_GRACE_MS) / BOUNDARY_SHRINK_INTERVAL_MS) + 1;
+      if (stepsDue > this.boundaryShrinkStepsDone) {
+        const isFirstStep = this.boundaryShrinkStepsDone === 0;
+        this.boundaryShrinkStepsDone = stepsDue;
+
+        const reachedTarget = this.shrinkTowardFinalWindow();
+
+        if (isFirstStep) {
+          this.announceBoundaryShrink();
+        } else {
+          this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+        }
+
+        if (reachedTarget) {
+          this.enterFinalRoamPhase();
+          this.lastFinalRoamAt = Date.now();
+          // The window just changed shape (inset rectangle -> fixed
+          // square), on top of whatever the ring collapse above already
+          // announced -- worth its own pulse so the client's outline
+          // reflects it immediately rather than waiting up to
+          // FINAL_ROAM_STEP_MS for the first roam step to also emit one.
+          this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+        }
+      }
+    } else if (this.mode === 'FINAL' && this.finalRoamActive) {
+      // Phase 2: the window itself moves one cell at a time on its own
+      // cadence (FINAL_ROAM_STEP_MS), independent of the shrink phase's
+      // BOUNDARY_SHRINK_INTERVAL_MS cadence above.
+      if (Date.now() - this.lastFinalRoamAt >= FINAL_ROAM_STEP_MS) {
+        this.lastFinalRoamAt = Date.now();
+        this.roamBoundary();
+        this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+      }
     }
 
     if (elapsed >= this.roundDurationMs) {
@@ -1558,6 +1717,7 @@ export default class Room {
       animalIndex: p.animalIndex,
       score: p.score || 0,
       eliminated: p.eliminated,
+      eliminatedAt: p.eliminatedAt || null,
     }));
   }
 

@@ -532,6 +532,11 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
         score: p.score,
         result: p.eliminated ? 'eliminated' : 'survived',
         stage: currentStage,
+        // Only actually used for ranking at stage 3 (see endTournament()'s
+        // stage-aware sort) -- a standalone 개인전 tournament (SOLO chosen
+        // at stage 1) still ranks by score, unchanged. Harmless to always
+        // carry: null means "never eliminated," i.e. the winner.
+        eliminatedAt: p.eliminatedAt || null,
       });
     });
 
@@ -631,8 +636,37 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
   return endTournament();
 }
 
+// Reaching a later bracket stage always ranks above an earlier one,
+// regardless of score -- someone who made it to stage 3 objectively placed
+// better than anyone cut in stage 1/2, which a pure score sort can't
+// guarantee (a long-surviving stage-1 elimination could easily outscore a
+// stage-3 entrant who died early in the chaotic final). Within the same
+// stage: stage 3 (the FINAL/SOLO finale) ranks by elimination order --
+// never-eliminated (the winner) first, then whoever lasted longest -- per
+// the operator's explicit call that the finale isn't score-based. Every
+// other stage keeps the original score-based ordering (also covers a
+// standalone 개인전 tournament, which is always "stage 1" and never
+// reaches this eliminatedAt-based branch).
+function compareRankings(a, b) {
+  if (a.stage !== b.stage) {
+    return b.stage - a.stage;
+  }
+  if (a.stage === 3) {
+    const aAlive = a.eliminatedAt == null;
+    const bAlive = b.eliminatedAt == null;
+    if (aAlive !== bAlive) {
+      return aAlive ? -1 : 1;
+    }
+    if (aAlive) {
+      return 0; // both never eliminated -- shouldn't happen (one true winner), stable no-op
+    }
+    return b.eliminatedAt - a.eliminatedAt;
+  }
+  return b.score - a.score;
+}
+
 function endTournament() {
-  const rankings = [...finalRankings].sort((a, b) => b.score - a.score);
+  const rankings = [...finalRankings].sort(compareRankings);
   // Global broadcast covers anyone already parked on a result screen from a
   // lineage that finished earlier; the room that just triggered this also
   // gets the rankings bundled directly into its own roomResult (see Room.js)
