@@ -67,10 +67,10 @@ export function fitTitlePanel(graphics, centerX, centerY, height, text, paddingX
 // had before) — (anchorX, anchorY) is the fixed on-screen point,
 // (originX, originY) says which fraction of the panel that point
 // represents, same numbers as the .setOrigin() call would have used.
-export function fitAnchoredRoundedPanel(graphics, anchorX, anchorY, originX, originY, height, text, paddingX) {
+export function fitAnchoredRoundedPanel(graphics, anchorX, anchorY, originX, originY, height, text, paddingX, extraOptions = {}) {
   const bounds = text.getBounds();
   const width = bounds.width + paddingX;
   const centerX = anchorX + width * (0.5 - originX);
   const centerY = anchorY + height * (0.5 - originY);
-  drawRoundedRect(graphics, centerX, centerY, width, height, { radius: 6 });
+  drawRoundedRect(graphics, centerX, centerY, width, height, { radius: 6, ...extraOptions });
 }

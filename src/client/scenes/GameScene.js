@@ -316,7 +316,12 @@ export default class GameScene extends Phaser.Scene {
       this.hideJoystick();
       this.spectatorBadge.setVisible(true);
       this.spectatorBadgePanel.setVisible(true);
-      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 90, 0.5, 0, 24, this.spectatorBadge, 24);
+      // fillAlpha bumped well above the shared 0.68 default -- this panel
+      // sits over the actual play area (not tucked in a corner like the
+      // other HUD chips), and at the map's current short WORLD_HEIGHT a
+      // player avatar routinely wanders directly behind it, visibly
+      // bleeding through the standard semi-transparent fill.
+      fitAnchoredRoundedPanel(this.spectatorBadgePanel, WORLD_WIDTH / 2, 90, 0.5, 0, 24, this.spectatorBadge, 24, { fillAlpha: 0.95 });
       this.backToDashboardNode.setVisible(this.fromDashboard);
 
       if (!this.spectatorBadgePulse) {

@@ -5,7 +5,9 @@ import LobbyScene from './scenes/LobbyScene';
 import ResultScene from './scenes/ResultScene';
 import DashboardScene from './scenes/DashboardScene';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../shared/hexGrid';
-import { FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT } from './theme/Theme';
+import {
+  FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT, FONT_BODY_FAMILY, FONT_BODY_SAMPLE_TEXT,
+} from './theme/Theme';
 
 const config = {
   title:    '타일 서바이벌',
@@ -121,6 +123,7 @@ if (document.fonts && document.fonts.load) {
   // only cares which characters need which unicode-range slice, not the
   // pixel size they'll eventually render at.
   document.fonts.load(`24px '${FONT_DISPLAY_FAMILY}'`, FONT_DISPLAY_SAMPLE_TEXT).catch(() => {});
+  document.fonts.load(`16px '${FONT_BODY_FAMILY}'`, FONT_BODY_SAMPLE_TEXT).catch(() => {});
 }
 
 if (document.fonts && document.fonts.ready) {

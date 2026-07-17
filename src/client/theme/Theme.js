@@ -34,6 +34,7 @@ export const FONT_BODY = "'Gothic A1', 'Malgun Gothic', sans-serif";
 // styled with FONT_DISPLAY across every scene -- a new title/banner string
 // added without a matching entry here is exposed to the same bug.
 export const FONT_DISPLAY_FAMILY = 'Black Han Sans';
+export const FONT_BODY_FAMILY = 'Gothic A1';
 // Shared event banner shown big at the very top of both LoginScene and
 // LobbyScene — one constant so the two screens can't drift out of sync.
 export const EVENT_BANNER_TEXT = 'FIL2 소확행 EVENT';
@@ -59,6 +60,47 @@ export const FONT_DISPLAY_SAMPLE_TEXT = [
   '생존!',
   '탈락했습니다.',
   '토너먼트 결과',
+].join(' ');
+
+// Same glyph-slice-loading race as FONT_DISPLAY_SAMPLE_TEXT above, just for
+// the body face -- found via a real bug: GameScene's spectator badge (only
+// ever created once the player reaches a rarely-visited screen, well after
+// LoginScene's own document.fonts.ready has already resolved and swept
+// every Text object that existed *at that point*) rendered one character as
+// a blank glyph box because Gothic A1's slice for it had never been
+// requested by anything drawn before it. Unlike FONT_DISPLAY_SAMPLE_TEXT,
+// this deliberately doesn't try to cover nickname text (unbounded,
+// user-supplied) -- only fixed strings drawn via Phaser Text with
+// FONT_BODY. DOM elements (every <button>/<input>) aren't included either:
+// those render through the browser's own text layout, not a Phaser canvas
+// Text object, so they were never exposed to this bug in the first place.
+export const FONT_BODY_SAMPLE_TEXT = [
+  '더블클릭: 게임 화면 보기',
+  '현황을 불러오는 중...',
+  '👁 관전 모드 - 참가자들의 게임을 지켜보는 중',
+  '유령 모드 - 무너진 칸을 클릭해 복구하세요 (모두의 게이지가 차면 유령 1명 부활!)',
+  '지금 미친듯이 클릭하세요! 복구 속도 UP · 게이지 채워 동료를 부활시키세요!',
+  '참가 주소:',
+  '토너먼트 진행 중입니다. 곧 다음 게임에 자동 참여합니다.',
+  '관리자가 게임을 시작하기를 기다리는 중...',
+  '닉네임을 입력해주세요.',
+  '관리자 비밀번호가 틀렸습니다.',
+  '아직 세션이 열리지 않았습니다. 관리자 접속을 기다려주세요.',
+  '참가할 수 없습니다.',
+  '참가하는 중...',
+  '결과가 없습니다.',
+  '다음 상대를 기다리는 중',
+  '토너먼트 결과',
+  '⚔️ 보스전',
+  '🏃 생존',
+  '팀 점수',
+  '내 점수',
+  '보스 체력',
+  '명 참가 중',
+  '참가 명',
+  '조 생존',
+  '점수 남은시간',
+  '1위 🥇🥈🥉',
 ].join(' ');
 
 export const COLORS = {
