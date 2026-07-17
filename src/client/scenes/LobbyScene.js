@@ -21,7 +21,11 @@ import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 // waiting players that render at full, readable size before that shrink
 // ever kicks in.
 const GRID_CELL_W = 68;
-const GRID_CELL_H = 32;
+// Shrunk from 32 alongside the bottom controls being collapsed into one
+// combined row (see the DOM button block below) -- freed-up vertical
+// budget goes toward fitting more rows before cellScale's shrink-to-fit
+// kicks in, not toward taller cells with nothing driving the need for it.
+const GRID_CELL_H = 28;
 // Computed from the live WORLD_WIDTH rather than a fixed count -- a fixed
 // GRID_COLS (originally 8, then manually re-tuned down to 6 and 5 as the
 // map got narrower for portrait/landscape experiments) kept silently
@@ -36,20 +40,17 @@ const GRID_COLS = Math.max(3, Math.floor((WORLD_WIDTH - 20) / GRID_CELL_W));
 // Shifted down from the original 112 to leave room for the event banner
 // pinned above the "🔥 대기실" title.
 const GRID_START_Y = 138;
-// Vertical budget the roster grid is allowed to use before it start
-// overlapping the action-button/mode-toggle rows pinned to the bottom of
-// the screen (see their own WORLD_HEIGHT-56/-18 anchors below) -- 80px
-// covers both rows plus a small margin. Both rows were shrunk (smaller
-// padding/font, action buttons split into left/right corner groups
-// instead of one big centered row) specifically to free up more of this
-// budget for the roster grid, since a crowded lobby needs to show as many
-// waiting names as possible. At the original, much taller WORLD_HEIGHT
-// this always had room to spare and the scaling below never engaged; at a
-// short WORLD_HEIGHT (mapConfig.js has been re-tuned down to as little as
-// ~270px for gameplay-tile-size reasons) a big roster no longer fits at
-// full cell size, and used to render right on top of those buttons -- see
-// renderLobby()'s cellScale for the fix.
-const GRID_AVAILABLE_HEIGHT = Math.max(GRID_CELL_H, WORLD_HEIGHT - GRID_START_Y - 80);
+// Vertical budget the roster grid is allowed to use before it starts
+// overlapping the bottom control bar (reset/clear/mode-toggle/addBot/start,
+// all one combined row now -- see the DOM button block below) pinned to the
+// very bottom of the screen. 36px covers that single compact row plus a
+// small margin -- down from 80px when it was two separate rows (action
+// buttons above the mode toggle), which was the single biggest bite out of
+// this budget. At MAX_LOBBY_PLAYERS (40) and the current GRID_COLS, this
+// keeps cellScale at a full, readable 1 instead of shrinking to its 0.45
+// floor and clustering unreadably small in the middle of the screen -- see
+// renderLobby()'s cellScale computation.
+const GRID_AVAILABLE_HEIGHT = Math.max(GRID_CELL_H, WORLD_HEIGHT - GRID_START_Y - 36);
 
 export default class LobbyScene extends Phaser.Scene {
 
@@ -131,29 +132,54 @@ export default class LobbyScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5);
 
-    // Segmented mode toggle, admin-only, pinned to the very bottom-center —
-    // kept as two plain buttons rather than a native <select>/radio pair so
-    // the active state can reuse the same visual language (filled/outlined)
-    // as every other button here instead of a form control that would look
-    // out of place against the rest of the UI. Sits below the action-button
-    // row (created further down) rather than above it: as the one truly
-    // centered control down here, dead-bottom-center reads as its natural
-    // spot, with the action buttons' left/right groups framing it from above.
-    const modeToggleHtml = `
-      <div style="display:flex;gap:6px;align-items:center;">
-        <button id="mode-team-button" type="button"
-          style="padding:6px 14px;font-size:12px;border-radius:7px;cursor:pointer;font-family:${FONT_BODY};">
-          팀전
-        </button>
-        <button id="mode-solo-button" type="button"
-          style="padding:6px 14px;font-size:12px;border-radius:7px;cursor:pointer;font-family:${FONT_BODY};">
-          개인전
-        </button>
+    // Everything that used to be two stacked rows (action buttons above,
+    // mode toggle below) is now one single row pinned to the very bottom
+    // edge of the screen -- freeing up the vertical space the second row
+    // used to cost entirely for the roster grid above it (see
+    // GRID_AVAILABLE_HEIGHT's own comment), since a crowded lobby needs
+    // that room far more than these controls need to be visually separated.
+    // Three groups (destructive/reset on the left, the mode toggle centered,
+    // routine/frequently-used on the right) in one flex row rather than one
+    // undifferentiated cluster, so "게임 시작" -- the one actually pressed
+    // every round -- doesn't read as visually interchangeable with the rare,
+    // destructive reset buttons next to it.
+    const buttonHtml = `
+      <div style="display:flex;justify-content:space-between;align-items:center;width:${WORLD_WIDTH - 32}px;">
+        <div style="display:flex;gap:8px;">
+          <button id="reset-server-button" type="button"
+            style="padding:6px 10px;font-size:10px;border-radius:7px;border:none;background:#7f1d1d;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            서버 초기화
+          </button>
+          <button id="clear-lobby-button" type="button"
+            style="padding:6px 10px;font-size:10px;border-radius:7px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            초기화
+          </button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button id="mode-team-button" type="button"
+            style="padding:5px 12px;font-size:11px;border-radius:7px;cursor:pointer;font-family:${FONT_BODY};">
+            팀전
+          </button>
+          <button id="mode-solo-button" type="button"
+            style="padding:5px 12px;font-size:11px;border-radius:7px;cursor:pointer;font-family:${FONT_BODY};">
+            개인전
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button id="add-bot-button" type="button"
+            style="padding:6px 12px;font-size:11px;border-radius:7px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            봇 추가
+          </button>
+          <button id="start-button" type="button"
+            style="padding:6px 16px;font-size:12px;border-radius:7px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            게임 시작
+          </button>
+        </div>
       </div>
     `;
-    this.modeToggleNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 18).createFromHTML(modeToggleHtml);
-    this.modeTeamButton = this.modeToggleNode.getChildByID('mode-team-button');
-    this.modeSoloButton = this.modeToggleNode.getChildByID('mode-solo-button');
+    this.buttonNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 16).createFromHTML(buttonHtml);
+    this.modeTeamButton = this.buttonNode.getChildByID('mode-team-button');
+    this.modeSoloButton = this.buttonNode.getChildByID('mode-solo-button');
     applyButtonFx(this.modeTeamButton);
     applyButtonFx(this.modeSoloButton);
 
@@ -173,40 +199,6 @@ export default class LobbyScene extends Phaser.Scene {
       this.selectedGameMode = 'SOLO';
       refreshModeButtons();
     });
-
-    // Split into two corner-anchored groups (destructive/reset controls on
-    // the left, routine/frequently-used controls on the right) inside a
-    // single flex row spanning almost the full screen width, rather than
-    // one big centered cluster -- that centered layout ate into the middle
-    // of the screen where the roster grid needs room, and made every
-    // button (including "게임 시작", the one actually pressed every round)
-    // look as visually loud as the rare, destructive reset buttons next to
-    // it. Buttons are also shrunk (smaller padding/font) across the board.
-    const buttonHtml = `
-      <div style="display:flex;justify-content:space-between;align-items:center;width:${WORLD_WIDTH - 32}px;">
-        <div style="display:flex;gap:8px;">
-          <button id="reset-server-button" type="button"
-            style="padding:7px 11px;font-size:11px;border-radius:8px;border:none;background:#7f1d1d;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
-            서버 초기화
-          </button>
-          <button id="clear-lobby-button" type="button"
-            style="padding:7px 11px;font-size:11px;border-radius:8px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
-            초기화
-          </button>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button id="add-bot-button" type="button"
-            style="padding:7px 14px;font-size:12px;border-radius:8px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
-            봇 추가
-          </button>
-          <button id="start-button" type="button"
-            style="padding:7px 18px;font-size:13px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
-            게임 시작
-          </button>
-        </div>
-      </div>
-    `;
-    this.buttonNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 56).createFromHTML(buttonHtml);
     this.startButton = this.buttonNode.getChildByID('start-button');
     this.addBotButton = this.buttonNode.getChildByID('add-bot-button');
     this.clearLobbyButton = this.buttonNode.getChildByID('clear-lobby-button');
@@ -249,12 +241,12 @@ export default class LobbyScene extends Phaser.Scene {
       this.socket.emit('resetServer');
     });
 
+    // Every control in this bar (reset/clear/mode-toggle/addBot/start) is
+    // admin-only -- hiding the single combined node covers all of them at
+    // once now that they're one DOM element instead of needing to hide each
+    // child individually.
     if (!this.isAdmin) {
-      this.startButton.style.display = 'none';
-      this.addBotButton.style.display = 'none';
-      this.clearLobbyButton.style.display = 'none';
-      this.resetServerButton.style.display = 'none';
-      this.modeToggleNode.setVisible(false);
+      this.buttonNode.setVisible(false);
     }
 
     this.handleLobbyUpdate = (payload) => this.renderLobby(payload);

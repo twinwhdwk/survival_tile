@@ -1,16 +1,32 @@
-export const ZODIAC_ANIMALS = [
-  { key: 'rat', label: '쥐' },
-  { key: 'ox', label: '소' },
-  { key: 'tiger', label: '호랑이' },
-  { key: 'rabbit', label: '토끼' },
-  { key: 'dragon', label: '용' },
-  { key: 'snake', label: '뱀' },
-  { key: 'horse', label: '말' },
-  { key: 'goat', label: '양' },
-  { key: 'monkey', label: '원숭이' },
-  { key: 'rooster', label: '닭' },
-  { key: 'dog', label: '개' },
-  { key: 'pig', label: '돼지' },
+// headShape controls the base silhouette drawn in AnimalTextures.js, not
+// just a small ornament on an identical head -- without it, every species
+// shared the exact same circle head + oval muzzle and only differed by a
+// tiny marker (horns, whiskers, stripes...), which read as "the same face
+// with slightly different ears" rather than genuinely different animals.
+// 'round' is the original look (kept for every original zodiac entry so
+// they render unchanged); 'snout' gives a longer jaw (predators/long-faced
+// animals), 'mane' draws a radiating mane behind the head (lion), 'trunk'
+// swaps the muzzle for an elephant's trunk.
+export const ANIMAL_SPECIES = [
+  { key: 'rat', label: '쥐', headShape: 'round' },
+  { key: 'ox', label: '소', headShape: 'round' },
+  { key: 'tiger', label: '호랑이', headShape: 'snout' },
+  { key: 'rabbit', label: '토끼', headShape: 'round' },
+  { key: 'dragon', label: '용', headShape: 'round' },
+  { key: 'snake', label: '뱀', headShape: 'round' },
+  { key: 'horse', label: '말', headShape: 'snout' },
+  { key: 'goat', label: '양', headShape: 'round' },
+  { key: 'monkey', label: '원숭이', headShape: 'round' },
+  { key: 'rooster', label: '닭', headShape: 'round' },
+  { key: 'dog', label: '개', headShape: 'snout' },
+  { key: 'pig', label: '돼지', headShape: 'round' },
+  { key: 'crocodile', label: '악어', headShape: 'snout' },
+  { key: 'lion', label: '사자', headShape: 'mane' },
+  { key: 'bear', label: '곰', headShape: 'round' },
+  { key: 'fox', label: '여우', headShape: 'snout' },
+  { key: 'cat', label: '고양이', headShape: 'round' },
+  { key: 'panda', label: '판다', headShape: 'round' },
+  { key: 'elephant', label: '코끼리', headShape: 'trunk' },
 ];
 
 export const EAR_SHAPES = ['round', 'pointy', 'long', 'small', 'big'];
@@ -26,15 +42,17 @@ export const BODY_COLORS = [
   0xffd700, // gold (lion/chick)
   0x9370db, // purple (fantasy)
   0x87ceeb, // sky blue (fantasy)
+  0x6b8e23, // olive green (crocodile/dragon)
+  0xff7f50, // coral (fantasy/fox)
 ];
 
-// Every character is one of the 12 zodiac animals, randomly combined with a
-// body color, ear shape, eye shape, and mouth shape. The index encodes all
-// five dimensions, so ANIMAL_COUNT is their product rather than a flat list —
+// Every character is one of ANIMAL_SPECIES, randomly combined with a body
+// color, ear shape, eye shape, and mouth shape. The index encodes all five
+// dimensions, so ANIMAL_COUNT is their product rather than a flat list —
 // callers must generate textures lazily (one per actually-used index) rather
 // than pre-generating the whole space.
 export const ANIMAL_COUNT =
-  ZODIAC_ANIMALS.length * BODY_COLORS.length * EAR_SHAPES.length * EYE_SHAPES.length * MOUTH_SHAPES.length;
+  ANIMAL_SPECIES.length * BODY_COLORS.length * EAR_SHAPES.length * EYE_SHAPES.length * MOUTH_SHAPES.length;
 
 export function getAnimalSpec(index) {
   const safeIndex = ((index % ANIMAL_COUNT) + ANIMAL_COUNT) % ANIMAL_COUNT;
@@ -52,7 +70,7 @@ export function getAnimalSpec(index) {
   const color = BODY_COLORS[remainder % BODY_COLORS.length];
   remainder = Math.floor(remainder / BODY_COLORS.length);
 
-  const zodiac = ZODIAC_ANIMALS[remainder % ZODIAC_ANIMALS.length];
+  const species = ANIMAL_SPECIES[remainder % ANIMAL_SPECIES.length];
 
-  return { zodiac, color, earShape, eyeShape, mouthShape };
+  return { species, color, earShape, eyeShape, mouthShape };
 }

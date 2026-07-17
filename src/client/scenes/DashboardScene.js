@@ -174,12 +174,17 @@ export default class DashboardScene extends Phaser.Scene {
         보스 프리뷰
       </button>
     `;
-    this.previewButtonNode = this.add.dom(WORLD_WIDTH - 42, 15).createFromHTML(previewButtonHtml);
+    this.previewButtonNode = this.add.dom(WORLD_WIDTH - 42, 15).createFromHTML(previewButtonHtml).setVisible(this.isAdmin);
     this.previewButton = this.previewButtonNode.getChildByID('dashboard-boss-preview-button');
     applyButtonFx(this.previewButton);
     this.bossPreview = null;
     this.bossPreviewVisible = false;
-    this.previewButton.addEventListener('click', () => this.toggleBossPreview());
+    this.previewButton.addEventListener('click', () => {
+      if (!this.isAdmin) {
+        return;
+      }
+      this.toggleBossPreview();
+    });
 
     this.handleDashboardUpdate = (payload) => this.renderDashboard(payload);
     this.handleDashboardStarting = (payload) => this.scene.restart(payload);

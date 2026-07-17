@@ -21,7 +21,42 @@ export const FINAL_ROAM_STEP_MS = 15000;
 export const FINAL_ROAM_WINDOW_SIZE = 6;
 export const START_COUNTDOWN_MS = 10000; // nobody (bots included) can move until this long into the round, so the client's pre-game countdown is a real freeze, not just cosmetic
 export const BOUNDARY_SHRINK_GRACE_MS = 20000; // the boundary doesn't start closing in until this long into the round
-export const BOUNDARY_SHRINK_INTERVAL_MS = 15000; // the boundary insets by one ring (all 4 sides at once) every 15s after the grace period
+// The boundary insets by one ring (all 4 sides at once) every this-many ms
+// after the grace period, once the first BOUNDARY_SHRINK_EARLY_STEPS rings
+// (see BOUNDARY_SHRINK_INTERVAL_EARLY_MS) have already fired at the faster
+// cadence.
+//
+// Both intervals are tuned together against one explicit target: the safe
+// zone should reach its minimum size (SAFE_ZONE_MIN_ROWS/COLS in Room.js)
+// with 30s still left on SURVIVAL_ROUND_DURATION_MS (120s), i.e. by 90s
+// elapsed, not just "eventually" or "whenever the schedule happens to land."
+// At MAP_ROWS=7/MAP_COLS=18 (mapConfig.js), reaching that minimum takes 8
+// total steps (the column axis's 7 rings, MAX_COL_INSET_LEFT/RIGHT, plus
+// the row axis's one deferred squeeze, MAX_ROW_INSET_TOP/BOTTOM — see
+// Room.js's shrinkBoundary()): BOUNDARY_SHRINK_EARLY_STEPS (3) of them at
+// BOUNDARY_SHRINK_INTERVAL_EARLY_MS (6s) = 18s, the remaining 5 at this
+// interval (10s) = 50s, for 68s total — finishing at grace (20s) + 68s =
+// 88s elapsed, i.e. with 32s left, comfortably inside the 30s target. A
+// flat 15s schedule (the previous tuning) took well over 8*15s = 120s to
+// cover the same 8 steps — past the round's own duration on its own, so the
+// deferred row squeeze that makes the safe zone an actual minimum-size
+// rectangle would never have fired within a real round at all. These two
+// constants are map-size-sensitive: if MAP_ROWS/MAP_COLS (or
+// SAFE_ZONE_MIN_ROWS/COLS) change, re-run the step-count math above rather
+// than assuming the same total still lands inside the 30s target.
+export const BOUNDARY_SHRINK_INTERVAL_MS = 10000;
+// The first few rings close on this shorter cadence instead of the normal
+// BOUNDARY_SHRINK_INTERVAL_MS (see Room.js's boundaryShrinkStepInterval()) —
+// right as the grace period ends the map is at its widest, so a long wait
+// for a ring that barely changes anything at that size read as the whole
+// mechanic being slow to start. Ramping down to the normal cadence after
+// BOUNDARY_SHRINK_EARLY_STEPS rings keeps the later, more consequential
+// rings (each one a bigger, more felt squeeze at these already-tighter
+// dimensions) at a more readable pace instead of rushing those too. See
+// BOUNDARY_SHRINK_INTERVAL_MS's own comment for the full timing budget this
+// and BOUNDARY_SHRINK_EARLY_STEPS were solved against together.
+export const BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 6000;
+export const BOUNDARY_SHRINK_EARLY_STEPS = 3;
 export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this window, not all at once
 // SURVIVAL rounds don't have a boss to hit for points, so a teammate's score
 // contribution is instead how long they personally stayed alive (in whole
@@ -127,3 +162,14 @@ export const GHOST_REVIVE_GAUGE_MAX = 100;
 // coming back, short enough that idling isn't a safe way to wait out a
 // round.
 export const GHOST_RESPAWN_STILLNESS_MS = 3000;
+
+// A player's own spawn tile is the one tile triggerTileCollapse() never
+// reaches through the normal path — every other tile gets triggered the
+// instant a player's movement lands them on it (see Room.movePlayerTo()),
+// but the very first spawn placement sets position directly, so a player
+// who never moves at all from round start would otherwise sit on
+// permanently safe ground for the whole round. Mirrors
+// GHOST_RESPAWN_STILLNESS_MS's own one-shot check, just anchored to
+// START_COUNTDOWN_MS lifting (movement is impossible before that regardless
+// of player action) instead of an individual respawn.
+export const ROUND_START_STILLNESS_MS = 2000;

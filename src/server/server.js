@@ -7,7 +7,7 @@ import Compression from 'compression';
 
 import { ANIMAL_COUNT } from '../shared/animals';
 import {
-  NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, STAGE_1_GROUP_COUNT,
+  NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, MAX_PLAYERS,
   STAGE_2_GROUP_COUNT, STAGE_2_MAX_ROOM_SIZE,
 } from '../shared/roomConfig';
 import Room from './Room';
@@ -266,10 +266,11 @@ const spectatorSockets = new Set();
 let sessionOpened = false;
 
 // Bracket state: each stage is an array of "lineages" ({ members, score }).
-// A fixed 3-stage shape: stage 1's lineages are STAGE_1_GROUP_COUNT random
-// groups; stage 2's are STAGE_2_GROUP_COUNT groups formed by pooling and
-// reshuffling every stage-1 survivor (formStage2Groups); stage 3 is a
-// single pooled SOLO room (formStage3Group) that ends the tournament
+// A fixed 3-stage shape: stage 1's lineages are however many MAX_PLAYERS-
+// capped random groups chunkForInitialRound() produces (grows with turnout,
+// not a fixed count); stage 2's are STAGE_2_GROUP_COUNT groups formed by
+// pooling and reshuffling every stage-1 survivor (formStage2Groups); stage 3
+// is a single pooled SOLO room (formStage3Group) that ends the tournament
 // itself. A lineage that loses every member before its stage transition is
 // locked into the final ranking immediately and does not pass its score on.
 let currentStage = 0;
@@ -328,15 +329,26 @@ function broadcastLobby() {
   io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
 }
 
-// Round 1 always targets exactly STAGE_1_GROUP_COUNT (8) groups, sized as
-// evenly as possible -- an operator running a fixed-format event wants a
-// predictable stage 1 shape regardless of how close turnout lands to
-// MAX_LOBBY_PLAYERS (40), rather than however many fixed-MAX_PLAYERS-size
-// groups an unbounded headcount used to produce. Any remainder from an
-// uneven split is spread as +1 across multiple groups instead of dumping
-// it all onto a single trailing group. Only degrades below 8 groups when
-// there are literally fewer than 8 people at all (never more groups than
-// people) -- a small ad-hoc test session, not a real capped-at-40 event.
+// Round 1: groups are capped at MAX_PLAYERS (5), full stop — an earlier
+// version folded any remainder into an existing group instead of opening a
+// new one (11 players used to become [5, 6], already over the cap this
+// function's own name implies). Now: however many MAX_PLAYERS-sized groups
+// fit is the starting count, plus one more only if there's a remainder at
+// all, and the total is then spread as evenly as possible across however
+// many groups that ends up being (sizes differing by at most 1) rather than
+// cramming the leftover onto whichever group happened to be first/last --
+// e.g. 5 players stay a single group of 5 (round 1 is TEAM mode; splitting
+// them for no reason would leave someone playing "alone"), 6 becomes 2
+// groups of 3, 10 stays 2 groups of 5, 11 becomes 3 groups of 4/4/3.
+// ceil(total / ceil(total / MAX_PLAYERS)) never exceeds MAX_PLAYERS for any
+// total, so the cap holds regardless of headcount. Deliberately headcount-
+// driven rather than a fixed group count (an earlier fixed-
+// STAGE_1_GROUP_COUNT alternative was considered and discarded here) —
+// group *count* is left free to grow with turnout instead of group *size*
+// drifting away from MAX_PLAYERS as the lobby fills toward
+// MAX_LOBBY_PLAYERS. formStage2Groups()/formStage3Group() pool every
+// survivor regardless of how many stage-1 rooms fed them, so they don't
+// care how many groups this produces.
 function chunkForInitialRound(members) {
   const shuffled = [...members].sort(() => Math.random() - 0.5);
   const total = shuffled.length;
@@ -344,19 +356,16 @@ function chunkForInitialRound(members) {
     return [];
   }
 
-  const numGroups = Math.max(1, Math.min(STAGE_1_GROUP_COUNT, total));
-  const baseSize = Math.floor(total / numGroups);
-  const sizes = new Array(numGroups).fill(baseSize);
-  // total = numGroups * baseSize + remaining, and by definition of that
-  // division remaining is always < numGroups -- so this loop alone always
-  // fully spreads it (never leaves a trailing remainder to dump on the
-  // last group the way the old MAX_PLAYERS-divided version occasionally
-  // needed to).
-  let remaining = total - numGroups * baseSize;
-  for (let g = 0; g < numGroups && remaining > 0; g++) {
-    sizes[g] += 1;
-    remaining -= 1;
-  }
+  const numGroups = Math.max(1, Math.ceil(total / MAX_PLAYERS));
+  const base = Math.floor(total / numGroups);
+  let extra = total % numGroups;
+  const sizes = new Array(numGroups).fill(base).map((size) => {
+    if (extra > 0) {
+      extra -= 1;
+      return size + 1;
+    }
+    return size;
+  });
 
   const groups = [];
   let cursor = 0;
@@ -367,8 +376,9 @@ function chunkForInitialRound(members) {
   return groups;
 }
 
-// Stage 2 pools every stage-1 survivor across all STAGE_1_GROUP_COUNT rooms
-// (rather than mergeAdjacentLineages' pairwise merge) and randomly
+// Stage 2 pools every stage-1 survivor across however many stage-1 rooms
+// chunkForInitialRound() actually produced (rather than mergeAdjacentLineages'
+// pairwise merge) and randomly
 // redistributes them into exactly STAGE_2_GROUP_COUNT new groups, evenly
 // sized and capped at STAGE_2_MAX_ROOM_SIZE per room. Each returning
 // lineage's own `score` is always 0 -- a fresh shared team score for the
@@ -969,10 +979,12 @@ function setServerHandlers() {
       room.movePlayerTo(socket.id, movementData.x, movementData.y);
     });
 
+    // A ghost's tap is now a bare "I touched the screen" signal with no
+    // target of its own (see GameScene's handleGhostScreenTap) — Room.js's
+    // reviveTile() picks which collapsed tile actually comes back itself
+    // when row/col aren't a valid, currently-GONE tile, so an empty payload
+    // is the normal case here, not a malformed one.
     socket.on('reviveTile', (payload) => {
-      if (!payload || !Number.isInteger(payload.row) || !Number.isInteger(payload.col)) {
-        return;
-      }
       const roomId = socketRoomMap.get(socket.id);
       if (!roomId) {
         return;
@@ -981,7 +993,8 @@ function setServerHandlers() {
       if (!room) {
         return;
       }
-      room.reviveTile(socket.id, payload.row, payload.col);
+      const hasCoords = payload && Number.isInteger(payload.row) && Number.isInteger(payload.col);
+      room.reviveTile(socket.id, hasCoords ? payload.row : undefined, hasCoords ? payload.col : undefined);
     });
 
     // Admin-only "balance lever" triggered from the dashboard (or a

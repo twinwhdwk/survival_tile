@@ -124,11 +124,84 @@ function drawMouth(g, mouthShape) {
   }
 }
 
-function drawSpeciesMarker(g, zodiacKey, color) {
+// A lion's mane radiates out from behind the head as a ring of triangular
+// tufts -- drawn before the head fill so the head circle (radius 15) covers
+// the inner ~15px of each spike and only the outer points show, the same
+// way real fur roots would be hidden under the skull.
+function drawMane(g, color) {
+  const spikeCount = 14;
+  const innerR = 12;
+  const outerR = 20;
+  g.fillStyle(color, 1);
+  for (let i = 0; i < spikeCount; i++) {
+    const angle = (Math.PI * 2 * i) / spikeCount;
+    const spread = 0.16;
+    const x1 = CENTER + Math.cos(angle) * innerR;
+    const y1 = CENTER + Math.sin(angle) * innerR;
+    const x2 = CENTER + Math.cos(angle - spread) * outerR;
+    const y2 = CENTER + Math.sin(angle - spread) * outerR;
+    const x3 = CENTER + Math.cos(angle + spread) * outerR;
+    const y3 = CENTER + Math.sin(angle + spread) * outerR;
+    g.fillTriangle(x1, y1, x2, y2, x3, y3);
+  }
+}
+
+// The base head+muzzle silhouette, keyed by species.headShape rather than
+// every species sharing the same circle+oval -- see ANIMAL_SPECIES' own
+// comment in animals.js for why this exists. 'round' reproduces the
+// original single shape every species used to draw unconditionally.
+// Returns whether a muzzle patch was drawn, so the caller knows whether the
+// plain black nose dot still makes sense on top of it.
+function drawHeadAndMuzzle(g, headShape, color, skipMuzzle) {
+  g.fillStyle(color, 1);
+
+  if (headShape === 'snout') {
+    // Smaller, slightly raised skull with an elongated jaw hanging below it
+    // -- reads as a proper muzzle silhouette (crocodile/fox/tiger/horse/dog)
+    // instead of the same round head as everything else.
+    g.fillCircle(CENTER, CENTER - 3, 13);
+    g.fillEllipse(CENTER, CENTER + 9, 12, 10);
+    if (!skipMuzzle) {
+      g.fillStyle(0xffffff, 1);
+      g.fillEllipse(CENTER, CENTER + 10, 10, 7);
+    }
+    return;
+  }
+
+  if (headShape === 'trunk') {
+    // Slightly bigger head, no separate white muzzle patch -- the trunk
+    // (drawn as this species' marker, after the nose/mouth pass) reads as
+    // the face's main feature instead.
+    g.fillCircle(CENTER, CENTER, 16);
+    return;
+  }
+
+  // 'mane' still uses the plain round head/muzzle -- the mane itself is
+  // drawn separately, before this, as its own ring around the outside.
+  g.fillCircle(CENTER, CENTER, 15);
+  if (!skipMuzzle) {
+    g.fillStyle(0xffffff, 1);
+    g.fillEllipse(CENTER, CENTER + 6, 15, 10);
+  }
+}
+
+// Markers that need to render *underneath* the eyes (a patch of fur the
+// eyes then sit on top of) rather than layered on last like every other
+// species marker -- currently just panda's eye patches, which would
+// otherwise paint straight over the eyes drawn after them.
+function drawPreEyeMarker(g, speciesKey) {
+  if (speciesKey === 'panda') {
+    g.fillStyle(0x2a2a2a, 0.9);
+    g.fillEllipse(CENTER - 6, CENTER - 3, 6.5, 8);
+    g.fillEllipse(CENTER + 6, CENTER - 3, 6.5, 8);
+  }
+}
+
+function drawSpeciesMarker(g, speciesKey, color) {
   const darkColor = darken(color, 60);
   const hornColor = 0xe8e0c8;
 
-  switch (zodiacKey) {
+  switch (speciesKey) {
     case 'rat':
       g.lineStyle(1, 0x333333, 0.8);
       [-1, 1].forEach((side) => {
@@ -158,11 +231,18 @@ function drawSpeciesMarker(g, zodiacKey, color) {
       g.fillRect(CENTER + 0.5, CENTER + 7, 2.5, 4);
       break;
     case 'dragon':
+      // Bigger horn, a matching back-spike, and a forked tongue -- the
+      // original version was a single small horn easy to mistake for the
+      // ox's, since both still shared the exact same round head.
       g.fillStyle(0xffe066, 1);
-      g.fillTriangle(CENTER - 3, CENTER - 17, CENTER + 3, CENTER - 17, CENTER, CENTER - 25);
+      g.fillTriangle(CENTER - 4, CENTER - 17, CENTER + 4, CENTER - 17, CENTER, CENTER - 27);
+      g.fillTriangle(CENTER + 9, CENTER - 13, CENTER + 14, CENTER - 13, CENTER + 11, CENTER - 20);
       g.fillStyle(darkColor, 0.7);
       g.fillCircle(CENTER - 11, CENTER + 2, 1.4);
       g.fillCircle(CENTER + 11, CENTER + 2, 1.4);
+      g.fillStyle(0xff3355, 1);
+      g.fillTriangle(CENTER - 2, CENTER + 10, CENTER + 2, CENTER + 10, CENTER - 3, CENTER + 15);
+      g.fillTriangle(CENTER - 2, CENTER + 10, CENTER + 2, CENTER + 10, CENTER + 3, CENTER + 15);
       break;
     case 'snake':
       g.fillStyle(0xff3355, 1);
@@ -207,26 +287,80 @@ function drawSpeciesMarker(g, zodiacKey, color) {
       g.fillCircle(CENTER - 2.5, CENTER + 7, 1);
       g.fillCircle(CENTER + 2.5, CENTER + 7, 1);
       break;
+    case 'crocodile':
+      g.fillStyle(0xffffff, 1);
+      [-1, 1].forEach((side) => {
+        g.fillTriangle(
+          CENTER + side * 4, CENTER + 8,
+          CENTER + side * 4 + side * 2.5, CENTER + 8,
+          CENTER + side * 5, CENTER + 12
+        );
+      });
+      g.fillStyle(darken(color, 45), 0.7);
+      g.fillCircle(CENTER - 9, CENTER - 8, 1.3);
+      g.fillCircle(CENTER + 9, CENTER - 8, 1.3);
+      g.fillCircle(CENTER, CENTER - 12, 1.3);
+      break;
+    case 'lion':
+      // The mane itself is the headShape ring drawn before the head fill —
+      // this is just a small chin tuft to finish the silhouette below it.
+      g.fillStyle(darken(color, 15), 1);
+      g.fillTriangle(CENTER - 3, CENTER + 12, CENTER + 3, CENTER + 12, CENTER, CENTER + 17);
+      break;
+    case 'bear':
+      g.fillStyle(darken(color, 35), 1);
+      g.fillCircle(CENTER, CENTER + 8, 3);
+      break;
+    case 'fox':
+      g.fillStyle(0xffffff, 1);
+      g.fillTriangle(CENTER - 13, CENTER - 16, CENTER - 7, CENTER - 16, CENTER - 10, CENTER - 9);
+      g.fillTriangle(CENTER + 13, CENTER - 16, CENTER + 7, CENTER - 16, CENTER + 10, CENTER - 9);
+      g.fillStyle(darken(color, 30), 1);
+      g.fillCircle(CENTER, CENTER + 11, 1.6);
+      break;
+    case 'cat':
+      g.lineStyle(1, 0x333333, 0.7);
+      [-1, 1].forEach((side) => {
+        for (let i = 0; i < 2; i++) {
+          g.beginPath();
+          g.moveTo(CENTER + side * 7, CENTER + 7 + i * 2);
+          g.lineTo(CENTER + side * 15, CENTER + 5 + i * 3);
+          g.strokePath();
+        }
+      });
+      break;
+    case 'panda':
+      // Eye patches are drawn earlier, underneath the eyes -- see
+      // drawPreEyeMarker(). Nothing further needed here.
+      break;
+    case 'elephant':
+      g.fillStyle(color, 1);
+      g.fillEllipse(CENTER, CENTER + 13, 5, 9);
+      g.fillStyle(darken(color, 20), 1);
+      g.fillEllipse(CENTER + 1, CENTER + 19, 4, 4);
+      break;
     default:
       break;
   }
 }
 
 function drawAnimalFace(g, spec) {
-  const { zodiac, color, earShape, eyeShape, mouthShape } = spec;
+  const { species, color, earShape, eyeShape, mouthShape } = spec;
   const earColor = darken(color, 40);
+  const headShape = species.headShape || 'round';
+  // pig/elephant draw their own snout/trunk in drawSpeciesMarker instead of
+  // the plain white muzzle oval every other species gets.
+  const skipMuzzle = species.key === 'pig' || headShape === 'trunk';
+
+  if (headShape === 'mane') {
+    drawMane(g, darken(color, 20));
+  }
 
   drawEars(g, earShape, earColor);
 
-  // head
-  g.fillStyle(color, 1);
-  g.fillCircle(CENTER, CENTER, 15);
+  drawHeadAndMuzzle(g, headShape, color, skipMuzzle);
 
-  // muzzle (the pig marker draws its own snout instead)
-  if (zodiac.key !== 'pig') {
-    g.fillStyle(0xffffff, 1);
-    g.fillEllipse(CENTER, CENTER + 6, 15, 10);
-  }
+  drawPreEyeMarker(g, species.key);
 
   // blush
   g.fillStyle(0xff9aa2, 0.6);
@@ -235,14 +369,14 @@ function drawAnimalFace(g, spec) {
 
   drawEyes(g, eyeShape);
 
-  // nose (rooster/pig get their own beak/snout markers instead)
-  if (zodiac.key !== 'rooster' && zodiac.key !== 'pig') {
+  // nose (rooster/pig/elephant get their own beak/snout/trunk markers instead)
+  if (species.key !== 'rooster' && species.key !== 'pig' && species.key !== 'elephant') {
     g.fillStyle(0x1a1a1a, 1);
     g.fillCircle(CENTER, CENTER + 4, 2);
   }
 
   drawMouth(g, mouthShape);
-  drawSpeciesMarker(g, zodiac.key, color);
+  drawSpeciesMarker(g, species.key, color);
 }
 
 export function ensureAnimalTexture(scene, index) {
