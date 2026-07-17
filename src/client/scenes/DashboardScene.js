@@ -61,6 +61,12 @@ export default class DashboardScene extends Phaser.Scene {
   create(data) {
     this.socket = getSocket();
     this.stage = data.stage;
+    // Since 502a092/this change, a real player cut from the bracket also
+    // reaches this scene (see server.js's seatSpectator()) with the exact
+    // same payload shape an admin gets, minus isAdmin -- every admin-only
+    // control below (서버 초기화, C/S balance keys, double-click into an
+    // arbitrary room) must gate on this, not just "did I get here at all."
+    this.isAdmin = !!data.isAdmin;
     this.cardsByRoomId = {};
     this.selectedRoomId = null;
 
@@ -103,11 +109,24 @@ export default class DashboardScene extends Phaser.Scene {
     // the admin skills is that nobody watching can tell they exist, let
     // alone that clicking a card arms one. Only the harmless spectate hint
     // stays.
-    this.hintText = this.add.text(WORLD_WIDTH / 2, 50, '더블클릭: 게임 화면 보기', {
-      fontFamily: FONT_BODY,
-      fontSize: '12px',
-      color: COLORS.textMuted,
-    }).setOrigin(0.5);
+    // Only true for the admin -- a non-admin spectator can't actually
+    // double-click into a specific room (see spectateRoom()'s own guard
+    // below), so showing this hint to them would just be a promise the UI
+    // doesn't keep. A player who was just cut from the bracket (seated
+    // here straight from GameScene, with no dedicated "탈락했습니다"
+    // screen in between -- see GameScene's dashboardStarting handler) gets
+    // a plain spectate-status line instead, so this screen doesn't read as
+    // unexplained.
+    this.hintText = this.add.text(
+      WORLD_WIDTH / 2,
+      50,
+      this.isAdmin ? '더블클릭: 게임 화면 보기' : '탈락 - 다른 조의 경기를 지켜보는 중',
+      {
+        fontFamily: FONT_BODY,
+        fontSize: '12px',
+        color: COLORS.textMuted,
+      },
+    ).setOrigin(0.5);
 
     this.emptyText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, '현황을 불러오는 중...', {
       fontFamily: FONT_BODY,
@@ -132,10 +151,13 @@ export default class DashboardScene extends Phaser.Scene {
     // the card grid below (which starts at HEADER_HEIGHT=70) -- the bottom
     // corners were considered too, but FOOTER_MARGIN (14px) leaves no real
     // clearance there once the grid actually fills the screen.
-    this.resetServerNode = this.add.dom(40, 15).createFromHTML(resetButtonHtml);
+    this.resetServerNode = this.add.dom(40, 15).createFromHTML(resetButtonHtml).setVisible(this.isAdmin);
     this.resetServerButton = this.resetServerNode.getChildByID('dashboard-reset-server-button');
     applyButtonFx(this.resetServerButton);
     this.resetServerButton.addEventListener('click', () => {
+      if (!this.isAdmin) {
+        return;
+      }
       if (!window.confirm('서버를 초기화하면 진행 중인 모든 게임이 즉시 종료되고 모든 참가자가 로그인 화면으로 돌아갑니다. 계속할까요?')) {
         return;
       }
@@ -205,13 +227,22 @@ export default class DashboardScene extends Phaser.Scene {
   // spectator — server.js's 'adminSpectateRoom' handler seats this socket
   // in that room's channel and replies with a normal 'gameStarting' event,
   // which this scene already listens for (handleGameStarting), so there's
-  // nothing further to wire up here.
+  // nothing further to wire up here. Admin-only, deliberately not extended
+  // to a non-admin spectator: everyone free-picking their own room to watch
+  // in full real-time detail would multiply this stage's broadcast fan-out
+  // by however many people made that choice, instead of the flat, bounded
+  // cost of the summary-only dashboard every spectator already gets.
+  // server.js's own handler independently re-checks adminSockets too — this
+  // is just so the click doesn't even try for a non-admin.
   spectateRoom(roomId) {
+    if (!this.isAdmin) {
+      return;
+    }
     this.socket.emit('adminSpectateRoom', { roomId });
   }
 
   triggerAdminSkill(eventName) {
-    if (!this.selectedRoomId || !this.cardsByRoomId[this.selectedRoomId]) {
+    if (!this.isAdmin || !this.selectedRoomId || !this.cardsByRoomId[this.selectedRoomId]) {
       return;
     }
     this.socket.emit(eventName, { roomId: this.selectedRoomId });
@@ -611,7 +642,7 @@ export default class DashboardScene extends Phaser.Scene {
 
     const monster = this.add.text(centerX, centerY - 46, '👹', { fontSize: '46px' }).setOrigin(0.5);
     const monsterNameTag = this.add.graphics();
-    const monsterName = this.add.text(centerX, centerY - 14, 'PRA', {
+    const monsterName = this.add.text(centerX, centerY - 14, '불량', {
       fontFamily: FONT_DISPLAY,
       fontSize: '18px',
       color: '#ff5555',
@@ -630,7 +661,7 @@ export default class DashboardScene extends Phaser.Scene {
     }).setOrigin(0.5);
     parts.push(hpBarBg, hpBarFill, hpText);
 
-    const hint = this.add.text(centerX, WORLD_HEIGHT - 12, '타일을 클릭하면 PRA에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)', {
+    const hint = this.add.text(centerX, WORLD_HEIGHT - 12, '타일을 클릭하면 불량에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)', {
       fontFamily: FONT_BODY,
       fontSize: '10px',
       color: COLORS.textMuted,
@@ -665,7 +696,7 @@ export default class DashboardScene extends Phaser.Scene {
 
       // Attack tile sits a little over halfway from the team's box toward
       // the monster, so the projectile's travel distance still reads as
-      // "coming from that team" rather than starting right on top of PRA.
+      // "coming from that team" rather than starting right on top of 불량.
       const tileX = def.x + (centerX - def.x) * 0.55;
       const tileY = def.y + (centerY - def.y) * 0.55;
       const tile = this.add.image(tileX, tileY, 'tile_solid').setScale(0.9).setInteractive({ useHandCursor: true });
@@ -763,6 +794,6 @@ export default class DashboardScene extends Phaser.Scene {
   updatePreviewHpDisplay(state) {
     const ratio = Math.max(0, state.hp / PREVIEW_MAX_HP);
     state.hpBarFill.setSize(150 * ratio, 8);
-    state.hpText.setText(state.defeated ? 'PRA 처치! 잠시 후 초기화됩니다' : `HP ${state.hp}/${PREVIEW_MAX_HP}`);
+    state.hpText.setText(state.defeated ? '불량 처치! 잠시 후 초기화됩니다' : `HP ${state.hp}/${PREVIEW_MAX_HP}`);
   }
 }

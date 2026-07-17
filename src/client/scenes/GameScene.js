@@ -183,6 +183,7 @@ export default class GameScene extends Phaser.Scene {
     this.eliminated = false;
     this.roomFinished = false;
     this.isSpectator = false;
+    this.isAdmin = false;
     this.fromDashboard = false;
     this.mode = 'SURVIVAL';
     this.gameMode = 'TEAM';
@@ -342,11 +343,16 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, attackTiles, score, isSpectator, fromDashboard,
+    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, attackTiles, score, isSpectator, fromDashboard, isAdmin,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
     this.isSpectator = !!isSpectator;
+    // Distinct from isSpectator now that a real player cut from the bracket
+    // can also reach this scene as a spectator (see DashboardScene's own
+    // isAdmin comment) -- admin-only skill keys below must gate on this,
+    // not just "am I spectating."
+    this.isAdmin = !!isAdmin;
     this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
 
@@ -367,7 +373,11 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.isSpectator) {
       this.hideJoystick();
-      this.backToDashboardNode.setVisible(this.fromDashboard);
+      // fromDashboard is already only ever true via adminSpectateRoom's
+      // reply (admin-only, see DashboardScene's own spectateRoom() guard),
+      // but the isAdmin check here is cheap defense in depth against that
+      // ever changing quietly.
+      this.backToDashboardNode.setVisible(this.fromDashboard && this.isAdmin);
     }
 
     this.roundStartTime = roundStartTime;
@@ -1508,8 +1518,40 @@ export default class GameScene extends Phaser.Scene {
       // of being routed back to DashboardScene the way LobbyScene's
       // identical handleDashboardStarting already does for a lobby-phase
       // admin.
+      // Also how a real player cut from the bracket gets seated into a
+      // dashboard the moment their own room finishes (see server.js's
+      // seatSpectator()) — the server emits this to them *before*
+      // 'roomResult' in that exact case, so this can arrive and tear down
+      // GameScene before the roomResult handler above ever runs for them.
+      // Same roomTransitionHoldUntil wait as roomResult itself, for the
+      // same reason: without it, a player eliminated on the very same tick
+      // their room ends would have their own "탈락!" effect cut off
+      // mid-flight by the immediate scene teardown.
       dashboardStarting: (payload) => {
-        this.scene.start('DashboardScene', payload);
+        // Guards the exact same race roomResult's own `if (this.roomFinished)
+        // return` guards against: Phaser's scene.start() doesn't tear this
+        // scene's socket handlers down synchronously, so a 'roomResult' the
+        // server sent right after this can still reach GameScene's own
+        // roomResult handler and queue a *second*, conflicting scene
+        // transition (observed live: a stray ResultScene "대기실로
+        // 돌아가기" button surviving on top of the DashboardScene that
+        // actually ends up active). Setting this here makes that second
+        // handler's own guard catch it and no-op, exactly as if this
+        // player's own roomResult had arrived and been handled first.
+        if (this.roomFinished) {
+          return;
+        }
+        this.roomFinished = true;
+
+        const proceed = () => this.scene.start('DashboardScene', payload);
+        const holdRemaining = this.roomTransitionHoldUntil
+          ? Math.max(0, this.roomTransitionHoldUntil - this.time.now)
+          : 0;
+        if (holdRemaining > 0) {
+          this.time.delayedCall(holdRemaining, proceed);
+        } else {
+          proceed();
+        }
       },
 
     };
@@ -1556,7 +1598,12 @@ export default class GameScene extends Phaser.Scene {
   }
 
   triggerAdminSkill(eventName) {
-    if (!this.isSpectator || this.mode !== 'BOSS' || !this.roomId) {
+    // mode !== 'BOSS' already rules this out for a non-admin spectator in
+    // practice (the only room type they ever reach is stage 3's FINAL,
+    // which has no boss to apply this to at all) -- isAdmin is still
+    // checked explicitly as defense in depth, matching server.js's own
+    // independent adminSockets re-check on these events.
+    if (!this.isSpectator || !this.isAdmin || this.mode !== 'BOSS' || !this.roomId) {
       return;
     }
     this.socket.emit(eventName, { roomId: this.roomId });

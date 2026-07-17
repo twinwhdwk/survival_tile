@@ -254,10 +254,13 @@ export default class LobbyScene extends Phaser.Scene {
       this.cleanupSocketHandlers();
       this.scene.start('GameScene', payload);
     };
-    // Admin-only: stage 1 (and 2) always route the admin to the multi-room
-    // dashboard instead of a single room's GameScene — see server.js's
-    // 'dashboardStarting' branch in startStage(). Regular players never
-    // receive this event, only 'gameStarting' above.
+    // Admin-only in practice: stage 1 (and 2) always route the admin to the
+    // multi-room dashboard instead of a single room's GameScene — see
+    // server.js's 'dashboardStarting' branch in startStage(). A regular
+    // player cut from the bracket also ends up on this same dashboard (see
+    // seatSpectator()), but always via GameScene's own identical handler at
+    // the moment their room finishes, never by receiving this event while
+    // sitting in LobbyScene.
     this.handleDashboardStarting = (payload) => {
       this.cleanupSocketHandlers();
       this.scene.start('DashboardScene', payload);

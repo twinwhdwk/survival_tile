@@ -150,7 +150,7 @@ function tickAllRooms() {
 // summary gathered here already belongs to `currentStage` with no extra
 // filtering needed.
 function broadcastDashboard() {
-  if (currentStage === 0 || currentStage > 2 || adminSockets.size === 0) {
+  if (currentStage === 0 || currentStage > 2 || (adminSockets.size === 0 && spectatorSockets.size === 0)) {
     return;
   }
   const summaries = [];
@@ -164,9 +164,36 @@ function broadcastDashboard() {
   adminSockets.forEach((adminId) => {
     const adminSocket = io.sockets.sockets[adminId];
     if (adminSocket) {
-      adminSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries });
+      adminSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: true });
     }
   });
+  spectatorSockets.forEach((spectatorId) => {
+    const spectatorSocket = io.sockets.sockets[spectatorId];
+    if (spectatorSocket) {
+      spectatorSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: false });
+    }
+  });
+}
+
+// Seats a real player cut from the bracket into the dashboard the room's
+// still-ongoing stage already gives an admin, the moment their own room
+// finishes -- not waiting for the next stage to start. Bots (no real
+// socket) and anyone already an admin or already spectating are silently
+// skipped. Only ever called for stage 1/2 (TEAM mode's own branches in
+// handleRoomFinished) -- stage 3 has nothing after it to spectate, and a
+// stage-3 elimination already gets an in-place ghost view of the same room
+// (see Room.js's handleOwnElimination-equivalent client logic), no
+// re-seating needed.
+function seatSpectator(socketId) {
+  if (adminSockets.has(socketId) || spectatorSockets.has(socketId)) {
+    return;
+  }
+  const socket = io.sockets.sockets[socketId];
+  if (!socket) {
+    return;
+  }
+  spectatorSockets.add(socketId);
+  socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: false });
 }
 
 // Bots move on their own faster cadence, separate from the 1s round-state
@@ -210,6 +237,16 @@ let botCounter = 0;
 // whoever is holding this.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '3927';
 const adminSockets = new Set();
+// Real players cut from the bracket (not bots, and not already an admin)
+// who stay connected to watch the rest of the tournament play out — seated
+// into the exact same dashboard/spectator broadcasts an admin already gets
+// (broadcastDashboard, and startStage()'s stage-3+ room-join), just for a
+// non-admin viewer. Never gains isAdmin: true in any payload, so admin-only
+// controls (C/S skills, 서버 초기화, jumping into an arbitrary room mid-
+// stage) stay hidden/inert for them even though they're seeing the same
+// screens. Cleared per-tournament (endTournament/resetServerState), same
+// as disconnectedSockets.
+const spectatorSockets = new Set();
 // Sticky once true for the life of this process -- deliberately NOT the
 // same thing as "an admin socket is currently connected" (adminSockets.size
 // > 0). That used to be exactly what gated new joins, which meant any
@@ -490,10 +527,14 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
       // receive the same tileWarning/tileCollapsed/playerMoved/roomResult
       // broadcasts everyone else does, plus their own directly-addressed
       // 'gameStarting' carrying isSpectator so the client knows not to
-      // spawn them a controllable avatar.
+      // spawn them a controllable avatar. Real players already cut from the
+      // bracket (spectatorSockets — seated the moment their own room
+      // finished, see seatSpectator()) get the exact same treatment here,
+      // just with isAdmin: false so admin-only controls (C/S skills, 서버
+      // 초기화, jumping into an arbitrary room) stay hidden/inert for them.
       //
       // Stage 1/2 can have several simultaneous rooms (one per group), so
-      // instead of seating the admin into just one of them, they get a
+      // instead of seating everyone into just one of them, they get a
       // multi-room dashboard: a one-time 'dashboardStarting' plus periodic
       // 'dashboardUpdate' broadcasts (see broadcastDashboard(), driven off
       // the same 1s tick as everything else) covering every room in the
@@ -504,18 +545,20 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
       // would make the client receive tile/player events from whichever
       // room it isn't currently rendering and silently corrupt the map.
       if (index === 0) {
-        adminSockets.forEach((adminId) => {
-          const adminSocket = io.sockets.sockets[adminId];
-          if (!adminSocket) {
+        const seatObserver = (socketId, isAdmin) => {
+          const observerSocket = io.sockets.sockets[socketId];
+          if (!observerSocket) {
             return;
           }
           if (stage <= 2) {
-            adminSocket.emit('dashboardStarting', { stage, roomCount: active.length });
+            observerSocket.emit('dashboardStarting', { stage, roomCount: active.length, isAdmin });
           } else {
-            adminSocket.join(roomId);
-            adminSocket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true });
+            observerSocket.join(roomId);
+            observerSocket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true, isAdmin });
           }
-        });
+        };
+        adminSockets.forEach((adminId) => seatObserver(adminId, true));
+        spectatorSockets.forEach((spectatorId) => seatObserver(spectatorId, false));
       }
     } catch (error) {
       console.error(`Failed to start room ${roomId} (stage ${stage}, lineage ${index}):`, error);
@@ -572,6 +615,11 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
       result: 'eliminated',
       stage: currentStage,
     });
+    // A wiped room's whole roster is done for the tournament -- seat every
+    // real player among them (bots silently no-op, see seatSpectator) into
+    // the dashboard the rest of this still-ongoing stage already has,
+    // rather than leaving them on a dead-end result screen.
+    allMembers.forEach((m) => seatSpectator(m.socketId));
   } else if (advancing.length < allMembers.length) {
     // Some teammates advance (into the next stage's pooled/reshuffled
     // group) but not everyone did — e.g. an 8-player room where only 4
@@ -593,6 +641,7 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
         result: 'eliminated',
         stage: currentStage,
       });
+      eliminatedHere.forEach((m) => seatSpectator(m.socketId));
     }
   }
 
@@ -689,6 +738,7 @@ function endTournament() {
   stageResults = [];
   finalRankings = [];
   disconnectedSockets.clear();
+  spectatorSockets.clear();
   broadcastLobby();
 
   return { rankings };
@@ -733,6 +783,7 @@ function resetServerState() {
   stageResults = [];
   finalRankings = [];
   disconnectedSockets.clear();
+  spectatorSockets.clear();
   broadcastLobby();
 
   // An admin currently parked on DashboardScene or a spectated GameScene
@@ -998,7 +1049,9 @@ function setServerHandlers() {
         return;
       }
       socket.join(roomId);
-      socket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true, fromDashboard: true });
+      socket.emit('gameStarting', {
+        ...room.getSnapshot(), isSpectator: true, fromDashboard: true, isAdmin: true,
+      });
     });
 
     // Leaves the spectated room's channel (so its tileWarning/tileCollapsed/
@@ -1017,12 +1070,13 @@ function setServerHandlers() {
       if (currentStage === 0 || currentStage > 2) {
         return;
       }
-      socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size });
+      socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
     });
 
     socket.on('disconnect', () => {
       console.log('Socket disconnected: ' + socket.id);
       adminSockets.delete(socket.id);
+      spectatorSockets.delete(socket.id);
 
       if (lobbyPlayers[socket.id]) {
         delete lobbyPlayers[socket.id];
