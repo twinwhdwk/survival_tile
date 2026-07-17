@@ -1,15 +1,27 @@
 import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
-import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
+import { generateBackgroundTexture, generateParticleTextures, generateTileTextures } from '../utilities/EffectTextures';
 import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
-import { playClick } from '../utilities/SoundFx';
-import { vibrateTap } from '../utilities/Haptics';
+import { playClick, playBossHit, playBossDefeat } from '../utilities/SoundFx';
+import { vibrateTap, vibrateBossHit } from '../utilities/Haptics';
 import { applyButtonFx } from '../utilities/ButtonFx';
+
+// Purely a visual/admin-facing demo (see buildBossPreview()) — a mock-up of
+// a possible future "everyone attacks one shared boss" mode, unrelated to
+// the actual tournament's bracket/team-merge logic in server.js. The "4"
+// here is just this preview's own fixed layout (4 corners to put a box in),
+// not a read of any real team-count limit — a separate, concurrent change
+// elsewhere in the codebase may introduce a real team-count cap, and this
+// preview intentionally doesn't reference or depend on it either way.
+const PREVIEW_TEAM_COUNT = 4;
+const PREVIEW_MAX_HP = 100;
+const PREVIEW_DAMAGE_MIN = 10;
+const PREVIEW_DAMAGE_MAX = 22;
 
 const CARD_GAP = 14;
 const GRID_PADDING = 20;
@@ -54,6 +66,12 @@ export default class DashboardScene extends Phaser.Scene {
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
+    // Needed only for the boss preview overlay's "attack tiles" (tile_solid),
+    // which reuses the exact same tile art as the real game board rather than
+    // a bespoke sprite — generateTileTextures() is internally guarded against
+    // regenerating a key that already exists, so this is a no-op if some
+    // other scene already created it this session.
+    generateTileTextures(this);
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     createAmbientEmbers(this);
 
@@ -123,6 +141,23 @@ export default class DashboardScene extends Phaser.Scene {
       }
       this.socket.emit('resetServer');
     });
+
+    // Mirrors resetServerButton's corner-tucked, muted styling, just on the
+    // opposite corner — this toggles a self-contained overlay (see
+    // buildBossPreview()) built lazily on first click, purely a visual demo
+    // with no server round-trip at all, unlike every other button here.
+    const previewButtonHtml = `
+      <button id="dashboard-boss-preview-button" type="button"
+        style="width:76px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid #7a5a2a;background:#1c150dcc;color:#e0b060;cursor:pointer;font-family:${FONT_BODY};">
+        보스 프리뷰
+      </button>
+    `;
+    this.previewButtonNode = this.add.dom(WORLD_WIDTH - 42, 15).createFromHTML(previewButtonHtml);
+    this.previewButton = this.previewButtonNode.getChildByID('dashboard-boss-preview-button');
+    applyButtonFx(this.previewButton);
+    this.bossPreview = null;
+    this.bossPreviewVisible = false;
+    this.previewButton.addEventListener('click', () => this.toggleBossPreview());
 
     this.handleDashboardUpdate = (payload) => this.renderDashboard(payload);
     this.handleDashboardStarting = (payload) => this.scene.restart(payload);
@@ -537,5 +572,197 @@ export default class DashboardScene extends Phaser.Scene {
       card.hpBarBg.setVisible(false);
       card.hpBarFill.setVisible(false);
     }
+  }
+
+  toggleBossPreview() {
+    if (!this.bossPreview) {
+      this.buildBossPreview();
+    }
+    this.bossPreviewVisible = !this.bossPreviewVisible;
+    this.bossPreview.container.setVisible(this.bossPreviewVisible);
+    this.previewButton.textContent = this.bossPreviewVisible ? '닫기' : '보스 프리뷰';
+  }
+
+  // Built once, lazily, on first toggle rather than in create() -- most
+  // sessions running this dashboard for a real event will never open this,
+  // so there's no reason to pay for it (four extra Graphics/Text objects
+  // plus their DOM-adjacent tile sprites) up front.
+  //
+  // Everything here lives in its own container at a depth (200+) well above
+  // the real room-card grid, with an opaque interactive backdrop underneath
+  // it -- Phaser's default topOnly input routing means that backdrop alone
+  // is enough to swallow clicks before they reach a room card sitting right
+  // behind it, so the admin can't accidentally arm C/S skills on a real
+  // room while this overlay is open.
+  buildBossPreview() {
+    const centerX = WORLD_WIDTH / 2;
+    const centerY = WORLD_HEIGHT / 2 + 22;
+
+    const container = this.add.container(0, 0).setDepth(200).setVisible(false);
+    const parts = [];
+
+    const backdrop = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x000000, 0.72)
+      .setInteractive();
+    // No-op handler -- its only job is to exist as the topmost interactive
+    // object under the pointer so a click anywhere on the backdrop doesn't
+    // fall through to a room card underneath.
+    backdrop.on('pointerdown', () => {});
+    parts.push(backdrop);
+
+    const monster = this.add.text(centerX, centerY - 46, '👹', { fontSize: '46px' }).setOrigin(0.5);
+    const monsterNameTag = this.add.graphics();
+    const monsterName = this.add.text(centerX, centerY - 14, 'PRA', {
+      fontFamily: FONT_DISPLAY,
+      fontSize: '18px',
+      color: '#ff5555',
+      stroke: TEXT_STROKE,
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    fitTitlePanel(monsterNameTag, centerX, centerY - 14, 22, monsterName, 16);
+    parts.push(monster, monsterNameTag, monsterName);
+
+    const hpBarBg = this.add.rectangle(centerX, centerY + 12, 150, 10, 0x222222);
+    const hpBarFill = this.add.rectangle(centerX - 75, centerY + 12, 150, 8, 0xff4444).setOrigin(0, 0.5);
+    const hpText = this.add.text(centerX, centerY + 26, '', {
+      fontFamily: FONT_BODY,
+      fontSize: '11px',
+      color: COLORS.textMuted,
+    }).setOrigin(0.5);
+    parts.push(hpBarBg, hpBarFill, hpText);
+
+    const hint = this.add.text(centerX, WORLD_HEIGHT - 12, '타일을 클릭하면 PRA에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)', {
+      fontFamily: FONT_BODY,
+      fontSize: '10px',
+      color: COLORS.textMuted,
+    }).setOrigin(0.5);
+    parts.push(hint);
+
+    // Fixed 4-corner layout -- see PREVIEW_TEAM_COUNT's own comment for why
+    // this "4" is independent of any real team-count logic elsewhere.
+    const teamDefs = [
+      { label: '1팀', x: 68, y: 52 },
+      { label: '2팀', x: WORLD_WIDTH - 68, y: 52 },
+      { label: '3팀', x: 68, y: WORLD_HEIGHT - 40 },
+      { label: '4팀', x: WORLD_WIDTH - 68, y: WORLD_HEIGHT - 40 },
+    ].slice(0, PREVIEW_TEAM_COUNT);
+
+    const teams = teamDefs.map((def) => {
+      const box = this.add.graphics();
+      drawRoundedRect(box, def.x, def.y, 76, 40, { radius: 6 });
+      const label = this.add.text(def.x, def.y - 8, def.label, {
+        fontFamily: FONT_BODY,
+        fontSize: '13px',
+        color: COLORS.textGold,
+        stroke: TEXT_STROKE,
+        strokeThickness: 3,
+      }).setOrigin(0.5);
+      const countText = this.add.text(def.x, def.y + 9, '공격 0회', {
+        fontFamily: FONT_BODY,
+        fontSize: '10px',
+        color: COLORS.textMuted,
+      }).setOrigin(0.5);
+      parts.push(box, label, countText);
+
+      // Attack tile sits a little over halfway from the team's box toward
+      // the monster, so the projectile's travel distance still reads as
+      // "coming from that team" rather than starting right on top of PRA.
+      const tileX = def.x + (centerX - def.x) * 0.55;
+      const tileY = def.y + (centerY - def.y) * 0.55;
+      const tile = this.add.image(tileX, tileY, 'tile_solid').setScale(0.9).setInteractive({ useHandCursor: true });
+      parts.push(tile);
+
+      return { tile, countText, attackCount: 0 };
+    });
+
+    container.add(parts);
+
+    const state = {
+      container, monster, hpBarFill, hpText, centerX, centerY, hp: PREVIEW_MAX_HP, defeated: false,
+    };
+
+    teams.forEach((team) => {
+      team.tile.on('pointerdown', () => this.triggerPreviewAttack(state, team));
+    });
+
+    this.updatePreviewHpDisplay(state);
+    this.bossPreview = state;
+  }
+
+  triggerPreviewAttack(state, team) {
+    if (state.defeated) {
+      return;
+    }
+    playClick();
+    vibrateTap();
+
+    team.attackCount += 1;
+    team.countText.setText(`공격 ${team.attackCount}회`);
+
+    const projectile = this.add.image(team.tile.x, team.tile.y, 'particle_spark')
+      .setScale(1.6)
+      .setTint(0xffaa33);
+    state.container.add(projectile);
+
+    this.tweens.add({
+      targets: projectile,
+      x: state.centerX,
+      y: state.centerY - 46,
+      duration: 260,
+      ease: 'Quad.easeIn',
+      onComplete: () => {
+        projectile.destroy();
+        this.resolvePreviewHit(state);
+      },
+    });
+  }
+
+  resolvePreviewHit(state) {
+    const damage = Phaser.Math.Between(PREVIEW_DAMAGE_MIN, PREVIEW_DAMAGE_MAX);
+    state.hp = Math.max(0, state.hp - damage);
+
+    playBossHit();
+    vibrateBossHit();
+
+    this.tweens.killTweensOf(state.monster);
+    state.monster.setScale(1);
+    this.tweens.add({ targets: state.monster, scale: 1.15, duration: 80, yoyo: true });
+
+    const dmgText = this.add.text(state.centerX, state.centerY - 60, `-${damage}`, {
+      fontFamily: FONT_BODY,
+      fontSize: '15px',
+      color: '#ffdd55',
+      stroke: TEXT_STROKE,
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    state.container.add(dmgText);
+    this.tweens.add({
+      targets: dmgText,
+      y: state.centerY - 90,
+      alpha: 0,
+      duration: 600,
+      ease: 'Cubic.easeOut',
+      onComplete: () => dmgText.destroy(),
+    });
+
+    this.updatePreviewHpDisplay(state);
+
+    if (state.hp <= 0 && !state.defeated) {
+      state.defeated = true;
+      playBossDefeat();
+      // A loopable demo, not a one-shot -- rather than leaving the overlay
+      // stuck on a dead boss, it quietly resets to full HP after a beat so
+      // the admin can keep clicking tiles for as long as they're showing it.
+      this.time.delayedCall(1200, () => {
+        state.hp = PREVIEW_MAX_HP;
+        state.defeated = false;
+        this.updatePreviewHpDisplay(state);
+      });
+    }
+  }
+
+  updatePreviewHpDisplay(state) {
+    const ratio = Math.max(0, state.hp / PREVIEW_MAX_HP);
+    state.hpBarFill.setSize(150 * ratio, 8);
+    state.hpText.setText(state.defeated ? 'PRA 처치! 잠시 후 초기화됩니다' : `HP ${state.hp}/${PREVIEW_MAX_HP}`);
   }
 }

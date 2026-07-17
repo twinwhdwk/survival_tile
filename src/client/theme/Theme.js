@@ -101,6 +101,10 @@ export const FONT_BODY_SAMPLE_TEXT = [
   '조 생존',
   '점수 남은시간',
   '1위 🥇🥈🥉',
+  '타일을 클릭하면 PRA에게 공격 시뮬레이션이 발동합니다 (실제 게임과는 무관)',
+  '공격 0회',
+  'PRA 처치! 잠시 후 초기화됩니다',
+  '1팀 2팀 3팀 4팀',
 ].join(' ');
 
 export const COLORS = {
