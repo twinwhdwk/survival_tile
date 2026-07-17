@@ -1497,6 +1497,23 @@ export default class Room {
   }
 
   handleDisconnect(socketId) {
+    const player = this.players[socketId];
+    if (player) {
+      player.disconnected = true;
+    }
     this.eliminatePlayer(socketId);
+    // eliminatePlayer() no-ops before reaching its allHumansGone check for
+    // a player who was already eliminated -- exactly the case of a ghost
+    // (still connected, tappable for revival by a teammate) who then
+    // disconnects entirely. Re-check here so a TEAM room still ends once
+    // every human really is gone, instead of lingering with bots playing
+    // on for nobody. Not relevant to SOLO: a SOLO player disconnecting
+    // after elimination is already moot, since soloAllHumansEliminated
+    // (SOLO has no ghost/revival at all) already finished the room at the
+    // moment of elimination itself.
+    if (player && !this.finished && this.gameMode !== 'SOLO' && this.hasHumans
+      && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected)) {
+      this.finishRoom('all-eliminated');
+    }
   }
 }
