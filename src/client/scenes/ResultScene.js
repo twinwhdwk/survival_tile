@@ -50,7 +50,13 @@ export default class ResultScene extends Phaser.Scene {
     this.messagePanel = this.add.graphics();
     this.rankingsPanel = this.add.graphics().setVisible(false);
 
-    this.messageText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, data.message || '', {
+    // Fixed offsets from the *top* (y=0), not WORLD_HEIGHT/2 -- see
+    // LoginScene's own comment on the same fix. WORLD_HEIGHT is derived
+    // from MAP_COLS/MAP_ROWS (mapConfig.js), which have been re-tuned for
+    // gameplay-tile-size reasons down to a canvas as short as ~270px;
+    // WORLD_HEIGHT/2-relative negative offsets pushed this whole screen's
+    // content off the top at that size.
+    this.messageText = this.add.text(WORLD_WIDTH / 2, 40, data.message || '', {
       fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: '#ffffff',
@@ -62,7 +68,7 @@ export default class ResultScene extends Phaser.Scene {
     // this is safe regardless of the entrance tween's scale — used instead
     // of the getBounds() fit elsewhere since showRankings() below needs to
     // redraw this same panel later while the tween may still be mid-flight.
-    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, this.messageText.width + 28, 46);
+    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, 40, this.messageText.width + 28, 46);
     this.messageText.setScale(0.6).setAlpha(0);
 
     this.tweens.add({
@@ -79,7 +85,7 @@ export default class ResultScene extends Phaser.Scene {
       this.cameras.main.flash(300, 110, 255, 150);
     }
 
-    this.subText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 180, '', {
+    this.subText = this.add.text(WORLD_WIDTH / 2, 68, '', {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,
@@ -148,11 +154,11 @@ export default class ResultScene extends Phaser.Scene {
   showRankings(rankings) {
     this.stopWaitingDots();
     this.messageText.setText('토너먼트 결과');
-    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 220, this.messageText.width + 28, 46);
+    drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, 40, this.messageText.width + 28, 46);
     this.subText.setText('');
 
     const mySocketId = this.socket.id;
-    const startY = WORLD_HEIGHT / 2 - 130;
+    const startY = 100;
     const rowCount = Math.max(rankings ? rankings.length : 0, 1);
     const listCenterY = startY + ((rowCount - 1) * 26) / 2;
     drawRoundedPanel(this.rankingsPanel, WORLD_WIDTH / 2, listCenterY, 360, rowCount * 26 + 30);

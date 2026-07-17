@@ -49,7 +49,16 @@ export default class LoginScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5).setShadow(0, 0, '#ff6622', 10, true, true);
 
-    this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 175, `참가 주소: ${PUBLIC_SITE_URL}`, {
+    // Everything below is stacked with fixed offsets from the *top* of the
+    // screen (y=0), not WORLD_HEIGHT/2 -- MAP_COLS/MAP_ROWS (mapConfig.js)
+    // have been re-tuned several times for gameplay-tile-size reasons, and
+    // WORLD_HEIGHT is derived directly from them, so it's shrunk enough in
+    // practice (down to ~270px) that WORLD_HEIGHT/2-relative offsets here
+    // went negative and pushed the title off the top of the screen. A
+    // top-anchored stack can't go negative regardless of how short
+    // WORLD_HEIGHT gets; it just leaves extra empty space below on a
+    // taller one.
+    this.add.text(WORLD_WIDTH / 2, 58, `참가 주소: ${PUBLIC_SITE_URL}`, {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textInfo,
@@ -65,7 +74,7 @@ export default class LoginScene extends Phaser.Scene {
     // second overlapping emoji text whose additive blend + randomized scale
     // drifted out of alignment with the main title and read as a stray
     // duplicate/shadow rather than a soft glow.
-    const title = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, '🔥 타일 서바이벌 🔥', {
+    const title = this.add.text(WORLD_WIDTH / 2, 96, '🔥 타일 서바이벌 🔥', {
       fontFamily: FONT_DISPLAY,
       fontSize: '28px',
       color: '#ffffff',
@@ -79,7 +88,7 @@ export default class LoginScene extends Phaser.Scene {
     // text. Measured here at the text's default scale=1 — doing this after
     // the entrance tween's setScale(0.6) below would size the panel for
     // the shrunk starting pose instead of the settled title.
-    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 140, 40, title, 28);
+    fitTitlePanel(titlePanel, WORLD_WIDTH / 2, 96, 40, title, 28);
     title.setScale(0.6).setAlpha(0);
 
     this.tweens.add({
@@ -90,7 +99,7 @@ export default class LoginScene extends Phaser.Scene {
       ease: 'Back.easeOut',
     });
 
-    this.statusText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 60, '', {
+    this.statusText = this.add.text(WORLD_WIDTH / 2, 246, '', {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,
@@ -107,7 +116,7 @@ export default class LoginScene extends Phaser.Scene {
       </div>
     `;
 
-    this.formNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 40).createFromHTML(formHtml);
+    this.formNode = this.add.dom(WORLD_WIDTH / 2, 178).createFromHTML(formHtml);
 
     this.input_ = this.formNode.getChildByID('nickname-input');
     this.button = this.formNode.getChildByID('join-button');

@@ -11,9 +11,16 @@ import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
-const GRID_COLS = 8;
 const GRID_CELL_W = 90;
 const GRID_CELL_H = 32;
+// Computed from the live WORLD_WIDTH rather than a fixed count -- a fixed
+// GRID_COLS (originally 8, then manually re-tuned down to 6 and 5 as the
+// map got narrower for portrait/landscape experiments) kept silently
+// overflowing off the right edge of the screen every time MAP_COLS
+// (mapConfig.js) changed again for unrelated gameplay-tile-size reasons.
+// This adapts automatically instead, with a floor of 3 columns so an
+// unusually narrow WORLD_WIDTH still lays out something sane instead of 0.
+const GRID_COLS = Math.max(3, Math.floor((WORLD_WIDTH - 40) / GRID_CELL_W));
 const GRID_START_X = (WORLD_WIDTH - GRID_COLS * GRID_CELL_W) / 2 + GRID_CELL_W / 2;
 // Shifted down from the original 112 to leave room for the event banner
 // pinned above the "🔥 대기실" title.
