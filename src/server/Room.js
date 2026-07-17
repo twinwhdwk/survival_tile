@@ -855,14 +855,16 @@ export default class Room {
     if (this.tileMap[row][col] !== TILE_STATE.GONE) {
       return;
     }
-    // SURVIVAL only: shrinkBoundary() only ever sweeps the *one* ring
-    // transitioning at that moment, so a tile revived outside the current
-    // safe zone would never get swept again — permanently wasting the tap
-    // on ground nobody can get survivor credit for standing on (finishRoom's
-    // SURVIVAL branch requires isSafeTile at round end). BOSS has no
-    // shrinking boundary (rowInset/colInset stay 0, isSafeTile covers the
-    // whole map), so this is a no-op there.
-    if (this.mode === 'SURVIVAL' && !this.isSafeTile(row, col)) {
+    // shrinkBoundary() only ever sweeps the *one* ring transitioning at
+    // that moment, so a tile revived outside the current safe zone would
+    // never get swept again — permanently wasting the tap on ground that,
+    // for SURVIVAL, nobody can get survivor credit for standing on anyway
+    // (finishRoom's SURVIVAL branch requires isSafeTile at round end). BOSS
+    // now shares the same shrinking boundary (see checkRoundState), so the
+    // same waste applies there too even though finishRoom's BOSS branch
+    // itself doesn't check isSafeTile — a tile outside the zone still just
+    // collapses again on the next ring regardless of who's standing on it.
+    if ((this.mode === 'SURVIVAL' || this.mode === 'BOSS') && !this.isSafeTile(row, col)) {
       return;
     }
 
@@ -926,12 +928,14 @@ export default class Room {
     if (!player || !player.eliminated || this.finished) {
       return;
     }
-    // SURVIVAL restricts the candidate pool to the current safe zone (see
-    // pickRandomSolidTileInSafeZone()); BOSS has no shrinking boundary, so
-    // it keeps picking from the whole map as before.
-    const tile = this.mode === 'SURVIVAL' ? this.pickRandomSolidTileInSafeZone() : this.pickRandomSolidTile();
+    // SURVIVAL and BOSS both restrict the candidate pool to the current
+    // safe zone (see pickRandomSolidTileInSafeZone()) now that both share
+    // the shrinking boundary — respawning a ghost outside it would just
+    // strand them somewhere about to collapse anyway.
+    const usesSafeZone = this.mode === 'SURVIVAL' || this.mode === 'BOSS';
+    const tile = usesSafeZone ? this.pickRandomSolidTileInSafeZone() : this.pickRandomSolidTile();
     if (!tile) {
-      return; // nothing standing anywhere (in the safe zone, for SURVIVAL) to respawn onto — stay a ghost
+      return; // nothing standing anywhere (in the safe zone, if applicable) to respawn onto — stay a ghost
     }
     const { x, y } = hexToPixel(tile.row, tile.col);
     const respawnTime = Date.now();
@@ -1380,24 +1384,33 @@ export default class Room {
     const elapsed = Date.now() - this.roundStartTime;
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
 
-    // Not SURVIVAL-only: BOSS rounds have no shrinking boundary, so
-    // this.rowInset/this.colInset stay 0 for their whole duration and
-    // getSafeZoneTiles() naturally covers the entire board — the same threshold/burst logic
-    // just applies map-wide instead of to a shrinking rectangle. BOSS mode
-    // previously had no auto-regen at all (this check used to require
-    // mode === 'SURVIVAL'), which meant the only tiles that ever came back
-    // during a 3-minute boss fight were whatever eliminated teammates
-    // manually clicked — with everyone still alive and actively chasing a
-    // teleporting boss across a floor that collapses under every footstep,
-    // the whole map could run out of standing ground with no safety net at
-    // all until the first elimination created a ghost.
+    // Not SURVIVAL-only: getSafeZoneTiles() naturally covers the entire
+    // board when rowInset/colInset are still 0 (BOSS's grace period, before
+    // its own boundary starts closing below), so the same threshold/burst
+    // logic just applies map-wide until then. BOSS mode previously had no
+    // auto-regen at all (this check used to require mode === 'SURVIVAL'),
+    // which meant the only tiles that ever came back during a 3-minute boss
+    // fight were whatever eliminated teammates manually clicked — with
+    // everyone still alive and actively chasing a teleporting boss across a
+    // floor that collapses under every footstep, the whole map could run
+    // out of standing ground with no safety net at all until the first
+    // elimination created a ghost.
     if (elapsed - this.lastRegenAt >= AUTO_REGEN_MIN_INTERVAL_MS) {
       if (this.autoRegenerateTiles()) {
         this.lastRegenAt = elapsed;
       }
     }
 
-    if (this.mode === 'SURVIVAL' && boundaryActive) {
+    // BOSS now shares SURVIVAL's shrinking safe-zone boundary (stage 2's
+    // team boss fight is meant to funnel players together as the round
+    // wears on, same as stage 1) — isSafeTile()/shrinkBoundary()/
+    // getSafeZoneTiles() were already fully mode-agnostic rectangle math,
+    // this was the only gate keeping BOSS out. finishRoom()'s BOSS branch
+    // deliberately still doesn't check isSafeTile at round end (no loss on
+    // timeout, only a full wipeout knocks a lineage out) — the boundary's
+    // role here is purely attritional via the normal tile-collapse ->
+    // elimination chain, not a survivor-snapshot gate like SURVIVAL has.
+    if ((this.mode === 'SURVIVAL' || this.mode === 'BOSS') && boundaryActive) {
       const stepsDue = Math.floor((elapsed - BOUNDARY_SHRINK_GRACE_MS) / BOUNDARY_SHRINK_INTERVAL_MS) + 1;
       if (stepsDue > this.boundaryShrinkStepsDone) {
         const isFirstStep = this.boundaryShrinkStepsDone === 0;
