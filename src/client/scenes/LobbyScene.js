@@ -21,10 +21,19 @@ const GRID_CELL_H = 32;
 // This adapts automatically instead, with a floor of 3 columns so an
 // unusually narrow WORLD_WIDTH still lays out something sane instead of 0.
 const GRID_COLS = Math.max(3, Math.floor((WORLD_WIDTH - 40) / GRID_CELL_W));
-const GRID_START_X = (WORLD_WIDTH - GRID_COLS * GRID_CELL_W) / 2 + GRID_CELL_W / 2;
 // Shifted down from the original 112 to leave room for the event banner
 // pinned above the "🔥 대기실" title.
 const GRID_START_Y = 138;
+// Vertical budget the roster grid is allowed to use before it start
+// overlapping the mode-toggle/action-button rows pinned to the bottom of
+// the screen (see their own WORLD_HEIGHT-76/-30 anchors below) -- 100px
+// covers both rows plus a small margin. At the original, much taller
+// WORLD_HEIGHT this always had room to spare and the scaling below never
+// engaged; at a short WORLD_HEIGHT (mapConfig.js has been re-tuned down to
+// as little as ~270px for gameplay-tile-size reasons) a big roster no
+// longer fits at full cell size, and used to render right on top of those
+// buttons -- see renderLobby()'s cellScale for the fix.
+const GRID_AVAILABLE_HEIGHT = Math.max(GRID_CELL_H, WORLD_HEIGHT - GRID_START_Y - 100);
 
 export default class LobbyScene extends Phaser.Scene {
 
@@ -37,6 +46,7 @@ export default class LobbyScene extends Phaser.Scene {
   create(data) {
     this.socket = getSocket();
     this.rosterCells = {};
+    this.cellScale = 1;
     this.isAdmin = !!data.isAdmin;
     this.statusPulseTween = null;
     // 팀전 (TEAM) is the original bracket this app was built around, so it
@@ -249,6 +259,30 @@ export default class LobbyScene extends Phaser.Scene {
     const entries = Object.entries(players || {});
     this.countText.setText(`${entries.length}명 참가 중`);
 
+    // A big roster at a short WORLD_HEIGHT (see GRID_AVAILABLE_HEIGHT's own
+    // comment) can need more rows than actually fit before the grid runs
+    // into the mode-toggle/action buttons below it -- shrink every cell
+    // uniformly so the whole roster stays above those buttons instead.
+    // Clamped to 0.45 rather than shrinking indefinitely: past that a cell
+    // is too small to read anyway, and an extreme roster is better served
+    // by fixing the room count than by an unreadably tiny grid.
+    const neededRows = Math.max(1, Math.ceil(entries.length / GRID_COLS));
+    const maxRows = Math.max(1, Math.floor(GRID_AVAILABLE_HEIGHT / GRID_CELL_H));
+    const cellScale = neededRows > maxRows ? Math.max(0.45, maxRows / neededRows) : 1;
+    const spacingW = GRID_CELL_W * cellScale;
+    const spacingH = GRID_CELL_H * cellScale;
+    const startX = (WORLD_WIDTH - GRID_COLS * spacingW) / 2 + spacingW / 2;
+
+    if (cellScale !== this.cellScale) {
+      // Rare (only when the roster crosses a row-count threshold) -- an
+      // instant swap rather than an exit tween, since every cell needs to
+      // end up at a new size and every entrance below already re-animates
+      // them in fresh at the new scale.
+      Object.values(this.rosterCells).forEach(({ container }) => container.destroy());
+      this.rosterCells = {};
+      this.cellScale = cellScale;
+    }
+
     // Keyed by socketId (same diffing approach as DashboardScene's room
     // cards) rather than destroying and rebuilding the whole grid on every
     // 'lobbyUpdate' — that used to replay every existing player's entrance
@@ -268,8 +302,8 @@ export default class LobbyScene extends Phaser.Scene {
       seenIds.add(socketId);
       const col = i % GRID_COLS;
       const row = Math.floor(i / GRID_COLS);
-      const cellX = GRID_START_X + col * GRID_CELL_W;
-      const cellY = GRID_START_Y + row * GRID_CELL_H;
+      const cellX = startX + col * spacingW;
+      const cellY = GRID_START_Y + row * spacingH;
 
       const existing = this.rosterCells[socketId];
       if (existing) {
@@ -279,11 +313,11 @@ export default class LobbyScene extends Phaser.Scene {
         return;
       }
 
-      const cell = this.createRosterCell(socketId, entry, cellX, cellY);
+      const cell = this.createRosterCell(socketId, entry, cellX, cellY, cellScale);
       this.rosterCells[socketId] = cell;
       this.tweens.add({
         targets: cell.container,
-        scale: 1,
+        scale: cellScale,
         alpha: 1,
         delay: newCellIndex * 25,
         duration: 220,
@@ -332,8 +366,8 @@ export default class LobbyScene extends Phaser.Scene {
     }
   }
 
-  createRosterCell(socketId, entry, cellX, cellY) {
-    const container = this.add.container(cellX, cellY).setScale(0.5).setAlpha(0);
+  createRosterCell(socketId, entry, cellX, cellY, cellScale) {
+    const container = this.add.container(cellX, cellY).setScale(cellScale * 0.5).setAlpha(0);
 
     // Same "find myself instantly" idea as the in-round gold nickname/
     // spotlight ring, applied here too — a player waiting in a crowded
