@@ -253,18 +253,25 @@ function sanitizeNickname(raw) {
 }
 
 function broadcastLobby() {
-  // Personalized per-socket (rather than one io.emit payload) so each
-  // client can be told whether *it* holds admin privileges.
-  Object.keys(io.sockets.sockets).forEach((socketId) => {
+  // players/phase are identical for every recipient -- only isAdmin
+  // varies. A previous version personalized the *entire* payload per
+  // socket (N individually-serialized emits for N connected sockets, one
+  // full copy of `players` each), which is O(n^2) total bytes for a lobby
+  // of n people since every single join/leave/bot-add re-broadcasts to
+  // everyone. io.emit() lets socket.io serialize the shared payload once
+  // and fan it out natively; the (typically tiny, often just 1) set of
+  // admin sockets gets a small personalized follow-up confirming
+  // isAdmin: true, which is the only place that field is ever actually
+  // read client-side (LobbyScene.js sets it once at scene creation from
+  // whichever lobbyUpdate triggered the transition -- never re-read from
+  // a later update), so a non-admin momentarily "confirmed" isAdmin:false
+  // by the broadcast is not a behavior change.
+  io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
+  adminSockets.forEach((socketId) => {
     const socket = io.sockets.sockets[socketId];
-    if (!socket) {
-      return;
+    if (socket) {
+      socket.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: true });
     }
-    socket.emit('lobbyUpdate', {
-      players: lobbyPlayers,
-      phase: globalPhase,
-      isAdmin: adminSockets.has(socketId),
-    });
   });
 }
 
