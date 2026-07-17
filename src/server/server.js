@@ -292,21 +292,23 @@ function broadcastLobby() {
   io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
 }
 
-// Round 1: groups are capped at MAX_PLAYERS (4), full stop — never landed
-// on previously, since the old approach folded any remainder into an
-// existing group instead of opening a new one (5 players used to become a
-// single group of 5, 11 became [5, 6] — both already over the cap this
+// Round 1: groups are capped at MAX_PLAYERS (5), full stop — an earlier
+// version folded any remainder into an existing group instead of opening a
+// new one (11 players used to become [5, 6], already over the cap this
 // function's own name implies). Now: however many MAX_PLAYERS-sized groups
 // fit is the starting count, plus one more only if there's a remainder at
-// all (5 players -> 2 groups, not 1), and the total is then spread as
-// evenly as possible across however many groups that ends up being (sizes
-// differing by at most 1) rather than cramming the leftover onto whichever
-// group happened to be first/last. ceil(total / ceil(total / MAX_PLAYERS))
-// never exceeds MAX_PLAYERS for any total, so the cap holds regardless of
-// headcount. Deliberately headcount-driven rather than a fixed group count
-// (an earlier fixed-STAGE_1_GROUP_COUNT alternative was considered and
-// discarded here) — group *count* is left free to grow with turnout instead
-// of group *size* drifting away from MAX_PLAYERS as the lobby fills toward
+// all, and the total is then spread as evenly as possible across however
+// many groups that ends up being (sizes differing by at most 1) rather than
+// cramming the leftover onto whichever group happened to be first/last --
+// e.g. 5 players stay a single group of 5 (round 1 is TEAM mode; splitting
+// them for no reason would leave someone playing "alone"), 6 becomes 2
+// groups of 3, 10 stays 2 groups of 5, 11 becomes 3 groups of 4/4/3.
+// ceil(total / ceil(total / MAX_PLAYERS)) never exceeds MAX_PLAYERS for any
+// total, so the cap holds regardless of headcount. Deliberately headcount-
+// driven rather than a fixed group count (an earlier fixed-
+// STAGE_1_GROUP_COUNT alternative was considered and discarded here) —
+// group *count* is left free to grow with turnout instead of group *size*
+// drifting away from MAX_PLAYERS as the lobby fills toward
 // MAX_LOBBY_PLAYERS. formStage2Groups()/formStage3Group() pool every
 // survivor regardless of how many stage-1 rooms fed them, so they don't
 // care how many groups this produces.

@@ -1,4 +1,11 @@
-export const MAX_PLAYERS = 4; // target group size for room assignment -- chunkForInitialRound() caps every stage-1 group at this, adding groups rather than growing past it
+// Target group size for stage-1 room assignment (chunkForInitialRound() in
+// server.js caps every group at this, adding a whole extra group rather than
+// growing past it). Stage 1 is TEAM mode -- a lone 1-person "team" doesn't
+// make sense, so this is picked so ceil(total/MAX_PLAYERS) never produces a
+// singleton group for any realistic headcount (5 people -> 1 group of 5, not
+// split at all; 6 -> 2 groups of 3; 10 -> 2 groups of 5; 11 -> 3 groups of
+// 4/4/3), not just "the biggest a room should get."
+export const MAX_PLAYERS = 5;
 export const NICKNAME_MAX_LENGTH = 8;
 // Hard cap on lobby size (real players + bots combined) -- keeps a real
 // event's stage-1 group count (MAX_PLAYERS-capped, see chunkForInitialRound
