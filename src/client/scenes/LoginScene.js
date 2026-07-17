@@ -7,6 +7,7 @@ import { generateBackgroundTexture, generateParticleTextures } from '../utilitie
 import { createAmbientEmbers } from '../utilities/SceneFx';
 import { applyButtonFx } from '../utilities/ButtonFx';
 import { unlockAudio, playError } from '../utilities/SoundFx';
+import { requestFullscreenIfPossible } from '../utilities/Fullscreen';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
@@ -227,6 +228,11 @@ export default class LoginScene extends Phaser.Scene {
     // gesture — this is the very first click/tap in the whole app, so
     // every later scene's sounds work with no further gesture needed.
     unlockAudio();
+    // Same reasoning, different browser restriction: Fullscreen also only
+    // grants inside a real user gesture. Requesting it here (mobile
+    // Android in particular) hides the browser's address bar for the rest
+    // of the session instead of leaving it pinned above a shrunk viewport.
+    requestFullscreenIfPossible();
 
     const nickname = this.input_.value.trim().slice(0, NICKNAME_MAX_LENGTH);
     if (!nickname) {
