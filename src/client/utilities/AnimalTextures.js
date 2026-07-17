@@ -156,14 +156,21 @@ function drawHeadAndMuzzle(g, headShape, color, skipMuzzle) {
   g.fillStyle(color, 1);
 
   if (headShape === 'snout') {
-    // Smaller, slightly raised skull with an elongated jaw hanging below it
-    // -- reads as a proper muzzle silhouette (crocodile/fox/tiger/horse/dog)
-    // instead of the same round head as everything else.
-    g.fillCircle(CENTER, CENTER - 3, 13);
-    g.fillEllipse(CENTER, CENTER + 9, 12, 10);
+    // Smaller, slightly raised skull with an elongated jaw below it -- reads
+    // as a proper muzzle silhouette (crocodile/fox/tiger/horse/dog) instead
+    // of the same round head as everything else. drawMouth()/the nose dot
+    // below are shared, unparameterized code tuned for the *original* round
+    // muzzle's center (CENTER + 6); an earlier version of this shape pushed
+    // the muzzle down to CENTER + 10, which left every mouth shape floating
+    // above the white patch instead of sitting on it. Keeping this jaw
+    // anchored on the same CENTER + ~6-7 band (just stretched taller/wider
+    // into a snout, not shifted to a new center) is what keeps mouths
+    // landing correctly without needing to touch that shared code at all.
+    g.fillCircle(CENTER, CENTER - 2, 13);
+    g.fillEllipse(CENTER, CENTER + 7, 13, 12);
     if (!skipMuzzle) {
       g.fillStyle(0xffffff, 1);
-      g.fillEllipse(CENTER, CENTER + 10, 10, 7);
+      g.fillEllipse(CENTER, CENTER + 7, 11, 9);
     }
     return;
   }
