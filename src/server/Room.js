@@ -286,6 +286,24 @@ export default class Room {
     this.io.to(this.id).emit(event, payload);
   }
 
+  // Same as emit(), but skips the one player whose own action this is --
+  // used only where the payload is purely informational to *other*
+  // players (broadcastPlayerMoved's own position echo: a mover already
+  // has their own up-to-the-frame local x/y and does nothing with the
+  // server's confirmation of it, since otherPlayers[id] is only ever
+  // keyed by everyone *else*'s id). socket.broadcast excludes just that
+  // one socket from the room's emit; bots have no real socket to exclude
+  // from, so they fall back to the normal room-wide emit() (harmless --
+  // nothing ever reads a bot's own echoed position either).
+  emitExcludingSender(id, event, payload) {
+    const socket = this.io.sockets.sockets[id];
+    if (socket) {
+      socket.broadcast.to(this.id).emit(event, payload);
+    } else {
+      this.emit(event, payload);
+    }
+  }
+
   // Lightweight per-room stats for the admin's multi-room dashboard (stage
   // 1/2, before the bracket narrows down to a single room worth watching in
   // full). Includes the full tileMap (same array getSnapshot() already
@@ -664,7 +682,7 @@ export default class Room {
 
     if (now - state.last >= MOVE_BROADCAST_MIN_INTERVAL_MS) {
       state.last = now;
-      this.emit('playerMoved', { playerId: id, x: player.x, y: player.y });
+      this.emitExcludingSender(id, 'playerMoved', { playerId: id, x: player.x, y: player.y });
       return;
     }
 
@@ -675,7 +693,7 @@ export default class Room {
           return;
         }
         state.last = Date.now();
-        this.emit('playerMoved', { playerId: id, x: player.x, y: player.y });
+        this.emitExcludingSender(id, 'playerMoved', { playerId: id, x: player.x, y: player.y });
       }, MOVE_BROADCAST_MIN_INTERVAL_MS - (now - state.last));
     }
   }
