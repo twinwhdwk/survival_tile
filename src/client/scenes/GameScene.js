@@ -180,6 +180,7 @@ export default class GameScene extends Phaser.Scene {
     this.mode = 'SURVIVAL';
     this.gameMode = 'TEAM';
     this.boss = null;
+    this.attackTileMarkers = [];
     this.score = 0;
     this.lastLiveScoreSecond = null;
     this.bossLowHpTween = null;
@@ -303,7 +304,9 @@ export default class GameScene extends Phaser.Scene {
     this.lastFootstepAt = 0;
   }
 
-  applySnapshot({ roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, score, isSpectator, fromDashboard }) {
+  applySnapshot({
+    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, attackTiles, score, isSpectator, fromDashboard,
+  }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
     this.isSpectator = !!isSpectator;
@@ -338,6 +341,7 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.mode === 'BOSS' && boss) {
       this.initBossHud(boss);
+      this.initAttackTiles(attackTiles);
     } else {
       // SURVIVAL rounds now score teammates by survival time too (see
       // Room.js addSurvivalScore), so the readout needs to be visible from
@@ -779,6 +783,36 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
+  // Attack tiles are separate targets from the boss's own tile (see
+  // Room.js's damageBossFromAttackTile) that also damage the boss and
+  // credit the shared score when stepped on. Rendered as a red hex glow
+  // (same hexPoints() outline reviveHighlight already uses) rather than a
+  // new tile texture/state -- purely a visual overlay, movement/collision
+  // is unaffected by it either way.
+  initAttackTiles(attackTiles) {
+    this.attackTileMarkers.forEach((marker) => {
+      this.tweens.killTweensOf(marker);
+      marker.destroy();
+    });
+    this.attackTileMarkers = (attackTiles || []).map((tile) => this.createAttackTileMarker(tile));
+  }
+
+  createAttackTileMarker(tile) {
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    const marker = this.add.polygon(x, y, hexPoints(HEX_WIDTH / 2 - 2), 0xff2a2a, 0.35)
+      .setStrokeStyle(2, 0xff3b3b, 0.95)
+      .setDepth(0);
+    this.tweens.add({
+      targets: marker,
+      alpha: 0.12,
+      duration: 550,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    return marker;
+  }
+
   updateBossHpBar() {
     if (!this.boss) {
       return;
@@ -1183,7 +1217,9 @@ export default class GameScene extends Phaser.Scene {
         playBoundaryAlarm();
       },
 
-      bossDamaged: ({ hp, maxHp, row, col, defeated, score }) => {
+      bossDamaged: ({
+        hp, maxHp, row, col, defeated, score, bossMoved, attackTiles,
+      }) => {
         if (!this.boss) {
           return;
         }
@@ -1192,6 +1228,9 @@ export default class GameScene extends Phaser.Scene {
         this.boss.maxHp = maxHp;
         this.updateBossHpBar();
         this.updateScoreText(score);
+        if (attackTiles) {
+          this.initAttackTiles(attackTiles);
+        }
 
         const { x: worldX, y: worldY } = hexToPixel(row, col);
 
@@ -1232,7 +1271,11 @@ export default class GameScene extends Phaser.Scene {
           playBossDefeat();
           vibrateVictory();
           this.roomTransitionHoldUntil = this.time.now + BOSS_DEFEAT_CELEBRATION_MS;
-        } else {
+        } else if (bossMoved) {
+          // An attack-tile hit doesn't move the boss -- its row/col here is
+          // the *attack* tile's own position (for the damage-number/impact
+          // effects above), not a new boss location, so skip repositioning
+          // the boss marker in that case.
           this.boss.row = row;
           this.boss.col = col;
           if (this.bossTileMarker) {

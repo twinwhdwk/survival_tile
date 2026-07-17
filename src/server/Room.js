@@ -38,6 +38,7 @@ import {
   ADMIN_CRITICAL_COOLDOWN_MS,
   ADMIN_SHATTER_TILE_COUNT,
   ADMIN_SHATTER_COOLDOWN_MS,
+  ATTACK_TILES_PER_PLAYERS,
 } from '../shared/bossConfig';
 
 const CENTER_ROW = Math.floor(MAP_ROWS / 2);
@@ -274,6 +275,7 @@ export default class Room {
     // land in other rooms) is unaffected and plays out normally.
     this.hasHumans = Object.values(this.players).some((p) => !p.isBot);
 
+    this.attackTiles = [];
     if (this.mode === 'BOSS') {
       const maxHp = getBossMaxHp(Object.keys(this.players).length);
       const tile = this.pickRandomSolidTile();
@@ -283,6 +285,19 @@ export default class Room {
         row: tile ? tile.row : CENTER_ROW,
         col: tile ? tile.col : CENTER_COL,
       };
+
+      // ~1 attack tile per ATTACK_TILES_PER_PLAYERS players (e.g. 2 for an
+      // 8-player room) — separate targets from the boss's own tile that
+      // also damage the boss and credit the shared score when stepped on,
+      // so a bigger room has proportionally more ways to contribute at
+      // once instead of everyone funneling onto one tile.
+      const attackTileCount = Math.ceil(Object.keys(this.players).length / ATTACK_TILES_PER_PLAYERS);
+      for (let i = 0; i < attackTileCount; i++) {
+        const spot = this.pickAttackTileSpot();
+        if (spot) {
+          this.attackTiles.push(spot);
+        }
+      }
     }
   }
 
@@ -298,6 +313,7 @@ export default class Room {
       roundStartTime: this.roundStartTime,
       roundDuration: this.roundDurationMs,
       boss: this.boss || null,
+      attackTiles: this.attackTiles,
     };
   }
 
@@ -423,6 +439,27 @@ export default class Room {
       return null;
     }
     return tiles[Math.floor(Math.random() * tiles.length)];
+  }
+
+  // Attack tiles always live inside the current safe zone (same reasoning
+  // as pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
+  // behind outside it would strand a target nobody can reach) and never
+  // overlap the boss's own tile or each other, so every attack tile is a
+  // genuinely distinct, always-reachable target.
+  pickAttackTileSpot() {
+    const candidates = this.getSafeZoneTiles().filter(({ row, col }) => {
+      if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
+        return false;
+      }
+      if (this.boss && row === this.boss.row && col === this.boss.col) {
+        return false;
+      }
+      return !this.attackTiles.some((t) => t.row === row && t.col === col);
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
   // Used by moveBotsRandomly()'s eliminated-bot branch, which calls
@@ -668,8 +705,15 @@ export default class Room {
     this.broadcastPlayerMoved(player);
     this.triggerTileCollapse(row, col);
 
-    if (this.mode === 'BOSS' && this.boss && this.boss.hp > 0 && row === this.boss.row && col === this.boss.col) {
-      this.damageBoss();
+    if (this.mode === 'BOSS' && this.boss && this.boss.hp > 0) {
+      if (row === this.boss.row && col === this.boss.col) {
+        this.damageBoss();
+      } else {
+        const attackIndex = this.attackTiles.findIndex((t) => t.row === row && t.col === col);
+        if (attackIndex !== -1) {
+          this.damageBossFromAttackTile(attackIndex);
+        }
+      }
     }
   }
 
@@ -715,7 +759,11 @@ export default class Room {
     }
   }
 
-  damageBoss() {
+  // Shared by damageBoss() (stepping on the boss's own tile) and the
+  // attack-tile check in movePlayerTo() -- both deal identical damage/score
+  // (a starting balance default; the boss's own tile also relocates itself
+  // on every hit, attack tiles don't, so that part stays in each caller).
+  applyBossDamage() {
     // A one-shot flag armed by the admin's "C" dashboard key (see
     // armCriticalHit()) rather than a random chance — this hit's damage
     // simply comes out bigger than usual, which the client renders through
@@ -728,6 +776,11 @@ export default class Room {
     this.boss.hp = Math.max(0, this.boss.hp - damage);
     const defeated = this.boss.hp <= 0;
     this.score += defeated ? BOSS_KILL_SCORE : BOSS_HIT_SCORE;
+    return defeated;
+  }
+
+  damageBoss() {
+    const defeated = this.applyBossDamage();
 
     if (defeated) {
       this.emit('bossDamaged', {
@@ -752,6 +805,59 @@ export default class Room {
       col: this.boss.col,
       defeated: false,
       score: this.score,
+      // Only the boss's own tile relocates itself on a hit -- the client
+      // uses this to know whether to move its boss marker, since an
+      // attack-tile hit (see damageBossFromAttackTile) emits the *attack*
+      // tile's position under the same row/col fields instead.
+      bossMoved: true,
+    });
+  }
+
+  // Stepping on an attack tile deals the same damage/score as the boss's
+  // own tile (see applyBossDamage()) but relocates only that one attack
+  // tile, elsewhere in the current safe zone, rather than the boss's tile —
+  // keeps the "always N live attack tiles" property true even as the
+  // boundary shrinks around a used one. Emits the *hit* tile's own row/col
+  // (not the boss's, which doesn't move here) so the client's damage-number/
+  // impact-particle effects land where the player actually stepped instead
+  // of wherever the boss currently is.
+  damageBossFromAttackTile(index) {
+    const hitTile = this.attackTiles[index];
+    const defeated = this.applyBossDamage();
+
+    if (defeated) {
+      this.attackTiles.splice(index, 1);
+      this.emit('bossDamaged', {
+        hp: 0,
+        maxHp: this.boss.maxHp,
+        row: hitTile.row,
+        col: hitTile.col,
+        defeated: true,
+        score: this.score,
+        attackTiles: this.attackTiles,
+      });
+      this.finishRoom('boss-defeated');
+      return;
+    }
+
+    const newSpot = this.pickAttackTileSpot();
+    if (newSpot) {
+      this.attackTiles[index] = newSpot;
+    } else {
+      // Nowhere left to relocate it (safe zone nearly exhausted) — drop it
+      // rather than leave a stale entry pointing at a tile that's no longer
+      // a valid target.
+      this.attackTiles.splice(index, 1);
+    }
+    this.emit('bossDamaged', {
+      hp: this.boss.hp,
+      maxHp: this.boss.maxHp,
+      row: hitTile.row,
+      col: hitTile.col,
+      defeated: false,
+      score: this.score,
+      attackTiles: this.attackTiles,
+      bossMoved: false,
     });
   }
 

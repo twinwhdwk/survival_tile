@@ -22,6 +22,14 @@ export const ADMIN_CRITICAL_COOLDOWN_MS = 5000; // rate-limits how often "C" can
 export const ADMIN_SHATTER_TILE_COUNT = 5; // "S": this many random standing tiles crack and collapse at once
 export const ADMIN_SHATTER_COOLDOWN_MS = 8000; // rate-limits how often "S" can fire per room
 
+// Attack tiles are separate from the boss's own tile -- stepping on one
+// damages the boss and credits the room's shared score exactly like a
+// direct boss hit (see Room.js's applyBossDamage()/movePlayerTo()), giving
+// the team more than one live target to chase at once. Count scales with
+// room size (1 per 4 players, e.g. 2 for an 8-player room) rather than a
+// fixed number, so a 10-player room isn't just as sparse as a 4-player one.
+export const ATTACK_TILES_PER_PLAYERS = 4;
+
 const BOSS_HP_PER_SURVIVOR = 10;
 
 // Boss toughness matches how many humans actually made it into the room —
