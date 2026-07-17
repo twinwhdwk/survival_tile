@@ -11,7 +11,16 @@ import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
-const GRID_CELL_W = 90;
+// Shrunk from an original 90 (with icon/text layout tightened to match in
+// createRosterCell) specifically to fit more columns per row -- at this
+// map's actual WORLD_WIDTH (~588px), 90px cells only fit 6 columns with
+// ~48px of unused margin left over, so any roster past 6 people immediately
+// wrapped into a 2nd row and dragged the whole grid into cellScale's
+// shrink-to-fit path (see renderLobby()) far sooner than the available
+// width actually required. 68px fits 8, meaningfully raising the number of
+// waiting players that render at full, readable size before that shrink
+// ever kicks in.
+const GRID_CELL_W = 68;
 const GRID_CELL_H = 32;
 // Computed from the live WORLD_WIDTH rather than a fixed count -- a fixed
 // GRID_COLS (originally 8, then manually re-tuned down to 6 and 5 as the
@@ -20,13 +29,16 @@ const GRID_CELL_H = 32;
 // (mapConfig.js) changed again for unrelated gameplay-tile-size reasons.
 // This adapts automatically instead, with a floor of 3 columns so an
 // unusually narrow WORLD_WIDTH still lays out something sane instead of 0.
-const GRID_COLS = Math.max(3, Math.floor((WORLD_WIDTH - 40) / GRID_CELL_W));
+// Margin trimmed from 40 to 20 alongside the GRID_CELL_W shrink above --
+// still enough for comfortable left/right breathing room once centered
+// (see renderLobby()'s startX), just no longer wasteful.
+const GRID_COLS = Math.max(3, Math.floor((WORLD_WIDTH - 20) / GRID_CELL_W));
 // Shifted down from the original 112 to leave room for the event banner
 // pinned above the "🔥 대기실" title.
 const GRID_START_Y = 138;
 // Vertical budget the roster grid is allowed to use before it start
-// overlapping the mode-toggle/action-button rows pinned to the bottom of
-// the screen (see their own WORLD_HEIGHT-58/-22 anchors below) -- 80px
+// overlapping the action-button/mode-toggle rows pinned to the bottom of
+// the screen (see their own WORLD_HEIGHT-56/-18 anchors below) -- 80px
 // covers both rows plus a small margin. Both rows were shrunk (smaller
 // padding/font, action buttons split into left/right corner groups
 // instead of one big centered row) specifically to free up more of this
@@ -119,11 +131,14 @@ export default class LobbyScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5);
 
-    // Segmented mode toggle, admin-only, sitting just above the action
-    // row — kept as two plain buttons rather than a native <select>/radio
-    // pair so the active state can reuse the same visual language
-    // (filled/outlined) as every other button here instead of a form
-    // control that would look out of place against the rest of the UI.
+    // Segmented mode toggle, admin-only, pinned to the very bottom-center —
+    // kept as two plain buttons rather than a native <select>/radio pair so
+    // the active state can reuse the same visual language (filled/outlined)
+    // as every other button here instead of a form control that would look
+    // out of place against the rest of the UI. Sits below the action-button
+    // row (created further down) rather than above it: as the one truly
+    // centered control down here, dead-bottom-center reads as its natural
+    // spot, with the action buttons' left/right groups framing it from above.
     const modeToggleHtml = `
       <div style="display:flex;gap:6px;align-items:center;">
         <button id="mode-team-button" type="button"
@@ -136,7 +151,7 @@ export default class LobbyScene extends Phaser.Scene {
         </button>
       </div>
     `;
-    this.modeToggleNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 58).createFromHTML(modeToggleHtml);
+    this.modeToggleNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 18).createFromHTML(modeToggleHtml);
     this.modeTeamButton = this.modeToggleNode.getChildByID('mode-team-button');
     this.modeSoloButton = this.modeToggleNode.getChildByID('mode-solo-button');
     applyButtonFx(this.modeTeamButton);
@@ -191,7 +206,7 @@ export default class LobbyScene extends Phaser.Scene {
         </div>
       </div>
     `;
-    this.buttonNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 22).createFromHTML(buttonHtml);
+    this.buttonNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 56).createFromHTML(buttonHtml);
     this.startButton = this.buttonNode.getChildByID('start-button');
     this.addBotButton = this.buttonNode.getChildByID('add-bot-button');
     this.clearLobbyButton = this.buttonNode.getChildByID('clear-lobby-button');
@@ -414,12 +429,15 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     if (Number.isInteger(entry.animalIndex)) {
-      const icon = this.add.image(-30, 0, ensureAnimalTexture(this, entry.animalIndex)).setScale(0.4);
+      // Scaled/positioned down from 0.4 @ x=-30 alongside GRID_CELL_W's own
+      // shrink above -- keeps icon+name both fitting inside the now-narrower
+      // chip instead of the icon eating space the name needs more.
+      const icon = this.add.image(-20, 0, ensureAnimalTexture(this, entry.animalIndex)).setScale(0.28);
       container.add(icon);
     }
 
     const color = isMe ? '#ffd700' : (entry.isBot ? '#9aa3c9' : '#ffffff');
-    const text = this.add.text(-16, 0, entry.nickname, {
+    const text = this.add.text(-11, 0, entry.nickname, {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color,
@@ -429,14 +447,14 @@ export default class LobbyScene extends Phaser.Scene {
     // was previously left to just overflow straight out the side of the
     // rounded chip. Shrinking to fit (rather than truncating) keeps the
     // full name legible instead of losing characters to an ellipsis.
-    const maxTextWidth = 50;
+    const maxTextWidth = 36;
     if (text.width > maxTextWidth) {
       text.setScale(maxTextWidth / text.width);
     }
     container.add(text);
 
     if (entry.isBot) {
-      const badge = this.add.text(-18, -10, '🤖', { fontSize: '9px' }).setOrigin(0.5);
+      const badge = this.add.text(-12, -9, '🤖', { fontSize: '8px' }).setOrigin(0.5);
       container.add(badge);
     }
 
