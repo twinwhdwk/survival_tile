@@ -2075,6 +2075,16 @@ export default class GameScene extends Phaser.Scene {
     const shadow = this.add.ellipse(0, 15, 22, 8, 0x000000, 0.35);
     children.push(shadow);
 
+    // A soft, dark backing plate behind the head -- PIL-verified (no
+    // browser in this session) that this meaningfully improves contrast for
+    // lighter-colored species (white rabbit/panda, gray elephant) against
+    // the board's own warm bronze tiles, and gives every avatar a "sticker"
+    // cushion instead of floating bare on the tile. Placed before the
+    // self-only spotlight/halo below so those still render on top and stay
+    // the dominant "this is you" cue rather than being dimmed by it.
+    const iconBacking = this.add.circle(0, 0, 20, 0x000000, 0.22);
+    children.push(iconBacking);
+
     if (isSelf) {
       // A steady, always-at-least-partly-visible spotlight ring so self is
       // easy to spot at a glance, plus the original expanding sonar ping
