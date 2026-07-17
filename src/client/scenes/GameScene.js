@@ -543,7 +543,7 @@ export default class GameScene extends Phaser.Scene {
     // admin who already knows they're spectating) blocked the view.
     const backButtonHtml = `
       <button id="back-to-dashboard-button" type="button"
-        style="padding:8px 14px;font-size:13px;border-radius:8px;border:none;background:#1c130dcc;color:#ffd9a0;cursor:pointer;font-family:${FONT_BODY};border:1px solid #ffa94d88;">
+        style="padding:6px 12px;font-size:12px;border-radius:7px;border:none;background:#1c130dcc;color:#ffd9a0;cursor:pointer;font-family:${FONT_BODY};border:1px solid #ffa94d88;">
         ← 현황판으로
       </button>
     `;
