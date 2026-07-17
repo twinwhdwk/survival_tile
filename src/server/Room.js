@@ -9,6 +9,9 @@ import { hexToPixel, pixelToHex, hexNeighbors, DIRECTION_COUNT } from '../shared
 import {
   SURVIVAL_ROUND_DURATION_MS,
   BOSS_ROUND_DURATION_MS,
+  FINAL_ROUND_DURATION_MS,
+  FINAL_ROAM_STEP_MS,
+  FINAL_ROAM_WINDOW_SIZE,
   START_COUNTDOWN_MS,
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
@@ -41,6 +44,7 @@ import {
   ADMIN_CRITICAL_COOLDOWN_MS,
   ADMIN_SHATTER_TILE_COUNT,
   ADMIN_SHATTER_COOLDOWN_MS,
+  ATTACK_TILES_PER_PLAYERS,
 } from '../shared/bossConfig';
 
 const CENTER_ROW = Math.floor(MAP_ROWS / 2);
@@ -186,7 +190,11 @@ export default class Room {
     this.gameMode = gameMode || 'TEAM';
     this.onFinished = onFinished;
     this.score = startingScore || 0;
-    this.roundDurationMs = this.mode === 'BOSS' ? BOSS_ROUND_DURATION_MS : SURVIVAL_ROUND_DURATION_MS;
+    this.roundDurationMs = (() => {
+      if (this.mode === 'BOSS') return BOSS_ROUND_DURATION_MS;
+      if (this.mode === 'FINAL') return FINAL_ROUND_DURATION_MS;
+      return SURVIVAL_ROUND_DURATION_MS;
+    })();
 
     this.players = {};
     this.tileMap = createSolidTileMap();
@@ -238,6 +246,16 @@ export default class Room {
     // so the front-loaded early cadence can differ step to step.
     this.nextBoundaryShrinkAt = BOUNDARY_SHRINK_GRACE_MS + boundaryShrinkStepInterval(1);
     this.lastRegenAt = 0;
+    // FINAL mode only (stage 3's solo finale): once the rapid shrink phase
+    // reaches a fixed FINAL_ROAM_WINDOW_SIZE-square window, finalRoamActive
+    // flips on and getSafeBounds() switches from the inset rectangle above
+    // to this movable window instead — see shrinkTowardFinalWindow()/
+    // enterFinalRoamPhase()/roamBoundary().
+    this.finalRoamActive = false;
+    this.finalWindowRowStart = 0;
+    this.finalWindowColStart = 0;
+    this.finalRoamDirIndex = 0;
+    this.lastFinalRoamAt = 0;
     // Tracks the 0-alive -> 1-alive "last stand" state as an explicit
     // false->true->false transition (see eliminatePlayer()/respawnGhost())
     // rather than re-deriving it from aliveCount alone — the ghost-revive
@@ -253,7 +271,9 @@ export default class Room {
     this.lastAdminCriticalAt = 0;
     this.lastAdminShatterAt = 0;
 
-    members.forEach(({ socketId, nickname, animalIndex, isBot }) => {
+    members.forEach(({
+      socketId, nickname, animalIndex, isBot, score,
+    }) => {
       const spawn = this.getRandomSpawn();
       this.players[socketId] = {
         x: spawn.x,
@@ -272,11 +292,15 @@ export default class Room {
         disconnected: false,
         isBot: !!isBot,
         // Individual score, credited alongside the shared this.score by
-        // addSurvivalScore() below — TEAM mode doesn't rank by this (the
-        // room's combined this.score is what carries forward), but SOLO
+        // addSurvivalScore() below — TEAM mode doesn't rank by this for
+        // finalRankings, but each player's own carried-in value (their
+        // prior stage's total, seeded here from `score` on their members
+        // entry -- see formStage2Groups()/finishRoom()'s `advancing` list
+        // in server.js) is exactly how a stage-2+ room continues crediting
+        // someone's earlier-stage score instead of resetting it. SOLO
         // mode's finalRankings are built entirely from each player's own
         // value here (see Room.getPlayerResults()).
-        score: 0,
+        score: score || 0,
         // Start of the window addSurvivalScore() will next credit — see that
         // method for why this can't just always be roundStartTime once
         // ghost respawns are in play.
@@ -317,6 +341,7 @@ export default class Room {
     // land in other rooms) is unaffected and plays out normally.
     this.hasHumans = Object.values(this.players).some((p) => !p.isBot);
 
+    this.attackTiles = [];
     if (this.mode === 'BOSS') {
       const maxHp = getBossMaxHp(Object.keys(this.players).length);
       const tile = this.pickRandomSolidTile();
@@ -326,6 +351,19 @@ export default class Room {
         row: tile ? tile.row : CENTER_ROW,
         col: tile ? tile.col : CENTER_COL,
       };
+
+      // ~1 attack tile per ATTACK_TILES_PER_PLAYERS players (e.g. 2 for an
+      // 8-player room) — separate targets from the boss's own tile that
+      // also damage the boss and credit the shared score when stepped on,
+      // so a bigger room has proportionally more ways to contribute at
+      // once instead of everyone funneling onto one tile.
+      const attackTileCount = Math.ceil(Object.keys(this.players).length / ATTACK_TILES_PER_PLAYERS);
+      for (let i = 0; i < attackTileCount; i++) {
+        const spot = this.pickAttackTileSpot();
+        if (spot) {
+          this.attackTiles.push(spot);
+        }
+      }
     }
   }
 
@@ -341,6 +379,7 @@ export default class Room {
       roundStartTime: this.roundStartTime,
       roundDuration: this.roundDurationMs,
       boss: this.boss || null,
+      attackTiles: this.attackTiles,
     };
   }
 
@@ -394,8 +433,9 @@ export default class Room {
   }
 
   isSafeTile(row, col) {
-    return row >= this.rowInsetTop && row <= MAP_ROWS - 1 - this.rowInsetBottom
-      && col >= this.colInsetLeft && col <= MAP_COLS - 1 - this.colInsetRight;
+    const bounds = this.getSafeBounds();
+    return row >= bounds.rowStart && row <= bounds.rowEnd
+      && col >= bounds.colStart && col <= bounds.colEnd;
   }
 
   // How many rings inside the current safe rectangle (row, col) sits —
@@ -406,11 +446,12 @@ export default class Room {
   // now," so they aren't caught flat-footed by the next shrink step the
   // way a purely reactive "nearest safe tile" search would leave them.
   safeMargin(row, col) {
+    const bounds = this.getSafeBounds();
     return Math.min(
-      row - this.rowInsetTop,
-      (MAP_ROWS - 1 - this.rowInsetBottom) - row,
-      col - this.colInsetLeft,
-      (MAP_COLS - 1 - this.colInsetRight) - col,
+      row - bounds.rowStart,
+      bounds.rowEnd - row,
+      col - bounds.colStart,
+      bounds.colEnd - col,
     );
   }
 
@@ -418,7 +459,22 @@ export default class Room {
   // with the boundary events so the client can draw an outline of what's
   // currently safe, rather than players only finding out tile-by-tile as
   // each one flashes a warning right before it burns.
+  //
+  // FINAL mode's roam phase (see roamBoundary()) uses a fixed-size window
+  // that can sit anywhere on the map, not a rectangle symmetrically inset
+  // from all 4 edges the way SURVIVAL/BOSS/FINAL's own shrink phase do —
+  // this is the one place that distinction has to be made explicit, since
+  // every other boundary-aware method (isSafeTile, safeMargin,
+  // getSafeZoneTiles) all go through this.
   getSafeBounds() {
+    if (this.mode === 'FINAL' && this.finalRoamActive) {
+      return {
+        rowStart: this.finalWindowRowStart,
+        rowEnd: this.finalWindowRowStart + FINAL_ROAM_WINDOW_SIZE - 1,
+        colStart: this.finalWindowColStart,
+        colEnd: this.finalWindowColStart + FINAL_ROAM_WINDOW_SIZE - 1,
+      };
+    }
     return {
       rowStart: this.rowInsetTop,
       rowEnd: MAP_ROWS - 1 - this.rowInsetBottom,
@@ -427,15 +483,10 @@ export default class Room {
     };
   }
 
-  getSafeZoneTiles(
-    rowInsetTop = this.rowInsetTop,
-    rowInsetBottom = this.rowInsetBottom,
-    colInsetLeft = this.colInsetLeft,
-    colInsetRight = this.colInsetRight,
-  ) {
+  getSafeZoneTiles(bounds = this.getSafeBounds()) {
     const tiles = [];
-    for (let row = rowInsetTop; row <= MAP_ROWS - 1 - rowInsetBottom; row++) {
-      for (let col = colInsetLeft; col <= MAP_COLS - 1 - colInsetRight; col++) {
+    for (let row = bounds.rowStart; row <= bounds.rowEnd; row++) {
+      for (let col = bounds.colStart; col <= bounds.colEnd; col++) {
         tiles.push({ row, col });
       }
     }
@@ -473,11 +524,33 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
+  // Attack tiles always live inside the current safe zone (same reasoning
+  // as pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
+  // behind outside it would strand a target nobody can reach) and never
+  // overlap the boss's own tile or each other, so every attack tile is a
+  // genuinely distinct, always-reachable target.
+  pickAttackTileSpot() {
+    const candidates = this.getSafeZoneTiles().filter(({ row, col }) => {
+      if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
+        return false;
+      }
+      if (this.boss && row === this.boss.row && col === this.boss.col) {
+        return false;
+      }
+      return !this.attackTiles.some((t) => t.row === row && t.col === col);
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   // Used by moveBotsRandomly()'s eliminated-bot branch, which calls
   // reviveTile() the same way a real ghost's tap does, just picked at
-  // random rather than aimed by a cursor. BOSS has no shrinking boundary
-  // (isSafeTile covers the whole map there), so scanning the whole map is
-  // already correct for that mode.
+  // random rather than aimed by a cursor. FINAL mode (always SOLO, no
+  // ghosts) never reaches this — isSafeTile covers the whole map there
+  // regardless, so scanning the whole map would still be harmless even if
+  // it somehow did.
   pickRandomGoneTile() {
     const tiles = [];
     for (let row = 0; row < MAP_ROWS; row++) {
@@ -493,7 +566,7 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
-  // SURVIVAL-only variant of pickRandomGoneTile(), scoped to the current
+  // SURVIVAL/BOSS variant of pickRandomGoneTile(), scoped to the current
   // safe zone the same way pickRandomSolidTileInSafeZone() is — used by
   // reviveTile()'s auto-pick branch (a ghost's tap that doesn't name a
   // specific tile) so a free-form screen tap never gets spent reviving
@@ -597,7 +670,18 @@ export default class Room {
       return;
     }
     player.eliminated = true;
-    if (this.mode === 'SURVIVAL') {
+    // Only meaningful for FINAL (stage 3's own ranking is by elimination
+    // order, not score -- see handleRoomFinished's SOLO branch and
+    // endTournament()'s stage-3-aware sort in server.js), but harmless to
+    // always record: whoever never gets eliminated stays null, which reads
+    // as "still alive" / "the winner" wherever this is read back.
+    player.eliminatedAt = Date.now();
+    // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
+    // its own eventual ranking is by elimination order, not this score
+    // (see the FINAL branch of handleRoomFinished's SOLO case), but the
+    // score is still shown live and carries the same "how long did you
+    // last" meaning either way.
+    if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
       this.addSurvivalScore(player, Date.now());
     }
     this.emit('playerEliminated', { playerId: id, score: this.score, playerScore: player.score || 0 });
@@ -732,8 +816,15 @@ export default class Room {
     this.broadcastPlayerMoved(player);
     this.triggerTileCollapse(row, col);
 
-    if (this.mode === 'BOSS' && this.boss && this.boss.hp > 0 && row === this.boss.row && col === this.boss.col) {
-      this.damageBoss();
+    if (this.mode === 'BOSS' && this.boss && this.boss.hp > 0) {
+      if (row === this.boss.row && col === this.boss.col) {
+        this.damageBoss();
+      } else {
+        const attackIndex = this.attackTiles.findIndex((t) => t.row === row && t.col === col);
+        if (attackIndex !== -1) {
+          this.damageBossFromAttackTile(attackIndex);
+        }
+      }
     }
   }
 
@@ -779,7 +870,11 @@ export default class Room {
     }
   }
 
-  damageBoss() {
+  // Shared by damageBoss() (stepping on the boss's own tile) and the
+  // attack-tile check in movePlayerTo() -- both deal identical damage/score
+  // (a starting balance default; the boss's own tile also relocates itself
+  // on every hit, attack tiles don't, so that part stays in each caller).
+  applyBossDamage() {
     // A one-shot flag armed by the admin's "C" dashboard key (see
     // armCriticalHit()) rather than a random chance — this hit's damage
     // simply comes out bigger than usual, which the client renders through
@@ -792,6 +887,11 @@ export default class Room {
     this.boss.hp = Math.max(0, this.boss.hp - damage);
     const defeated = this.boss.hp <= 0;
     this.score += defeated ? BOSS_KILL_SCORE : BOSS_HIT_SCORE;
+    return defeated;
+  }
+
+  damageBoss() {
+    const defeated = this.applyBossDamage();
 
     if (defeated) {
       this.emit('bossDamaged', {
@@ -816,6 +916,59 @@ export default class Room {
       col: this.boss.col,
       defeated: false,
       score: this.score,
+      // Only the boss's own tile relocates itself on a hit -- the client
+      // uses this to know whether to move its boss marker, since an
+      // attack-tile hit (see damageBossFromAttackTile) emits the *attack*
+      // tile's position under the same row/col fields instead.
+      bossMoved: true,
+    });
+  }
+
+  // Stepping on an attack tile deals the same damage/score as the boss's
+  // own tile (see applyBossDamage()) but relocates only that one attack
+  // tile, elsewhere in the current safe zone, rather than the boss's tile —
+  // keeps the "always N live attack tiles" property true even as the
+  // boundary shrinks around a used one. Emits the *hit* tile's own row/col
+  // (not the boss's, which doesn't move here) so the client's damage-number/
+  // impact-particle effects land where the player actually stepped instead
+  // of wherever the boss currently is.
+  damageBossFromAttackTile(index) {
+    const hitTile = this.attackTiles[index];
+    const defeated = this.applyBossDamage();
+
+    if (defeated) {
+      this.attackTiles.splice(index, 1);
+      this.emit('bossDamaged', {
+        hp: 0,
+        maxHp: this.boss.maxHp,
+        row: hitTile.row,
+        col: hitTile.col,
+        defeated: true,
+        score: this.score,
+        attackTiles: this.attackTiles,
+      });
+      this.finishRoom('boss-defeated');
+      return;
+    }
+
+    const newSpot = this.pickAttackTileSpot();
+    if (newSpot) {
+      this.attackTiles[index] = newSpot;
+    } else {
+      // Nowhere left to relocate it (safe zone nearly exhausted) — drop it
+      // rather than leave a stale entry pointing at a tile that's no longer
+      // a valid target.
+      this.attackTiles.splice(index, 1);
+    }
+    this.emit('bossDamaged', {
+      hp: this.boss.hp,
+      maxHp: this.boss.maxHp,
+      row: hitTile.row,
+      col: hitTile.col,
+      defeated: false,
+      score: this.score,
+      attackTiles: this.attackTiles,
+      bossMoved: false,
     });
   }
 
@@ -944,14 +1097,15 @@ export default class Room {
         && this.tileMap[row][col] === TILE_STATE.GONE) {
       target = { row, col };
     } else {
-      // SURVIVAL only: shrinkBoundary() only ever sweeps the *one* ring
-      // transitioning at that moment, so a tile revived outside the current
-      // safe zone would never get swept again — permanently wasting the tap
-      // on ground nobody can get survivor credit for standing on (finishRoom's
-      // SURVIVAL branch requires isSafeTile at round end). BOSS has no
-      // shrinking boundary (isSafeTile covers the whole map there), so the
-      // plain whole-map pick is already correct for it.
-      target = this.mode === 'SURVIVAL' ? this.pickRandomGoneTileInSafeZone() : this.pickRandomGoneTile();
+      // SURVIVAL and BOSS share the same shrinking safe-zone boundary now
+      // (see checkRoundState) — shrinkBoundary() only ever sweeps the *one*
+      // ring transitioning at that moment, so a tile revived outside the
+      // current safe zone would never get swept again, permanently wasting
+      // the tap on ground that just collapses again on the next ring
+      // regardless of who's standing on it. FINAL mode never reaches this
+      // branch at all (its gameMode is always SOLO, guarded at the top of
+      // this method), so it doesn't need a case here.
+      target = (this.mode === 'SURVIVAL' || this.mode === 'BOSS') ? this.pickRandomGoneTileInSafeZone() : this.pickRandomGoneTile();
     }
     if (!target) {
       return;
@@ -961,7 +1115,7 @@ export default class Room {
     // Still needed for the explicit-coords (bot) branch above, whose
     // pickRandomGoneTile() isn't safe-zone-scoped — a no-op for the
     // auto-pick branch, which already only ever returns a safe-zone tile.
-    if (this.mode === 'SURVIVAL' && !this.isSafeTile(row, col)) {
+    if ((this.mode === 'SURVIVAL' || this.mode === 'BOSS') && !this.isSafeTile(row, col)) {
       return;
     }
 
@@ -1016,12 +1170,14 @@ export default class Room {
     if (!player || !player.eliminated || this.finished) {
       return;
     }
-    // SURVIVAL restricts the candidate pool to the current safe zone (see
-    // pickRandomSolidTileInSafeZone()); BOSS has no shrinking boundary, so
-    // it keeps picking from the whole map as before.
-    const tile = this.mode === 'SURVIVAL' ? this.pickRandomSolidTileInSafeZone() : this.pickRandomSolidTile();
+    // SURVIVAL and BOSS both restrict the candidate pool to the current
+    // safe zone (see pickRandomSolidTileInSafeZone()) now that both share
+    // the shrinking boundary — respawning a ghost outside it would just
+    // strand them somewhere about to collapse anyway.
+    const usesSafeZone = this.mode === 'SURVIVAL' || this.mode === 'BOSS';
+    const tile = usesSafeZone ? this.pickRandomSolidTileInSafeZone() : this.pickRandomSolidTile();
     if (!tile) {
-      return; // nothing standing anywhere (in the safe zone, for SURVIVAL) to respawn onto — stay a ghost
+      return; // nothing standing anywhere (in the safe zone, if applicable) to respawn onto — stay a ghost
     }
     const { x, y } = hexToPixel(tile.row, tile.col);
     const respawnTime = Date.now();
@@ -1119,7 +1275,7 @@ export default class Room {
       const oldRight = this.colInsetRight;
       this.colInsetLeft = Math.min(MAX_COL_INSET_LEFT, this.colInsetLeft + 1);
       this.colInsetRight = Math.min(MAX_COL_INSET_RIGHT, this.colInsetRight + 1);
-      this.collapseTilesLeavingSafeZone(this.rowInsetTop, this.rowInsetBottom, oldLeft, oldRight);
+      this.collapseTilesLeavingSafeZone(this.insetBounds(this.rowInsetTop, this.rowInsetBottom, oldLeft, oldRight));
       return;
     }
 
@@ -1128,15 +1284,107 @@ export default class Room {
       const oldBottom = this.rowInsetBottom;
       this.rowInsetTop = MAX_ROW_INSET_TOP;
       this.rowInsetBottom = MAX_ROW_INSET_BOTTOM;
-      this.collapseTilesLeavingSafeZone(oldTop, oldBottom, this.colInsetLeft, this.colInsetRight);
+      this.collapseTilesLeavingSafeZone(this.insetBounds(oldTop, oldBottom, this.colInsetLeft, this.colInsetRight));
     }
   }
 
-  // Shared by both branches of shrinkBoundary() above — burns every tile
-  // that was inside the safe zone at the old edge insets but isn't anymore
-  // at the room's current ones.
-  collapseTilesLeavingSafeZone(oldRowInsetTop, oldRowInsetBottom, oldColInsetLeft, oldColInsetRight) {
-    this.getSafeZoneTiles(oldRowInsetTop, oldRowInsetBottom, oldColInsetLeft, oldColInsetRight).forEach(({ row, col }) => {
+  // FINAL mode's own rapid-shrink phase (see checkRoundState) closes the
+  // column edges exactly the same way shrinkBoundary() does, but stops once
+  // they reach whatever value leaves exactly FINAL_ROAM_WINDOW_SIZE (6)
+  // columns, instead of continuing on to MAX_COL_INSET_LEFT/RIGHT — and
+  // never touches the row insets at all, unlike shrinkBoundary()'s eventual
+  // one-shot row squeeze. A 6-tall window already fits inside MAP_ROWS (7)
+  // with 1 row of slack from the start; there's no further row squeeze
+  // needed. Unlike SAFE_ZONE_MIN_COLS/ROWS' possibly-uneven target, 18 - 6
+  // = 12 is evenly split by both column edges (6 each), so this never needs
+  // the Math.min-diverging-edges handling shrinkBoundary()'s own column
+  // branch does. Once the target is reached, checkRoundState() calls
+  // enterFinalRoamPhase() to switch from this inset-based rectangle to the
+  // movable window.
+  finalShrinkTargetColInset() {
+    return Math.floor((MAP_COLS - FINAL_ROAM_WINDOW_SIZE) / 2);
+  }
+
+  shrinkTowardFinalWindow() {
+    const target = this.finalShrinkTargetColInset();
+    if (this.colInsetLeft >= target && this.colInsetRight >= target) {
+      return true;
+    }
+    const oldLeft = this.colInsetLeft;
+    const oldRight = this.colInsetRight;
+    this.colInsetLeft = Math.min(target, this.colInsetLeft + 1);
+    this.colInsetRight = Math.min(target, this.colInsetRight + 1);
+    this.collapseTilesLeavingSafeZone(this.insetBounds(this.rowInsetTop, this.rowInsetBottom, oldLeft, oldRight));
+    return this.colInsetLeft >= target && this.colInsetRight >= target;
+  }
+
+  // Ends the shrink phase and switches getSafeBounds() (and everything
+  // built on it) over to the movable window. rowStart is centered in
+  // whatever slack MAP_ROWS - FINAL_ROAM_WINDOW_SIZE leaves (0, given the
+  // current 7-tall map — i.e. rows 0-5, excluding just the bottom row);
+  // colStart picks up exactly where the shrink phase's left edge left off,
+  // so the window's initial position is a seamless continuation of the
+  // rectangle that was already shrinking, not a jump to a new spot.
+  enterFinalRoamPhase() {
+    const oldBounds = this.getSafeBounds(); // still inset-based at this point
+    this.finalWindowRowStart = Math.floor((MAP_ROWS - FINAL_ROAM_WINDOW_SIZE) / 2);
+    this.finalWindowColStart = this.colInsetLeft;
+    this.finalRoamDirIndex = 0;
+    this.finalRoamActive = true; // getSafeBounds() now reads the window instead
+    this.collapseTilesLeavingSafeZone(oldBounds);
+  }
+
+  // right -> down -> left, then repeats (not a 4-leg loop back through
+  // "up") -- the operator's own description never addressed what happens
+  // after "left" is exhausted, so this just cycles back to "right" rather
+  // than introducing a 4th leg they didn't ask for. Each tick tries the
+  // current direction; if the window's already at that edge, it advances
+  // to the next leg and retries immediately (same tick) rather than
+  // wasting a full FINAL_ROAM_STEP_MS doing nothing -- the map's aspect
+  // ratio gives the horizontal legs ~12 columns of travel room but the
+  // vertical ("down") leg only 1, so hitting an edge well before "using up"
+  // a leg is the normal case here, not an exception.
+  roamBoundary() {
+    const directions = [{ dr: 0, dc: 1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }];
+    for (let attempt = 0; attempt < directions.length; attempt++) {
+      const dir = directions[this.finalRoamDirIndex % directions.length];
+      const newRowStart = this.finalWindowRowStart + dir.dr;
+      const newColStart = this.finalWindowColStart + dir.dc;
+      const fits = newRowStart >= 0 && newRowStart + FINAL_ROAM_WINDOW_SIZE - 1 <= MAP_ROWS - 1
+        && newColStart >= 0 && newColStart + FINAL_ROAM_WINDOW_SIZE - 1 <= MAP_COLS - 1;
+      if (fits) {
+        const oldBounds = this.getSafeBounds();
+        this.finalWindowRowStart = newRowStart;
+        this.finalWindowColStart = newColStart;
+        this.collapseTilesLeavingSafeZone(oldBounds);
+        return;
+      }
+      this.finalRoamDirIndex += 1;
+    }
+    // All 3 directions blocked this tick -- shouldn't normally happen given
+    // the window always has room to move somewhere, but no-op rather than
+    // loop forever if it ever does.
+  }
+
+  // { rowStart, rowEnd, colStart, colEnd } for a given set of 4 edge insets
+  // -- used to describe the *old* rectangle to collapseTilesLeavingSafeZone
+  // right after the room's own insets have already moved on to their new
+  // values.
+  insetBounds(rowInsetTop, rowInsetBottom, colInsetLeft, colInsetRight) {
+    return {
+      rowStart: rowInsetTop,
+      rowEnd: MAP_ROWS - 1 - rowInsetBottom,
+      colStart: colInsetLeft,
+      colEnd: MAP_COLS - 1 - colInsetRight,
+    };
+  }
+
+  // Shared by shrinkBoundary(), shrinkTowardFinalWindow(),
+  // enterFinalRoamPhase(), and roamBoundary() above — burns every tile that
+  // was inside the safe zone at `oldBounds` but isn't anymore per the
+  // room's current (already-updated) getSafeBounds().
+  collapseTilesLeavingSafeZone(oldBounds) {
+    this.getSafeZoneTiles(oldBounds).forEach(({ row, col }) => {
       if (this.isSafeTile(row, col) || this.tileMap[row][col] !== TILE_STATE.SOLID) {
         return;
       }
@@ -1481,10 +1729,10 @@ export default class Room {
     const elapsed = Date.now() - this.roundStartTime;
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
 
-    // Not SURVIVAL-only: BOSS rounds have no shrinking boundary, so all four
-    // edge insets stay 0 for their whole duration and getSafeZoneTiles()
-    // naturally covers the entire board — the same threshold/burst logic
-    // just applies map-wide instead of to a shrinking rectangle. BOSS mode
+    // Not SURVIVAL-only: getSafeZoneTiles() naturally covers the entire
+    // board when every edge inset is still 0 (BOSS/FINAL's own grace
+    // period, before their own boundary starts closing below), so the same
+    // threshold/burst logic just applies map-wide until then. BOSS mode
     // previously had no auto-regen at all (this check used to require
     // mode === 'SURVIVAL'), which meant the only tiles that ever came back
     // during a 3-minute boss fight were whatever eliminated teammates
@@ -1498,22 +1746,77 @@ export default class Room {
       }
     }
 
+    // BOSS shares SURVIVAL's shrinking safe-zone boundary (stage 2's team
+    // boss fight is meant to funnel players together as the round wears on,
+    // same as stage 1) — isSafeTile()/shrinkBoundary()/getSafeZoneTiles()
+    // were already fully mode-agnostic rectangle math, this was the only
+    // gate keeping BOSS out. finishRoom()'s BOSS branch deliberately still
+    // doesn't check isSafeTile at round end (no loss on timeout, only a
+    // full wipeout knocks a lineage out) — the boundary's role here is
+    // purely attritional via the normal tile-collapse -> elimination chain,
+    // not a survivor-snapshot gate like SURVIVAL has.
+    //
     // A while loop (not a single if) so a room that somehow falls behind
     // schedule (a long GC pause, an overloaded event loop) still catches all
     // the way up rather than settling permanently one or more rings behind
     // where BOUNDARY_SHRINK_INTERVAL_EARLY_MS/BOUNDARY_SHRINK_INTERVAL_MS say
     // it should be — shrinkBoundary() itself is a safe no-op once both axes
     // are already fully inset, so an extra catch-up call is harmless.
-    while (this.mode === 'SURVIVAL' && boundaryActive && elapsed >= this.nextBoundaryShrinkAt) {
-      const isFirstStep = this.boundaryShrinkStepsDone === 0;
-      this.boundaryShrinkStepsDone += 1;
-      this.nextBoundaryShrinkAt += boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
+    if ((this.mode === 'SURVIVAL' || this.mode === 'BOSS') && boundaryActive) {
+      while (elapsed >= this.nextBoundaryShrinkAt) {
+        const isFirstStep = this.boundaryShrinkStepsDone === 0;
+        this.boundaryShrinkStepsDone += 1;
+        this.nextBoundaryShrinkAt += boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
 
-      this.shrinkBoundary();
+        this.shrinkBoundary();
 
-      if (isFirstStep) {
-        this.announceBoundaryShrink();
-      } else {
+        if (isFirstStep) {
+          this.announceBoundaryShrink();
+        } else {
+          this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+        }
+      }
+    } else if (this.mode === 'FINAL' && boundaryActive && !this.finalRoamActive) {
+      // Phase 1: same front-loaded cadence as SURVIVAL/BOSS above, just
+      // aimed at a fixed FINAL_ROAM_WINDOW_SIZE-wide stopping point instead
+      // of MAX_COL_INSET_LEFT/RIGHT — see shrinkTowardFinalWindow()'s own
+      // comment. Breaks out of the catch-up loop the instant the target is
+      // reached (rather than letting a rare multi-step catch-up call
+      // shrinkTowardFinalWindow()/enterFinalRoamPhase() again after the
+      // window's already active) since it's a one-time phase transition,
+      // not a repeatable ring step like the branch above.
+      while (elapsed >= this.nextBoundaryShrinkAt) {
+        const isFirstStep = this.boundaryShrinkStepsDone === 0;
+        this.boundaryShrinkStepsDone += 1;
+        this.nextBoundaryShrinkAt += boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
+
+        const reachedTarget = this.shrinkTowardFinalWindow();
+
+        if (isFirstStep) {
+          this.announceBoundaryShrink();
+        } else {
+          this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+        }
+
+        if (reachedTarget) {
+          this.enterFinalRoamPhase();
+          this.lastFinalRoamAt = Date.now();
+          // The window just changed shape (inset rectangle -> fixed
+          // square), on top of whatever the ring collapse above already
+          // announced -- worth its own pulse so the client's outline
+          // reflects it immediately rather than waiting up to
+          // FINAL_ROAM_STEP_MS for the first roam step to also emit one.
+          this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
+          break;
+        }
+      }
+    } else if (this.mode === 'FINAL' && this.finalRoamActive) {
+      // Phase 2: the window itself moves one cell at a time on its own
+      // cadence (FINAL_ROAM_STEP_MS), independent of the shrink phase's
+      // BOUNDARY_SHRINK_INTERVAL_MS cadence above.
+      if (Date.now() - this.lastFinalRoamAt >= FINAL_ROAM_STEP_MS) {
+        this.lastFinalRoamAt = Date.now();
+        this.roamBoundary();
         this.emit('boundaryPulse', { safeBounds: this.getSafeBounds() });
       }
     }
@@ -1534,6 +1837,7 @@ export default class Room {
       animalIndex: p.animalIndex,
       score: p.score || 0,
       eliminated: p.eliminated,
+      eliminatedAt: p.eliminatedAt || null,
     }));
   }
 
@@ -1556,7 +1860,7 @@ export default class Room {
     // Whoever wasn't already eliminated made it all the way to this moment —
     // credit them for the full time elapsed, same as an eliminated
     // teammate's addSurvivalScore() call got their own cutoff timestamp.
-    if (this.mode === 'SURVIVAL') {
+    if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
       const endTime = Date.now();
       Object.values(this.players).forEach((player) => {
         if (!player.eliminated) {
@@ -1585,10 +1889,30 @@ export default class Room {
 
     const totalHumans = Object.keys(this.players).length;
 
+    // `score` here is each player's own individual carried total -- not
+    // just this.score, the room's shared pool -- so a stage-2+ room's
+    // constructor can seed it back into player.score, giving every survivor
+    // an additive running total across stages instead of resetting at each
+    // new room. See formStage2Groups()/formStage3Group() in server.js.
+    //
+    // SURVIVAL: player.score already IS each player's own individually-
+    // tracked total (addSurvivalScore credits it alongside this.score
+    // identically every time), so carrying it alone is correct -- adding
+    // this.score again here would double count the same credit.
+    //
+    // BOSS: damageBoss()/damageBossFromAttackTile() only ever touch the
+    // shared this.score, never an individual player.score, so a survivor's
+    // stage-1 total would otherwise carry through stage 2 completely
+    // unchanged by anything that happened in the boss fight. Folding
+    // this.score in here, once, identically for every survivor of *this*
+    // room, credits the team effort onto each of their individual totals —
+    // matching "1라운드 점수 위에 2라운드로 배정된 사람들의 점수를 또
+    // 더하는 형태" (stage-1 score, plus whatever the stage-2 group earned).
     const advancing = survivorIds.map((id) => ({
       socketId: id,
       nickname: this.players[id].nickname,
       animalIndex: this.players[id].animalIndex,
+      score: (this.players[id].score || 0) + (this.mode === 'BOSS' ? this.score : 0),
     }));
 
     // onFinished may end the whole tournament right here (this was the last
