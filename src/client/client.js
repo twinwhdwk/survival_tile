@@ -9,6 +9,15 @@ import {
   FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT, FONT_BODY_FAMILY, FONT_BODY_SAMPLE_TEXT,
 } from './theme/Theme';
 
+// `pointer: coarse` is true for a touch-primary device (phone/tablet) and
+// false for a mouse/trackpad-primary one (PC/laptop) -- a more reliable
+// "is this PC" signal than viewport width alone, since an operator's
+// browser window size can vary. Per the operator's own stated setup, PC
+// access is always the operator/spectator role and mobile is always a
+// player, so this doubles as a good-enough proxy for "is this the
+// operator" without waiting for the actual admin-password join later.
+const isTouchPrimary = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
 const config = {
   title:    '타일 서바이벌',
   parent:   'game',
@@ -41,7 +50,31 @@ const config = {
     // their own `resolution` to 0 ("inherit the Game Config's resolution"
     // — see Phaser.GameObjects.TextStyle's own docs), so this one setting
     // is enough on its own; no per-TextStyle override is needed.
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    //
+    // devicePixelRatio alone only accounts for OS/browser display scaling,
+    // not how far Phaser.Scale.FIT itself has to stretch the small design
+    // canvas (WORLD_WIDTH/HEIGHT, shrunk considerably this session for
+    // mobile tile-size reasons — see mapConfig.js) to fill a large PC
+    // monitor or projected TV. On most desktop browsers devicePixelRatio is
+    // just 1, so that upscale alone left hex tiles/text visibly blurry on
+    // a big screen. For a PC (operator/spectator, per how this app is
+    // actually used — see isTouchPrimary above), factor in how much
+    // screen.width/height (not just the current window size, which this
+    // one-time config can't react to later on a resize) exceeds
+    // WORLD_WIDTH/HEIGHT too, since an operator typically runs the browser
+    // maximized/fullscreen anyway. Capped at 4 rather than going fully
+    // native on a big display — a real, if modest, GPU/render cost
+    // tradeoff for sharpness, not something to spend unboundedly on a 4K+
+    // screen. Mobile players keep the original modest cap: no reason to
+    // spend extra render cost there, and their CSS size is already close
+    // to WORLD_WIDTH/HEIGHT to begin with.
+    resolution: isTouchPrimary
+      ? Math.min(window.devicePixelRatio || 1, 2)
+      : Math.min(Math.max(
+        window.devicePixelRatio || 1,
+        (window.screen.width || window.innerWidth) / WORLD_WIDTH,
+        (window.screen.height || window.innerHeight) / WORLD_HEIGHT,
+      ), 4),
   },
   // Matches the CSS body background and the outer edge of every scene's
   // own radial gradient (EffectTextures.js) rather than pure black, so
