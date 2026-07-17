@@ -1,9 +1,6 @@
-// Stage 1 (SURVIVAL) and stage 2+ (BOSS) intentionally run different
-// lengths: a shorter first round keeps the initial free-for-all snappy,
-// while boss fights get the longer window since score there is built up
-// gradually through repeated hits rather than just showing up alive.
-export const SURVIVAL_ROUND_DURATION_MS = 120000; // 2 minutes for stage 1
-export const BOSS_ROUND_DURATION_MS = 180000; // 3 minutes per boss room
+// Stage 1 and 2 are both SURVIVAL now that the boss mechanic has been
+// removed, so they share this same duration.
+export const SURVIVAL_ROUND_DURATION_MS = 120000; // 2 minutes
 // Stage 3's solo final: rapid shrink to a fixed 6x6 window, then that
 // window roams the map (see Room.js's FINAL-mode boundary logic) until
 // time runs out or one player is left. Same length as stage 1's SURVIVAL
@@ -58,8 +55,8 @@ export const BOUNDARY_SHRINK_INTERVAL_MS = 10000;
 export const BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 6000;
 export const BOUNDARY_SHRINK_EARLY_STEPS = 3;
 export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this window, not all at once
-// SURVIVAL rounds don't have a boss to hit for points, so a teammate's score
-// contribution is instead how long they personally stayed alive (in whole
+// SURVIVAL rounds have no other scoring mechanic, so a teammate's score
+// contribution is how long they personally stayed alive (in whole
 // seconds), summed across the whole lineage — a team that all goes down
 // early scores worse than one where everyone hangs on longer, even if
 // nobody technically "survives" to the safe zone at the buzzer.
@@ -136,7 +133,7 @@ export const REGEN_GRACE_MS = 2000;
 // room-wide revival gauge — GAUGE_PER_TAP per successful tap from any
 // ghost (i.e. one that actually flips a GONE tile back to SOLID;
 // rate-limited per ghost by Room.reviveTile's GHOST_REVIVE_COOLDOWN_MS /
-// GHOST_REVIVE_LAST_STAND_COOLDOWN_MS gates in bossConfig.js). Filling
+// GHOST_REVIVE_LAST_STAND_COOLDOWN_MS gates below). Filling
 // the gauge to GAUGE_MAX respawns ONE random ghost back into the round
 // at a random currently-standing tile (Room.respawnRandomGhost), then
 // resets to 0 and starts filling again — a shared team effort rather
@@ -173,3 +170,30 @@ export const GHOST_RESPAWN_STILLNESS_MS = 3000;
 // START_COUNTDOWN_MS lifting (movement is impossible before that regardless
 // of player action) instead of an individual respawn.
 export const ROUND_START_STILLNESS_MS = 2000;
+
+// Base cooldown between a ghost's revive taps (see Room.reviveTile()).
+// Formerly lived in the now-removed bossConfig.js -- unrelated to the boss
+// mechanic itself, just co-located there historically.
+export const GHOST_REVIVE_COOLDOWN_MS = 1500;
+// Once only one teammate is still standing (Room.eliminatePlayer's
+// aliveCount === 1 check), every ghost's revive-tap cooldown shortens to
+// this instead of being waived entirely — a genuinely unlimited-rate tap
+// (every client-side click hitting the server with zero throttling) risks
+// real server load from a room full of people spam-tapping at once, so
+// this stays a real (if much shorter) rate limit rather than none at all.
+export const GHOST_REVIVE_LAST_STAND_COOLDOWN_MS = 400;
+
+// Bomb tiles: an environmental hazard layered on top of the normal tile
+// map (any mode, not gated to SURVIVAL/FINAL specifically) -- stepping on
+// one arms it, and after BOMB_FUSE_MS it blasts every tile within
+// BOMB_BLAST_RADIUS rings of it (see Room.explodeBombTile()) through the
+// same triggerTileCollapse() path an ordinary footstep already uses, so a
+// tile caught in the blast still gets its normal warning pulse before
+// actually collapsing, and anyone still standing there when it does is
+// eliminated exactly like any other collapse. Count scales with room size
+// (~1 per BOMB_TILES_PER_PLAYERS players) rather than a fixed number, the
+// same reasoning as the removed attack-tile mechanic's own scaling.
+export const BOMB_TILES_PER_PLAYERS = 6;
+export const BOMB_FUSE_MS = 2000;
+// 1 ring = a 3x3 area centered on the bomb tile.
+export const BOMB_BLAST_RADIUS = 1;

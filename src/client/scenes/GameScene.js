@@ -10,32 +10,19 @@ import {
   playRevive,
   playEliminate,
   playOtherEliminate,
-  playBossHit,
-  playBossDefeat,
-  playBossSkill,
   playBoundaryAlarm,
   playCountdownTick,
   playCountdownGo,
+  playBombArm,
+  playBombExplode,
 } from '../utilities/SoundFx';
-import { vibrateWarning, vibrateEliminate, vibrateBossHit, vibrateBossSkill, vibrateVictory, vibrateTap } from '../utilities/Haptics';
+import { vibrateWarning, vibrateEliminate, vibrateVictory, vibrateTap, vibrateBombExplode } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND } from '../../shared/roundConfig';
+import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND, BOMB_FUSE_MS } from '../../shared/roundConfig';
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
-
-// Flat-top hexagon outline, in local coordinates centered on (0,0) --
-// used by createAttackTileMarker() so an attack tile's glow matches the
-// board's own hex shape instead of a generic circle/square.
-function hexPoints(radius) {
-  const points = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i);
-    points.push(radius * Math.cos(angle), radius * Math.sin(angle));
-  }
-  return points;
-}
 
 // The joystick lives as plain DOM elements pinned to the real viewport
 // (position:fixed), not Phaser GameObjects -- see createJoystick()'s own
@@ -64,22 +51,18 @@ const JOYSTICK_SENSITIVITY = 0.5;
 // broadcast to. See emitPlayerMovement().
 const MOVEMENT_EMIT_MIN_INTERVAL_MS = 50;
 
-const BOSS_BAR_WIDTH = 220;
-
-// The generic mid-round announcement banner (round start, last stand,
-// boss defeated, ...) was pinned at WORLD_HEIGHT/2 - 60. That's harmless
-// on a tall canvas, but WORLD_HEIGHT is derived from MAP_COLS/MAP_ROWS
-// (mapConfig.js), which have been re-tuned for gameplay-tile-size reasons
-// down to as little as ~270px -- at that size WORLD_HEIGHT/2 - 60 (75)
-// lands almost directly on top of the boss HP panel (~y 38-82, BOSS mode
-// only), so the two visibly overlapped. A fixed offset from the top (like
+// The generic mid-round announcement banner (round start, last stand, ...)
+// was pinned at WORLD_HEIGHT/2 - 60. That's harmless on a tall canvas, but
+// WORLD_HEIGHT is derived from MAP_COLS/MAP_ROWS (mapConfig.js), which have
+// been re-tuned for gameplay-tile-size reasons down to as little as ~270px
+// -- at that size WORLD_HEIGHT/2 - 60 lands close enough to the top HUD
+// panels to visibly overlap them. A fixed offset from the top (like
 // LoginScene/ResultScene/LobbyScene's own fixes for the same root cause)
-// keeps the banner clear of that panel regardless of how short
-// WORLD_HEIGHT gets, at the cost of no longer being truly centered on a
-// much taller canvas.
+// keeps the banner clear of them regardless of how short WORLD_HEIGHT gets,
+// at the cost of no longer being truly centered on a much taller canvas.
 //
 // At that same ~270px WORLD_HEIGHT, the gap this sits in is only ~70px
-// tall (boss panel's bottom edge at ~82 down to the ghost hint panel's top
+// tall (top HUD panels' bottom edge down to the ghost hint panel's top
 // edge at ~152, see BANNER_BACKDROP_HEIGHT_PADDING below) -- a 2-line
 // banner (last stand, revive) at the original 24px padding needed ~86px
 // and visibly overlapped the ghost hint panel underneath it. 117 is the
@@ -92,23 +75,12 @@ const BANNER_Y = 117;
 // this collision and stays as it was.
 const BANNER_BACKDROP_HEIGHT_PADDING = 10;
 
-// Room.js's damageBoss() emits 'bossDamaged' (defeated: true) and then
-// calls finishRoom() on the very next line -- zero delay between them, so
-// 'roomResult' lands at this client within milliseconds of the celebration
-// even starting. Without holding the transition open, playBossDefeatCelebration()
-// (confetti lifespan up to 1000ms, camera flash/shake) and the "보스를
-// 물리쳤습니다!" banner were being torn down by scene.start() before a
-// player could see almost any of it — verified directly (replayed the
-// server's exact same-tick bossDamaged->roomResult sequence and found the
-// scene had already left GameScene, confetti already off, 150ms later).
-const BOSS_DEFEAT_CELEBRATION_MS = 1400;
-
-// Same zero-delay pattern on Room.js's eliminatePlayer() side: it emits
-// 'playerEliminated' and, if this was the last player standing, calls
-// finishRoom('all-eliminated') immediately after -- so a room-ending
-// elimination (own or, for a spectator watching, anyone else's) risks
-// the exact same cutoff as the boss-defeat case, just for the shorter
-// elimination effects (showFloatingLabel's pop-in + float-and-fade is
+// Room.js's eliminatePlayer() emits 'playerEliminated' and, if this was the
+// last player standing, calls finishRoom('all-eliminated') immediately
+// after with zero delay between them -- so a room-ending elimination (own
+// or, for a spectator watching, anyone else's) risks scene.start() tearing
+// this scene down before the elimination effects below finish playing
+// (showFloatingLabel's pop-in + float-and-fade is
 // 180+600=780ms; this covers that plus the 300ms camera flash the own-
 // elimination path also plays, with a little room to spare).
 const OWN_ELIMINATION_EFFECT_MS = 900;
@@ -142,7 +114,7 @@ const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치하세�
 // Throttles both the golden tap effect and the server emit while a ghost
 // keeps their finger down and drags across the screen (see
 // handleGhostScreenTap()) -- comfortably below GHOST_REVIVE_LAST_STAND_COOLDOWN_MS
-// (bossConfig.js, 400ms) so a last-stand ghost's faster server cooldown is
+// (roundConfig.js, 400ms) so a last-stand ghost's faster server cooldown is
 // never the bottleneck, while still nowhere near firing on every single
 // pointermove pixel.
 const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
@@ -187,11 +159,10 @@ export default class GameScene extends Phaser.Scene {
     this.fromDashboard = false;
     this.mode = 'SURVIVAL';
     this.gameMode = 'TEAM';
-    this.boss = null;
-    this.attackTileMarkers = [];
     this.score = 0;
+    this.bombTileMarkers = [];
+    this.bombFuseMarkers = {};
     this.lastLiveScoreSecond = null;
-    this.bossLowHpTween = null;
     this.lastTimerSecond = null;
     this.lastRemainingSeconds = null;
     this.currentSafeBounds = null;
@@ -262,10 +233,10 @@ export default class GameScene extends Phaser.Scene {
       on: false,
     });
 
-    // A heavier, wider burst than hitEmitter — used only for the boss's
-    // AoE tile-shatter skill (bossShatterSkill), which should read as a
-    // bigger, more menacing moment than an ordinary hit landing, not just
-    // the same spark burst scaled up.
+    // A heavier, wider burst than hitEmitter — for a multi-tile AoE moment
+    // (e.g. a bomb tile's blast radius) that should read as bigger and more
+    // menacing than an ordinary hit landing, not just the same spark burst
+    // scaled up.
     this.shatterEmitter = this.add.particles('particle_debris').setDepth(16).createEmitter({
       speed: { min: 140, max: 340 },
       angle: { min: 0, max: 360 },
@@ -280,7 +251,7 @@ export default class GameScene extends Phaser.Scene {
 
     // One-shot golden burst at wherever a ghost's finger actually is (see
     // handleGhostScreenTap) — same shape as hitEmitter, just gold instead of
-    // the boss-hit red, so a ghost's own tap reads as a distinct kind of
+    // hitEmitter's red, so a ghost's own tap reads as a distinct kind of
     // impact rather than reusing the "something got hurt" color.
     this.ghostTapEmitter = this.add.particles('particle_spark').setDepth(20).createEmitter({
       speed: { min: 60, max: 160 },
@@ -289,18 +260,6 @@ export default class GameScene extends Phaser.Scene {
       scale: { start: 1, end: 0 },
       alpha: { start: 1, end: 0 },
       tint: 0xffd700,
-      quantity: 0,
-      on: false,
-    });
-
-    this.confettiEmitter = this.add.particles('particle_spark').setDepth(31).createEmitter({
-      speed: { min: 120, max: 320 },
-      angle: { min: 0, max: 360 },
-      gravityY: 250,
-      lifespan: { min: 600, max: 1000 },
-      scale: { start: 1.1, end: 0.2 },
-      alpha: { start: 1, end: 0 },
-      tint: [0xff5555, 0xffd700, 0x55ff88, 0x55aaff, 0xff88ff],
       quantity: 0,
       on: false,
     });
@@ -343,18 +302,19 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, boss, attackTiles, score, isSpectator, fromDashboard, isAdmin,
+    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
     this.isSpectator = !!isSpectator;
     // Distinct from isSpectator now that a real player cut from the bracket
     // can also reach this scene as a spectator (see DashboardScene's own
-    // isAdmin comment) -- admin-only skill keys below must gate on this,
-    // not just "am I spectating."
+    // isAdmin comment) -- backToDashboardNode's visibility below must gate
+    // on this, not just "am I spectating."
     this.isAdmin = !!isAdmin;
     this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
+    this.initBombTiles(bombTiles);
 
     // A spectator's own socket id is never a key in `players` (the server
     // never seats an admin into a room — see startTournament/startStage in
@@ -386,19 +346,14 @@ export default class GameScene extends Phaser.Scene {
     this.roundDuration = roundDuration;
     this.mode = mode || 'SURVIVAL';
 
-    if (this.mode === 'BOSS' && boss) {
-      this.initBossHud(boss);
-      this.initAttackTiles(attackTiles);
-    } else {
-      // SURVIVAL rounds now score teammates by survival time too (see
-      // Room.js addSurvivalScore), so the readout needs to be visible from
-      // the start here as well, not just once a boss fight begins. Skipped
-      // for a spectating admin -- "내 점수"/"팀 점수" both read as if the
-      // viewer were a participant, which they never are (see applySnapshot's
-      // own comment above on why a spectator's id never ends up in `players`).
-      this.scorePanel.setVisible(!this.isSpectator);
-      this.scoreText.setVisible(!this.isSpectator);
-    }
+    // Every mode now scores teammates by survival time (see Room.js
+    // addSurvivalScore), so the readout is visible from the start
+    // regardless of mode. Skipped for a spectating admin -- "내 점수"/"팀
+    // 점수" both read as if the viewer were a participant, which they never
+    // are (see applySnapshot's own comment above on why a spectator's id
+    // never ends up in `players`).
+    this.scorePanel.setVisible(!this.isSpectator);
+    this.scoreText.setVisible(!this.isSpectator);
     this.updateScoreText(score || 0);
 
     this.cameras.main.fadeIn(400, 9, 11, 24);
@@ -409,9 +364,7 @@ export default class GameScene extends Phaser.Scene {
       if (this.isSpectator) {
         return;
       }
-      if (this.mode === 'BOSS') {
-        this.showBanner('보스전 시작!\n협력해서 보스를 물리치세요!', '#ff8888');
-      } else if (this.mode === 'FINAL') {
+      if (this.mode === 'FINAL') {
         this.showBanner('최종 개인전!\n마지막까지 살아남으세요!', '#ffcc55');
       } else {
         this.showBanner('생존하라!\n타일이 무너지기 전에 버티세요', '#88ccff');
@@ -554,29 +507,6 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 5,
       align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
-
-    // Stacked directly below the timer panel (which ends at y=38), not
-    // overlapping it — they used to share the same y=28 start while the
-    // timer ran to y=38, so during BOSS mode the two panels' semi-transparent
-    // fills and borders visibly bled into each other for that 10px band.
-    // Fixed size (never resized to fit text the way the other HUD panels
-    // are), so this draws once here rather than needing a redraw call
-    // anywhere else.
-    this.bossHpPanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
-    drawRoundedRect(this.bossHpPanel, WORLD_WIDTH / 2, 38 + 44 / 2, BOSS_BAR_WIDTH + 24, 44, { radius: 6 });
-
-    this.bossHpText = this.add.text(WORLD_WIDTH / 2, 50, '', {
-      fontFamily: FONT_BODY,
-      fontSize: '13px',
-      color: COLORS.textDanger,
-      stroke: TEXT_STROKE,
-      strokeThickness: 3,
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
-
-    this.bossHpBarBg = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 12, 0x222222)
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(29).setVisible(false);
-    this.bossHpBarFill = this.add.rectangle(WORLD_WIDTH / 2 - BOSS_BAR_WIDTH / 2, 70, BOSS_BAR_WIDTH, 8, 0xff4444)
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     this.scorePanel = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
 
@@ -779,111 +709,10 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  initBossHud(boss) {
-    this.boss = boss;
-    this.bossHpPanel.setVisible(true);
-    this.bossHpBarBg.setVisible(true);
-    this.bossHpBarFill.setVisible(true);
-    // Same "not a participant" reasoning as applySnapshot's SURVIVAL branch
-    // -- the boss HP bar is still meaningful to a spectator, an individual/
-    // team score readout isn't.
-    this.scorePanel.setVisible(!this.isSpectator);
-    this.scoreText.setVisible(!this.isSpectator);
-    this.updateBossHpBar();
-
-    const { x, y } = hexToPixel(boss.row, boss.col);
-
-    this.bossTileMarker = this.add.text(x, y, '☄️', { fontSize: '22px' }).setOrigin(0.5).setDepth(5).setScale(3).setAlpha(0);
-
-    this.bossTrailEmitter = this.add.particles('particle_spark').setDepth(4).createEmitter({
-      speed: { min: 10, max: 30 },
-      angle: { min: 0, max: 360 },
-      lifespan: { min: 400, max: 700 },
-      scale: { start: 0.6, end: 0 },
-      alpha: { start: 0.6, end: 0 },
-      tint: 0xffaa55,
-      frequency: 90,
-      quantity: 1,
-    });
-    this.bossTrailEmitter.startFollow(this.bossTileMarker);
-
-    this.cameras.main.shake(300, 0.007);
-    this.tweens.add({
-      targets: this.bossTileMarker,
-      scale: 1,
-      alpha: 1,
-      duration: 450,
-      ease: 'Back.easeOut',
-      onComplete: () => {
-        this.tweens.add({
-          targets: this.bossTileMarker,
-          scale: 1.15,
-          duration: 500,
-          yoyo: true,
-          repeat: -1,
-          ease: 'Sine.easeInOut',
-        });
-      },
-    });
-  }
-
-  // Attack tiles are separate targets from the boss's own tile (see
-  // Room.js's damageBossFromAttackTile) that also damage the boss and
-  // credit the shared score when stepped on. Rendered as a red hex glow
-  // (hexPoints() matches the board's own hex shape) rather than a new tile
-  // texture/state -- purely a visual overlay, movement/collision is
-  // unaffected by it either way.
-  initAttackTiles(attackTiles) {
-    this.attackTileMarkers.forEach((marker) => {
-      this.tweens.killTweensOf(marker);
-      marker.destroy();
-    });
-    this.attackTileMarkers = (attackTiles || []).map((tile) => this.createAttackTileMarker(tile));
-  }
-
-  createAttackTileMarker(tile) {
-    const { x, y } = hexToPixel(tile.row, tile.col);
-    const marker = this.add.polygon(x, y, hexPoints(HEX_WIDTH / 2 - 2), 0xff2a2a, 0.35)
-      .setStrokeStyle(2, 0xff3b3b, 0.95)
-      .setDepth(0);
-    this.tweens.add({
-      targets: marker,
-      alpha: 0.12,
-      duration: 550,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-    return marker;
-  }
-
-  updateBossHpBar() {
-    if (!this.boss) {
-      return;
-    }
-    const ratio = Math.max(0, this.boss.hp / this.boss.maxHp);
-    this.bossHpBarFill.setSize(BOSS_BAR_WIDTH * ratio, 8);
-    this.bossHpText.setText(`보스 체력 ${this.boss.hp}/${this.boss.maxHp}`);
-
-    if (ratio <= 0.25 && !this.bossLowHpTween) {
-      this.bossLowHpTween = this.tweens.add({
-        targets: this.bossHpBarFill,
-        alpha: 0.4,
-        duration: 260,
-        yoyo: true,
-        repeat: -1,
-      });
-    } else if (ratio > 0.25 && this.bossLowHpTween) {
-      this.bossLowHpTween.stop();
-      this.bossLowHpTween = null;
-      this.bossHpBarFill.setAlpha(1);
-    }
-  }
-
-  // A quick expanding-ring shockwave at (x, y) — used by both a boss hit
-  // and (bigger/slower) the boss's AoE shatter skill, so a landed attack
-  // reads as a real impact instead of just a particle puff with no sense
-  // of force radiating outward.
+  // A quick expanding-ring shockwave at (x, y) — used by a ghost's own tap
+  // effect (see handleGhostScreenTap) so a landed hit reads as a real
+  // impact instead of just a particle puff with no sense of force
+  // radiating outward.
   spawnImpactRing(x, y, { color = 0xff5555, startRadius = 10, endScale = 4, duration = 350, strokeWidth = 4 } = {}) {
     const ring = this.add.circle(x, y, startRadius, 0x000000, 0)
       .setStrokeStyle(strokeWidth, color, 0.9)
@@ -896,6 +725,36 @@ export default class GameScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => ring.destroy(),
     });
+  }
+
+  // Rebuilds every armed-but-not-yet-stepped-on bomb tile's marker from
+  // scratch on each bombTiles snapshot -- mirrors the removed boss mode's
+  // own attack-tile marker lifecycle (clear-then-recreate), which is simple
+  // and cheap enough at this scale (a handful of tiles) rather than diffing.
+  initBombTiles(bombTiles) {
+    (this.bombTileMarkers || []).forEach((marker) => marker.destroy());
+    this.bombTileMarkers = [];
+    (bombTiles || []).forEach((tile) => {
+      this.bombTileMarkers.push(this.createBombTileMarker(tile));
+    });
+  }
+
+  createBombTileMarker(tile) {
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    const marker = this.add.text(x, y, '💣', {
+      fontSize: '22px',
+    }).setOrigin(0.5).setDepth(12);
+
+    this.tweens.add({
+      targets: marker,
+      scale: 1.18,
+      duration: 480,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return marker;
   }
 
   showFloatingDamage(x, y, amount) {
@@ -946,12 +805,6 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  playBossDefeatCelebration(x, y) {
-    this.confettiEmitter.explode(40, x, y);
-    this.cameras.main.flash(400, 255, 240, 150);
-    this.cameras.main.shake(250, 0.006);
-  }
-
   updateScoreText(score) {
     const changed = score !== this.score;
     this.score = score;
@@ -977,8 +830,8 @@ export default class GameScene extends Phaser.Scene {
   // space (they follow a tile or avatar); the score readout is a fixed HUD
   // element (scrollFactor 0), so the popup needs to live in that same space.
   showScoreGainPopup(amount) {
-    // The score panel itself is hidden for a spectator (see applySnapshot/
-    // initBossHud) -- without this guard a TEAM-mode elimination would still
+    // The score panel itself is hidden for a spectator (see applySnapshot)
+    // -- without this guard a TEAM-mode elimination would still
     // pop a "+N" next to where that now-invisible panel would have been,
     // reading as a stray floating number with nothing anchoring it.
     if (!(amount > 0) || this.isSpectator) {
@@ -1260,103 +1113,53 @@ export default class GameScene extends Phaser.Scene {
         playBoundaryAlarm();
       },
 
-      bossDamaged: ({
-        hp, maxHp, row, col, defeated, score, bossMoved, attackTiles,
-      }) => {
-        if (!this.boss) {
-          return;
-        }
-        const damage = Math.max(0, this.boss.hp - hp);
-        this.boss.hp = hp;
-        this.boss.maxHp = maxHp;
-        this.updateBossHpBar();
-        this.updateScoreText(score);
-        if (attackTiles) {
-          this.initAttackTiles(attackTiles);
-        }
-
-        const { x: worldX, y: worldY } = hexToPixel(row, col);
-
-        if (damage > 0) {
-          // Bigger hits (an admin's hidden critical, or just a bigger
-          // BOSS_METEOR_DAMAGE down the line) now visibly hit harder
-          // instead of always producing the exact same-sized burst
-          // regardless of how much damage actually landed.
-          const isBigHit = damage >= 4;
-          const particleCount = Math.min(36, 10 + damage * 3);
-          const shakeIntensity = Math.min(0.02, 0.0035 + damage * 0.0015);
-
-          this.showFloatingDamage(worldX, worldY, damage);
-          this.hitEmitter.explode(particleCount, worldX, worldY);
-          this.spawnImpactRing(worldX, worldY, {
-            color: isBigHit ? 0xffcc33 : 0xff5555,
-            endScale: isBigHit ? 6 : 3.5,
-            duration: isBigHit ? 450 : 300,
-          });
-          this.cameras.main.shake(isBigHit ? 180 : 90, shakeIntensity);
-          if (this.bossTileMarker) {
-            this.bossTileMarker.setTint(0xffffff);
-            this.time.delayedCall(90, () => this.bossTileMarker && this.bossTileMarker.clearTint());
-          }
-          playBossHit();
-          vibrateBossHit();
-        }
-
-        if (defeated) {
-          if (this.bossTileMarker) {
-            this.bossTileMarker.setVisible(false);
-          }
-          if (this.bossTrailEmitter) {
-            this.bossTrailEmitter.stop();
-          }
-          this.playBossDefeatCelebration(worldX, worldY);
-          this.showBanner('보스를 물리쳤습니다! 🎉', '#55ff88');
-          playBossDefeat();
-          vibrateVictory();
-          this.roomTransitionHoldUntil = this.time.now + BOSS_DEFEAT_CELEBRATION_MS;
-        } else if (bossMoved) {
-          // An attack-tile hit doesn't move the boss -- its row/col here is
-          // the *attack* tile's own position (for the damage-number/impact
-          // effects above), not a new boss location, so skip repositioning
-          // the boss marker in that case.
-          this.boss.row = row;
-          this.boss.col = col;
-          if (this.bossTileMarker) {
-            this.bossTileMarker.setPosition(worldX, worldY);
-          }
-        }
+      // Room.armBombTile() sends this both when a bomb is stepped on (its
+      // spot leaves this.bombTiles) and again right after with a fresh
+      // replacement spot already appended -- always just a full re-render
+      // rather than trying to diff which single tile changed.
+      bombTilesUpdate: ({ bombTiles }) => {
+        this.initBombTiles(bombTiles);
       },
 
-      // The boss "slams the ground" and cracks several tiles at once (see
-      // Room.js's triggerBossShatterSkill()) — a heavier, longer shake, a
-      // dark flash, a wide shockwave ring + debris burst radiating from
-      // the boss's current tile, a brief camera zoom punch, and a banner
-      // naming the moment, so it reads as a genuine set-piece rather than
-      // a slightly-longer version of an ordinary hit.
-      bossShatterSkill: () => {
-        const origin = this.boss ? hexToPixel(this.boss.row, this.boss.col) : { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
-
-        this.cameras.main.shake(450, 0.014);
-        this.cameras.main.flash(220, 120, 10, 10);
-        this.cameras.main.zoomTo(1.06, 140, 'Sine.easeOut', false, (camera, progress) => {
-          if (progress === 1) {
-            this.cameras.main.zoomTo(1, 260, 'Sine.easeIn');
-          }
+      // The tile that was just armed already left the bombTiles list (see
+      // bombTilesUpdate above), so its calm pulsing 💣 marker is already
+      // gone by the time this fires -- this instead plants an urgent
+      // fuse-countdown marker right on top of it for the BOMB_FUSE_MS
+      // window until bombExploded below cleans it up.
+      bombArmed: ({ row, col }) => {
+        const key = `${row}_${col}`;
+        if (this.bombFuseMarkers[key]) {
+          this.bombFuseMarkers[key].destroy();
+        }
+        const { x, y } = hexToPixel(row, col);
+        const marker = this.add.text(x, y, '💥', {
+          fontSize: '26px',
+        }).setOrigin(0.5).setDepth(13);
+        this.tweens.add({
+          targets: marker,
+          scale: 1.4,
+          duration: BOMB_FUSE_MS,
+          ease: 'Cubic.easeIn',
         });
+        this.bombFuseMarkers[key] = marker;
+        playBombArm();
+        vibrateTap();
+      },
 
-        this.spawnImpactRing(origin.x, origin.y, {
-          color: 0xff6633, startRadius: 16, endScale: 9, duration: 550, strokeWidth: 6,
-        });
-        this.time.delayedCall(90, () => {
-          this.spawnImpactRing(origin.x, origin.y, {
-            color: 0xffaa33, startRadius: 10, endScale: 6, duration: 450, strokeWidth: 4,
-          });
-        });
-        this.shatterEmitter.explode(30, origin.x, origin.y);
-
-        this.showBanner('⚠️ 보스의 대지 붕괴!', '#ff6633');
-        playBossSkill();
-        vibrateBossSkill();
+      bombExploded: ({ row, col }) => {
+        const key = `${row}_${col}`;
+        if (this.bombFuseMarkers[key]) {
+          this.bombFuseMarkers[key].destroy();
+          delete this.bombFuseMarkers[key];
+        }
+        const { x, y } = hexToPixel(row, col);
+        this.cameras.main.shake(300, 0.01);
+        this.cameras.main.flash(200, 255, 140, 40);
+        this.spawnImpactRing(x, y, { color: 0xffaa33, endScale: 5, duration: 400 });
+        this.spawnImpactRing(x, y, { color: 0xff5555, startRadius: 6, endScale: 7, duration: 550 });
+        this.shatterEmitter.explode(24, x, y);
+        playBombExplode();
+        vibrateBombExplode();
       },
 
       playerMoved: (playerInfo) => {
@@ -1398,13 +1201,13 @@ export default class GameScene extends Phaser.Scene {
         // the own- and other-player paths below are covered uniformly.
         this.roomTransitionHoldUntil = this.time.now + OWN_ELIMINATION_EFFECT_MS;
 
-        // SURVIVAL rounds score teammates by how long each of them lasted
-        // (see Room.js addSurvivalScore), so every elimination in the room —
-        // not just the local player's own — can bump the shared team score;
-        // BOSS mode eliminations don't change score, so the delta is 0 there
-        // and the popup is skipped. 개인전 has no shared score at all —
-        // only this player's own elimination should touch the HUD, using
-        // their individual playerScore rather than the room-wide total.
+        // TEAM rounds score teammates by how long each of them lasted (see
+        // Room.js addSurvivalScore), so every elimination in the room — not
+        // just the local player's own — can bump the shared team score
+        // (showScoreGainPopup itself no-ops on a zero/negative delta). 개인전
+        // has no shared score at all — only this player's own elimination
+        // should touch the HUD, using their individual playerScore rather
+        // than the room-wide total.
         if (this.gameMode === 'SOLO') {
           if (playerId === this.socket.id && Number.isFinite(playerScore)) {
             this.updateScoreText(playerScore);
@@ -1468,15 +1271,14 @@ export default class GameScene extends Phaser.Scene {
           }
         };
 
-        // The server emits 'bossDamaged'(defeated)/'playerEliminated' and
-        // this 'roomResult' essentially back-to-back with no delay -- if a
-        // boss-defeat celebration or this player's own elimination effect
-        // just started, hold the actual scene transition open long enough
-        // for it to be seen instead of tearing GameScene down (confetti,
-        // camera flash, floating labels and all) within milliseconds of it
-        // starting. Any other finish reason has no pending effect to wait
-        // out, so this resolves to 0 and proceeds immediately exactly as
-        // before.
+        // The server emits 'playerEliminated' and this 'roomResult'
+        // essentially back-to-back with no delay -- if this player's own (or,
+        // for a spectator, anyone's) elimination effect just started, hold
+        // the actual scene transition open long enough for it to be seen
+        // instead of tearing GameScene down (camera flash, floating labels
+        // and all) within milliseconds of it starting. Any other finish
+        // reason has no pending effect to wait out, so this resolves to 0
+        // and proceeds immediately exactly as before.
         const holdRemaining = this.roomTransitionHoldUntil
           ? Math.max(0, this.roomTransitionHoldUntil - this.time.now)
           : 0;
@@ -1492,8 +1294,7 @@ export default class GameScene extends Phaser.Scene {
       // 'gameStarting' listener) by the time the next stage's rooms exist,
       // since their own roomResult above just sent them there. A
       // spectator instead stays parked in GameScene between rounds, so
-      // this is how they follow the bracket into round 2 (BOSS mode) and
-      // beyond.
+      // this is how they follow the bracket into round 2 and beyond.
       gameStarting: (payload) => {
         if (this.isSpectator) {
           this.scene.start('GameScene', payload);
@@ -1560,23 +1361,10 @@ export default class GameScene extends Phaser.Scene {
       this.socket.on(event, handler);
     });
 
-    // Admin-only "balance lever", same C/S keys as DashboardScene — this
-    // covers watching a single BOSS room in full (stage 3+, or any
-    // spectated room) where there's no multi-room grid to click a target
-    // on; the room being spectated *is* the implicit target. No-ops for a
-    // regular player or outside BOSS mode, checked at trigger time so this
-    // can just be registered unconditionally here.
-    this.handleKeyC = () => this.triggerAdminSkill('adminCritical');
-    this.handleKeyS = () => this.triggerAdminSkill('adminShatterTiles');
-    this.input.keyboard.on('keydown-C', this.handleKeyC);
-    this.input.keyboard.on('keydown-S', this.handleKeyS);
-
     this.events.once('shutdown', () => {
       Object.entries(this.handlers).forEach(([event, handler]) => {
         this.socket.off(event, handler);
       });
-      this.input.keyboard.off('keydown-C', this.handleKeyC);
-      this.input.keyboard.off('keydown-S', this.handleKeyS);
       // The joystick's own window-level pointer listeners and DOM elements
       // (createJoystick) live outside Phaser's event system entirely, so
       // nothing else would ever remove them -- without this a stage
@@ -1595,18 +1383,6 @@ export default class GameScene extends Phaser.Scene {
       // cursor everywhere.
       this.input.setDefaultCursor('default');
     });
-  }
-
-  triggerAdminSkill(eventName) {
-    // mode !== 'BOSS' already rules this out for a non-admin spectator in
-    // practice (the only room type they ever reach is stage 3's FINAL,
-    // which has no boss to apply this to at all) -- isAdmin is still
-    // checked explicitly as defense in depth, matching server.js's own
-    // independent adminSockets re-check on these events.
-    if (!this.isSpectator || !this.isAdmin || this.mode !== 'BOSS' || !this.roomId) {
-      return;
-    }
-    this.socket.emit(eventName, { roomId: this.roomId });
   }
 
   handleOwnElimination() {
@@ -1745,8 +1521,9 @@ export default class GameScene extends Phaser.Scene {
     vibrateVictory();
     this.updatePlayerCount();
 
-    // SURVIVAL only -- BOSS has no shrinking boundary (isSafeTile covers
-    // the whole map there), so this instruction wouldn't mean anything.
+    // SURVIVAL only -- this code path is never reached in FINAL mode anyway
+    // (always SOLO, which has no ghost revival at all, see reviveTile()'s
+    // own SOLO guard), so no other mode needs this instruction.
     // Room.respawnGhost() always drops a revived player on a tile that's
     // safe *at that instant*, but the boundary keeps shrinking afterward --
     // finishRoom() only counts someone as advancing if they're both alive

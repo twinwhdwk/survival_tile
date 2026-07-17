@@ -90,8 +90,8 @@ function noiseBurst(duration, { volume = 0.2, delay = 0, filterFreq = 1200 } = {
 // bots stepping at once) would otherwise spawn one oscillator/buffer graph
 // per tile within the same tick — throttling the frequent, low-stakes
 // effects to one play per short window keeps that from piling up into
-// stutter, while rarer/important effects (elimination, boss hits, victory)
-// stay unthrottled since they're never spammy on their own.
+// stutter, while rarer/important effects (elimination, victory) stay
+// unthrottled since they're never spammy on their own.
 function throttle(fn, minIntervalMs) {
   let last = 0;
   return (...args) => {
@@ -135,18 +135,24 @@ export function playOtherEliminate() {
   tone(220, 0.15, { type: 'triangle', volume: 0.07, endFreq: 120 });
 }
 
-export function playBossHit() {
-  noiseBurst(0.1, { volume: 0.16, filterFreq: 2200 });
-  tone(180, 0.1, { type: 'square', volume: 0.13 });
-}
-
-export function playBossDefeat() {
-  [523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.22, { type: 'sine', volume: 0.16, delay: i * 0.09 }));
-}
-
 export function playBoundaryAlarm() {
   tone(880, 0.14, { type: 'sawtooth', volume: 0.09, delay: 0 });
   tone(880, 0.14, { type: 'sawtooth', volume: 0.09, delay: 0.18 });
+}
+
+// A short, sharp beep the instant a bomb tile is stepped on -- distinct
+// from the deeper playBombExplode() rumble below, so arming and actually
+// detonating read as two separate moments rather than one long effect.
+export function playBombArm() {
+  tone(660, 0.09, { type: 'square', volume: 0.12 });
+}
+
+// A deep rumble/boom for a bomb tile's blast -- a low descending tone
+// under a heavy low-passed noise burst, meant to read as a real explosion
+// rather than the light "tink" of a regular tile collapse.
+export function playBombExplode() {
+  noiseBurst(0.4, { volume: 0.28, filterFreq: 350 });
+  tone(110, 0.5, { type: 'sawtooth', volume: 0.2, endFreq: 35 });
 }
 
 export function playCountdownTick(urgent) {
@@ -156,14 +162,6 @@ export function playCountdownTick(urgent) {
 export function playCountdownGo() {
   tone(523, 0.1, { type: 'sine', volume: 0.18 });
   tone(784, 0.22, { type: 'sine', volume: 0.18, delay: 0.09 });
-}
-
-// A deep rumble/boom for the boss's tile-shatter skill — a low descending
-// tone under a heavy low-passed noise burst, meant to read as a menacing
-// ground-slam rather than the light "tink" of a regular tile collapse.
-export function playBossSkill() {
-  noiseBurst(0.4, { volume: 0.28, filterFreq: 350 });
-  tone(110, 0.5, { type: 'sawtooth', volume: 0.2, endFreq: 35 });
 }
 
 export function playVictory() {

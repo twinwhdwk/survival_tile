@@ -20,17 +20,13 @@ export function vibrateEliminate() {
   vibrate([40, 60, 80]);
 }
 
-export function vibrateBossHit() {
-  vibrate(25);
-}
-
 export function vibrateVictory() {
   vibrate([60, 40, 60, 40, 120]);
 }
 
-// A building rumble rather than one flat buzz, for the boss's tile-shatter
-// skill — meant to land as "the boss just did something big," distinct
-// from the single short tap of vibrateBossHit().
-export function vibrateBossSkill() {
+// A building rumble rather than one flat buzz, for a bomb tile's blast --
+// meant to land as "something big just happened," distinct from the single
+// short tap a bomb tile's own arming gets.
+export function vibrateBombExplode() {
   vibrate([50, 30, 50, 30, 200]);
 }
