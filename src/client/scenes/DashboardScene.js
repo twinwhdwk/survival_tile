@@ -371,7 +371,7 @@ export default class DashboardScene extends Phaser.Scene {
       fontSize: '15px',
       color: COLORS.textGold,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0, 0.5);
     const aliveText = this.add.text(cardW / 2 - 10, -cardH / 2 + 12, '', {
       fontFamily: FONT_BODY,
