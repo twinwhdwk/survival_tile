@@ -1611,6 +1611,29 @@ export default class GameScene extends Phaser.Scene {
     playRevive();
     vibrateVictory();
     this.updatePlayerCount();
+
+    // SURVIVAL only -- BOSS has no shrinking boundary (isSafeTile covers
+    // the whole map there), so this instruction wouldn't mean anything.
+    // Room.respawnGhost() always drops a revived player on a tile that's
+    // safe *at that instant*, but the boundary keeps shrinking afterward --
+    // finishRoom() only counts someone as advancing if they're both alive
+    // AND inside the safe zone at the exact moment the round timer expires,
+    // with no grace period for a just-revived player. Without a clear
+    // prompt, a late revival easily reads as silently pointless: the player
+    // never dies again, sees no elimination event, and simply doesn't
+    // advance -- this is purely local/client-side (not shown to the rest of
+    // the room, unlike the shared "부활!" banner above), personal to
+    // whoever actually needs to move. Delayed so it doesn't immediately
+    // clobber that shared banner (showBanner() reuses one text object) --
+    // this way both are actually readable in sequence instead of the first
+    // getting cut off mid-display.
+    if (this.mode === 'SURVIVAL') {
+      this.time.delayedCall(2000, () => {
+        if (!this.eliminated) {
+          this.showBanner('안전지대 안으로 돌아가세요!', '#ff8888');
+        }
+      });
+    }
   }
 
   startGhostAura(x, y) {
