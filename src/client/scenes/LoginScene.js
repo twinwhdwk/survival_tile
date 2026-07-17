@@ -76,8 +76,12 @@ export default class LoginScene extends Phaser.Scene {
     // A single title with a drop shadow for the "burning" mood, instead of a
     // second overlapping emoji text whose additive blend + randomized scale
     // drifted out of alignment with the main title and read as a stray
-    // duplicate/shadow rather than a soft glow.
-    const title = this.add.text(WORLD_WIDTH / 2, 96, '🔥 타일 서바이벌 🔥', {
+    // duplicate/shadow rather than a soft glow. One leading 🔥 only (not
+    // bookended) -- matches the single-prefix convention every other
+    // screen's own title already uses (LobbyScene's "🔥 대기실",
+    // DashboardScene's "🔥 N라운드..."); the doubled emoji here was the one
+    // title in the app not following it.
+    const title = this.add.text(WORLD_WIDTH / 2, 96, '🔥 타일 서바이벌', {
       fontFamily: FONT_DISPLAY,
       fontSize: '28px',
       color: '#ffffff',
@@ -87,7 +91,7 @@ export default class LoginScene extends Phaser.Scene {
     // Rounded rather than a flat square-cornered rectangle — a hard box
     // read as an unstyled debug panel against the rounded DOM
     // inputs/buttons right below it. getBounds() (not .width, which
-    // undercounts the two 🔥 emoji glyphs) sizes it to actually wrap the
+    // undercounts the 🔥 emoji glyph) sizes it to actually wrap the
     // text. Measured here at the text's default scale=1 — doing this after
     // the entrance tween's setScale(0.6) below would size the panel for
     // the shrunk starting pose instead of the settled title.

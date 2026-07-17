@@ -40,7 +40,7 @@ export const FONT_BODY_FAMILY = 'Gothic A1';
 export const EVENT_BANNER_TEXT = 'FIL2 소확행 EVENT';
 export const FONT_DISPLAY_SAMPLE_TEXT = [
   EVENT_BANNER_TEXT,
-  '🔥 타일 서바이벌 🔥',
+  '🔥 타일 서바이벌',
   '🔥 대기실',
   '라운드 조별 현황',
   '시작!',

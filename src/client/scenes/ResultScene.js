@@ -267,7 +267,7 @@ export default class ResultScene extends Phaser.Scene {
 
     const buttonHtml = `
       <button id="return-button" type="button"
-        style="padding:7px 18px;font-size:13px;border-radius:8px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
+        style="padding:9px 20px;font-size:15px;border-radius:8px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
         대기실로 돌아가기
       </button>
     `;
