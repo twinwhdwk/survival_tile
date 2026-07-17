@@ -260,19 +260,25 @@ function broadcastLobby() {
   // of n people since every single join/leave/bot-add re-broadcasts to
   // everyone. io.emit() lets socket.io serialize the shared payload once
   // and fan it out natively; the (typically tiny, often just 1) set of
-  // admin sockets gets a small personalized follow-up confirming
-  // isAdmin: true, which is the only place that field is ever actually
-  // read client-side (LobbyScene.js sets it once at scene creation from
-  // whichever lobbyUpdate triggered the transition -- never re-read from
-  // a later update), so a non-admin momentarily "confirmed" isAdmin:false
-  // by the broadcast is not a behavior change.
-  io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
+  // admin sockets gets a small personalized emit confirming isAdmin: true.
+  //
+  // Admins are sent *before* the general broadcast, not after -- a newly-
+  // joining LoginScene listens with socket.once('lobbyUpdate', ...), so it
+  // only ever acts on whichever of these two messages arrives first. A
+  // brand-new admin's own join calls this function with them already in
+  // adminSockets; sending their personalized isAdmin: true copy second
+  // would have let the general broadcast's isAdmin: false win that race
+  // instead, transitioning them into LobbyScene as a regular player.
+  // LobbyScene itself never re-reads isAdmin from a later broadcast (only
+  // at scene creation), so the general broadcast reaching admins a moment
+  // after their real one is a harmless no-op for them.
   adminSockets.forEach((socketId) => {
     const socket = io.sockets.sockets[socketId];
     if (socket) {
       socket.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: true });
     }
   });
+  io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
 }
 
 // Round 1: aim for every group to land on exactly MAX_PLAYERS (4) or
