@@ -12,7 +12,9 @@ import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { NICKNAME_MAX_LENGTH } from '../../shared/roomConfig';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
+import {
+  FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT, BUTTON,
+} from '../theme/Theme';
 import { fitTitlePanel } from '../utilities/RoundedPanel';
 
 export default class LoginScene extends Phaser.Scene {
@@ -111,7 +113,7 @@ export default class LoginScene extends Phaser.Scene {
         <input id="nickname-input" type="text" maxlength="${NICKNAME_MAX_LENGTH}" placeholder="닉네임 (최대 ${NICKNAME_MAX_LENGTH}자)" autocomplete="off" enterkeyhint="go"
           style="width:180px;padding:8px;font-size:15px;text-align:center;border-radius:8px;border:2px solid #8a6a45;background:#1c130dcc;color:#ffffff;outline:none;font-family:${FONT_BODY};" />
         <button id="join-button" type="button"
-          style="width:180px;padding:9px;font-size:15px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+          style="width:180px;padding:9px;font-size:15px;border-radius:8px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
           참가하기
         </button>
       </div>
@@ -133,8 +135,8 @@ export default class LoginScene extends Phaser.Scene {
 
     this.input_.style.transition = 'border-color 0.2s ease, box-shadow 0.2s ease';
     this.input_.addEventListener('focus', () => {
-      this.input_.style.borderColor = '#55ffaa';
-      this.input_.style.boxShadow = '0 0 12px rgba(85,255,170,0.55)';
+      this.input_.style.borderColor = '#ffc978';
+      this.input_.style.boxShadow = '0 0 12px rgba(255,169,77,0.5)';
     });
     this.input_.addEventListener('blur', () => {
       this.input_.style.borderColor = '#8a6a45';

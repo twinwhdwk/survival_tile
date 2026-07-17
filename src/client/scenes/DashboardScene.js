@@ -5,7 +5,9 @@ import { generateBackgroundTexture, generateParticleTextures } from '../utilitie
 import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import {
+  FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, BUTTON,
+} from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { playClick } from '../utilities/SoundFx';
 import { vibrateTap } from '../utilities/Haptics';
@@ -117,7 +119,7 @@ export default class DashboardScene extends Phaser.Scene {
     // to see.
     const resetButtonHtml = `
       <button id="dashboard-reset-server-button" type="button"
-        style="width:70px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid #7f1d1d;background:#1c0d0dcc;color:#d99;cursor:pointer;font-family:${FONT_BODY};">
+        style="width:70px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid ${BUTTON.dangerBorder};background:#1c0d0dcc;color:${BUTTON.dangerText};cursor:pointer;font-family:${FONT_BODY};">
         서버 초기화
       </button>
     `;

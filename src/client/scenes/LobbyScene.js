@@ -8,7 +8,9 @@ import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { ANIMAL_COUNT } from '../../shared/animals';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { PUBLIC_SITE_URL } from '../../shared/publicUrl';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT } from '../theme/Theme';
+import {
+  FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, EVENT_BANNER_TEXT, BUTTON,
+} from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 // Shrunk from an original 90 (with icon/text layout tightened to match in
@@ -147,11 +149,11 @@ export default class LobbyScene extends Phaser.Scene {
       <div style="display:flex;justify-content:space-between;align-items:center;width:${WORLD_WIDTH - 32}px;">
         <div style="display:flex;gap:8px;">
           <button id="reset-server-button" type="button"
-            style="padding:6px 10px;font-size:10px;border-radius:7px;border:none;background:#7f1d1d;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            style="padding:6px 10px;font-size:10px;border-radius:7px;border:1px solid ${BUTTON.dangerBorder};background:${BUTTON.dangerBg};color:${BUTTON.dangerText};cursor:pointer;font-family:${FONT_BODY};">
             서버 초기화
           </button>
           <button id="clear-lobby-button" type="button"
-            style="padding:6px 10px;font-size:10px;border-radius:7px;border:none;background:#4b5563;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            style="padding:6px 10px;font-size:10px;border-radius:7px;border:1px solid ${BUTTON.secondaryBorder};background:${BUTTON.secondaryBg};color:${BUTTON.secondaryText};cursor:pointer;font-family:${FONT_BODY};">
             초기화
           </button>
         </div>
@@ -167,11 +169,11 @@ export default class LobbyScene extends Phaser.Scene {
         </div>
         <div style="display:flex;gap:8px;">
           <button id="add-bot-button" type="button"
-            style="padding:6px 12px;font-size:11px;border-radius:7px;border:none;background:#6366f1;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            style="padding:6px 12px;font-size:11px;border-radius:7px;border:1px solid ${BUTTON.secondaryBorder};background:${BUTTON.secondaryBg};color:${BUTTON.secondaryText};cursor:pointer;font-family:${FONT_BODY};">
             봇 추가
           </button>
           <button id="start-button" type="button"
-            style="padding:6px 16px;font-size:12px;border-radius:7px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+            style="padding:6px 16px;font-size:12px;border-radius:7px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
             게임 시작
           </button>
         </div>
@@ -184,8 +186,8 @@ export default class LobbyScene extends Phaser.Scene {
     applyButtonFx(this.modeSoloButton);
 
     const refreshModeButtons = () => {
-      const activeStyle = `background:#f59e0b;color:#1c130d;border:1px solid #f59e0b;`;
-      const inactiveStyle = `background:#1c130dcc;color:#ffd9a0;border:1px solid #ffa94d55;`;
+      const activeStyle = `background:${BUTTON.primaryBg};color:${BUTTON.primaryText};border:1px solid ${BUTTON.primaryBg};`;
+      const inactiveStyle = `background:${BUTTON.secondaryBg}cc;color:${BUTTON.secondaryText};border:1px solid ${BUTTON.secondaryBorder};`;
       this.modeTeamButton.style.cssText += this.selectedGameMode === 'TEAM' ? activeStyle : inactiveStyle;
       this.modeSoloButton.style.cssText += this.selectedGameMode === 'SOLO' ? activeStyle : inactiveStyle;
     };
