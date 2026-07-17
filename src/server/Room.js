@@ -9,6 +9,7 @@ import { hexToPixel, pixelToHex, hexNeighbors, DIRECTION_COUNT } from '../shared
 import {
   SURVIVAL_ROUND_DURATION_MS,
   BOSS_ROUND_DURATION_MS,
+  FINAL_ROUND_DURATION_MS,
   START_COUNTDOWN_MS,
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
@@ -171,7 +172,11 @@ export default class Room {
     this.gameMode = gameMode || 'TEAM';
     this.onFinished = onFinished;
     this.score = startingScore || 0;
-    this.roundDurationMs = this.mode === 'BOSS' ? BOSS_ROUND_DURATION_MS : SURVIVAL_ROUND_DURATION_MS;
+    this.roundDurationMs = (() => {
+      if (this.mode === 'BOSS') return BOSS_ROUND_DURATION_MS;
+      if (this.mode === 'FINAL') return FINAL_ROUND_DURATION_MS;
+      return SURVIVAL_ROUND_DURATION_MS;
+    })();
 
     this.players = {};
     this.tileMap = createSolidTileMap();
@@ -570,7 +575,12 @@ export default class Room {
       return;
     }
     player.eliminated = true;
-    if (this.mode === 'SURVIVAL') {
+    // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
+    // its own eventual ranking is by elimination order, not this score
+    // (see the FINAL branch of handleRoomFinished's SOLO case), but the
+    // score is still shown live and carries the same "how long did you
+    // last" meaning either way.
+    if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
       this.addSurvivalScore(player, Date.now());
     }
     this.emit('playerEliminated', { playerId: id, score: this.score, playerScore: player.score || 0 });
@@ -1570,7 +1580,7 @@ export default class Room {
     // Whoever wasn't already eliminated made it all the way to this moment —
     // credit them for the full time elapsed, same as an eliminated
     // teammate's addSurvivalScore() call got their own cutoff timestamp.
-    if (this.mode === 'SURVIVAL') {
+    if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
       const endTime = Date.now();
       Object.values(this.players).forEach((player) => {
         if (!player.eliminated) {
@@ -1599,16 +1609,30 @@ export default class Room {
 
     const totalHumans = Object.keys(this.players).length;
 
-    // `score` here is each player's own individual total (not this.score,
-    // the room's shared pool) -- carried forward so a stage-2+ room's
+    // `score` here is each player's own individual carried total -- not
+    // just this.score, the room's shared pool -- so a stage-2+ room's
     // constructor can seed it back into player.score, giving every survivor
     // an additive running total across stages instead of resetting at each
-    // new room. See formStage2Groups() in server.js, the first consumer.
+    // new room. See formStage2Groups()/formStage3Group() in server.js.
+    //
+    // SURVIVAL: player.score already IS each player's own individually-
+    // tracked total (addSurvivalScore credits it alongside this.score
+    // identically every time), so carrying it alone is correct -- adding
+    // this.score again here would double count the same credit.
+    //
+    // BOSS: damageBoss()/damageBossFromAttackTile() only ever touch the
+    // shared this.score, never an individual player.score, so a survivor's
+    // stage-1 total would otherwise carry through stage 2 completely
+    // unchanged by anything that happened in the boss fight. Folding
+    // this.score in here, once, identically for every survivor of *this*
+    // room, credits the team effort onto each of their individual totals —
+    // matching "1라운드 점수 위에 2라운드로 배정된 사람들의 점수를 또
+    // 더하는 형태" (stage-1 score, plus whatever the stage-2 group earned).
     const advancing = survivorIds.map((id) => ({
       socketId: id,
       nickname: this.players[id].nickname,
       animalIndex: this.players[id].animalIndex,
-      score: this.players[id].score || 0,
+      score: (this.players[id].score || 0) + (this.mode === 'BOSS' ? this.score : 0),
     }));
 
     // onFinished may end the whole tournament right here (this was the last

@@ -364,6 +364,8 @@ export default class GameScene extends Phaser.Scene {
       }
       if (this.mode === 'BOSS') {
         this.showBanner('보스전 시작!\n협력해서 보스를 물리치세요!', '#ff8888');
+      } else if (this.mode === 'FINAL') {
+        this.showBanner('최종 개인전!\n마지막까지 살아남으세요!', '#ffcc55');
       } else {
         this.showBanner('생존하라!\n타일이 무너지기 전에 버티세요', '#88ccff');
       }

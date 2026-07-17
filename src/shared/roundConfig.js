@@ -4,6 +4,21 @@
 // gradually through repeated hits rather than just showing up alive.
 export const SURVIVAL_ROUND_DURATION_MS = 120000; // 2 minutes for stage 1
 export const BOSS_ROUND_DURATION_MS = 180000; // 3 minutes per boss room
+// Stage 3's solo final: rapid shrink to a fixed 6x6 window, then that
+// window roams the map (see Room.js's FINAL-mode boundary logic) until
+// time runs out or one player is left. Same length as stage 1's SURVIVAL
+// round -- long enough for several roam steps (FINAL_ROAM_STEP_MS below)
+// after the shrink phase, without dragging the finale out past what the
+// rest of the bracket's pacing already establishes.
+export const FINAL_ROUND_DURATION_MS = 120000;
+// Once the rapid shrink phase reaches the fixed 6x6 window, it moves one
+// cell at a time on this interval instead of shrinking further -- the
+// operator's own example was "15초마다 1칸씩" (one cell every 15s).
+export const FINAL_ROAM_STEP_MS = 15000;
+// Fixed size of the roaming window once the rapid-shrink phase ends. 6, not
+// 8 -- the map is only MAP_ROWS=7 tall, so an 8-tall window couldn't move
+// vertically at all; 6 leaves exactly 1 row of slack to roam within.
+export const FINAL_ROAM_WINDOW_SIZE = 6;
 export const START_COUNTDOWN_MS = 10000; // nobody (bots included) can move until this long into the round, so the client's pre-game countdown is a real freeze, not just cosmetic
 export const BOUNDARY_SHRINK_GRACE_MS = 20000; // the boundary doesn't start closing in until this long into the round
 export const BOUNDARY_SHRINK_INTERVAL_MS = 15000; // the boundary insets by one ring (all 4 sides at once) every 15s after the grace period

@@ -229,12 +229,12 @@ const adminSockets = new Set();
 let sessionOpened = false;
 
 // Bracket state: each stage is an array of "lineages" ({ members, score }).
-// Stage 1 lineages are the initial random groups; each later stage merges
-// adjacent lineages (1&2, 3&4, ...) into one team that keeps playing
-// together, carrying its combined score forward. An odd lineage out just
-// carries forward alone. A lineage that loses every member is locked into
-// the final ranking immediately and does not pass its score on.
-let currentLineages = [];
+// A fixed 3-stage shape: stage 1's lineages are STAGE_1_GROUP_COUNT random
+// groups; stage 2's are STAGE_2_GROUP_COUNT groups formed by pooling and
+// reshuffling every stage-1 survivor (formStage2Groups); stage 3 is a
+// single pooled SOLO room (formStage3Group) that ends the tournament
+// itself. A lineage that loses every member before its stage transition is
+// locked into the final ranking immediately and does not pass its score on.
 let currentStage = 0;
 let stagePending = 0;
 let stageResults = [];
@@ -330,23 +330,6 @@ function chunkForInitialRound(members) {
   return groups;
 }
 
-function mergeAdjacentLineages(results) {
-  const merged = [];
-  for (let i = 0; i < results.length; i += 2) {
-    const a = results[i] || { members: [], score: 0 };
-    const b = i + 1 < results.length ? (results[i + 1] || { members: [], score: 0 }) : { members: [], score: 0 };
-    const members = [...a.members, ...b.members];
-    if (members.length === 0) {
-      continue;
-    }
-    // An empty side was already eliminated and locked into the rankings —
-    // its score doesn't carry over to whichever side is still playing.
-    const score = (a.members.length > 0 ? a.score : 0) + (b.members.length > 0 ? b.score : 0);
-    merged.push({ members, score });
-  }
-  return merged;
-}
-
 // Stage 2 pools every stage-1 survivor across all STAGE_1_GROUP_COUNT rooms
 // (rather than mergeAdjacentLineages' pairwise merge) and randomly
 // redistributes them into exactly STAGE_2_GROUP_COUNT new groups, evenly
@@ -406,6 +389,30 @@ function formStage2Groups(results) {
   return groups;
 }
 
+// Stage 3 pools every stage-2 survivor across all STAGE_2_GROUP_COUNT rooms
+// into exactly ONE final room, with no size cap -- a fixed decision (not a
+// tunable constant), since the whole point of the final stage is one
+// decisive free-for-all decider, not several parallel "finals" that would
+// each crown their own separate winner. Each member's own `score` already
+// carries their full running total (their individual stage-1 score plus
+// their stage-2 room's shared team credit -- see finishRoom()'s advancing
+// list in Room.js), which becomes their seed score for stage 3's own
+// SURVIVAL-style live scoring (final ranking itself is by elimination
+// order, not score -- see the FINAL-mode ranking in handleRoomFinished).
+function formStage3Group(results) {
+  const pool = [];
+  results.forEach((lineage) => {
+    if (!lineage || lineage.members.length === 0) {
+      return;
+    }
+    lineage.members.forEach((m) => pool.push(m));
+  });
+  if (pool.length === 0) {
+    return [];
+  }
+  return [{ members: pool, score: 0 }];
+}
+
 function startStage(lineages, stage, gameMode = 'TEAM') {
   const active = lineages
     .map(({ members, score }) => ({
@@ -419,7 +426,6 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
     return;
   }
 
-  currentLineages = active;
   currentStage = stage;
   stagePending = active.length;
   stageResults = active.map(() => null);
@@ -427,7 +433,16 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
   active.forEach(({ members, score }, index) => {
     roomCounter += 1;
     const roomId = `room-${roomCounter}`;
-    const mode = stage === 1 ? 'SURVIVAL' : 'BOSS';
+    // Stage 1 is always SURVIVAL, stage 3 is always the SOLO/FINAL finale
+    // (roaming boundary, no revival), everything in between is BOSS —
+    // matches the fixed 8-group -> 4-group -> 1-group bracket shape rather
+    // than the old open-ended "however many stages it takes" design.
+    let mode = 'BOSS';
+    if (stage === 1) {
+      mode = 'SURVIVAL';
+    } else if (stage === 3) {
+      mode = 'FINAL';
+    }
 
     // If anything here throws, stagePending would otherwise never reach 0
     // for this stage — every other lineage's room already exists and would
@@ -543,16 +558,16 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
       stage: currentStage,
     });
   } else if (advancing.length < allMembers.length) {
-    // Some teammates advance (into the merged lineage that plays on) but
-    // not everyone did — e.g. an 8-player room where only 4 make it out.
-    // Only a fully-wiped lineage (above) or the eventual champion (below)
-    // used to get recorded in finalRankings, so a player cut from a room
-    // whose lineage otherwise kept advancing would simply never appear in
-    // the final results at all. Recorded here, at this room's own finish
-    // time and score, rather than waiting on the lineage's eventual
-    // fate — which the survivors who did advance don't share with them
-    // from this point on anyway (their own path already diverged for good
-    // reasons: mergeAdjacentLineages(), a later wipeout, etc).
+    // Some teammates advance (into the next stage's pooled/reshuffled
+    // group) but not everyone did — e.g. an 8-player room where only 4
+    // make it out. Only a fully-wiped lineage (above) or the eventual
+    // stage-3 finale's own per-player ranking would otherwise ever get
+    // recorded in finalRankings, so a player cut here would simply never
+    // appear in the final results at all. Recorded here, at this room's
+    // own finish time and score, rather than waiting on some later
+    // fate — the survivors who did advance don't share one with them from
+    // this point on anyway, once formStage2Groups()/formStage3Group() have
+    // pooled and reshuffled everyone into entirely different rooms.
     const advancingIds = new Set(advancing.map((m) => m.socketId));
     const eliminatedHere = allMembers.filter((m) => !advancingIds.has(m.socketId));
     if (eliminatedHere.length > 0) {
@@ -576,25 +591,16 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     return undefined;
   }
 
-  if (currentLineages.length === 1) {
-    const finalEntry = stageResults[0];
-    if (finalEntry.members.length > 0) {
-      finalRankings.push({
-        nicknames: finalEntry.members.map((m) => m.nickname),
-        socketIds: finalEntry.members.map((m) => m.socketId),
-        score: finalEntry.score,
-        result: 'champion',
-        stage: currentStage,
-      });
-    }
-    return endTournament();
-  }
-
   // Stage 1 -> 2 pools and randomly reshuffles all survivors into exactly
   // STAGE_2_GROUP_COUNT groups (see formStage2Groups) instead of merging
-  // adjacent lineages pairwise -- the fixed 8-group-then-4-group bracket
-  // shape the operator wants, replacing the old unbounded pairwise-merge
-  // bracket for this specific transition.
+  // adjacent lineages pairwise -- the fixed 8-group-then-4-group-then-1-
+  // group bracket shape the operator wants, replacing the old unbounded
+  // pairwise-merge bracket that used to run until only one lineage (or
+  // none) was left. Both fixed transitions below run unconditionally on
+  // reaching their stage, regardless of how many lineages/groups survived
+  // it -- unlike the old design, surviving down to a single group here
+  // does NOT mean "crown a champion now," it just means stage 2 (or 3)
+  // starts with fewer groups than usual.
   if (currentStage === 1) {
     const stage2Groups = formStage2Groups(stageResults);
     if (stage2Groups.length === 0) {
@@ -604,13 +610,25 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     return undefined;
   }
 
-  const merged = mergeAdjacentLineages(stageResults);
-  if (merged.length === 0) {
-    return endTournament();
+  // Stage 2 -> 3 pools every surviving boss-fight team into the single
+  // final SOLO room (see formStage3Group) -- stage 3 always finishes the
+  // tournament itself via the gameMode === 'SOLO' branch at the top of
+  // this function, so nothing beyond this point should ever run for a
+  // normal 3-stage tournament.
+  if (currentStage === 2) {
+    const stage3Group = formStage3Group(stageResults);
+    if (stage3Group.length === 0) {
+      return endTournament();
+    }
+    startStage(stage3Group, 3, 'SOLO');
+    return undefined;
   }
 
-  startStage(merged, currentStage + 1);
-  return undefined;
+  // Not reachable in the normal 3-stage bracket (stage 3 is always SOLO,
+  // which returns via the early gameMode branch above) -- kept only so an
+  // unexpected extra stage fails safe into ending the tournament instead
+  // of silently hanging with stagePending stuck at 0.
+  return endTournament();
 }
 
 function endTournament() {
@@ -622,7 +640,6 @@ function endTournament() {
   io.emit('tournamentEnded', { rankings });
 
   globalPhase = 'LOBBY';
-  currentLineages = [];
   currentStage = 0;
   stagePending = 0;
   stageResults = [];
@@ -667,7 +684,6 @@ function resetServerState() {
 
   lobbyPlayers = {};
   globalPhase = 'LOBBY';
-  currentLineages = [];
   currentStage = 0;
   stagePending = 0;
   stageResults = [];
