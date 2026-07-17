@@ -480,16 +480,12 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
   active.forEach(({ members, score }, index) => {
     roomCounter += 1;
     const roomId = `room-${roomCounter}`;
-    // Stage 1 is always SURVIVAL, stage 3 is always the SOLO/FINAL finale
-    // (roaming boundary, no revival), everything in between is BOSS —
-    // matches the fixed 8-group -> 4-group -> 1-group bracket shape rather
-    // than the old open-ended "however many stages it takes" design.
-    let mode = 'BOSS';
-    if (stage === 1) {
-      mode = 'SURVIVAL';
-    } else if (stage === 3) {
-      mode = 'FINAL';
-    }
+    // Stage 3 is always the SOLO/FINAL finale (roaming boundary, no
+    // revival); stages 1 and 2 are both SURVIVAL now that the boss mechanic
+    // has been removed — stage 2 pools survivors into new groups (see
+    // formStage2Groups) but plays the exact same closing-boundary round as
+    // stage 1, just with a bigger, reshuffled roster.
+    const mode = stage === 3 ? 'FINAL' : 'SURVIVAL';
 
     // If anything here throws, stagePending would otherwise never reach 0
     // for this stage — every other lineage's room already exists and would
@@ -674,8 +670,8 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     return undefined;
   }
 
-  // Stage 2 -> 3 pools every surviving boss-fight team into the single
-  // final SOLO room (see formStage3Group) -- stage 3 always finishes the
+  // Stage 2 -> 3 pools every stage-2 survivor into the single final SOLO
+  // room (see formStage3Group) -- stage 3 always finishes the
   // tournament itself via the gameMode === 'SOLO' branch at the top of
   // this function, so nothing beyond this point should ever run for a
   // normal 3-stage tournament.
@@ -995,38 +991,6 @@ function setServerHandlers() {
       }
       const hasCoords = payload && Number.isInteger(payload.row) && Number.isInteger(payload.col);
       room.reviveTile(socket.id, hasCoords ? payload.row : undefined, hasCoords ? payload.col : undefined);
-    });
-
-    // Admin-only "balance lever" triggered from the dashboard (or a
-    // spectated room) — see Room.js's armCriticalHit()/
-    // triggerBossShatterSkill() for why these produce no visible cue
-    // beyond what normal play already looks like.
-    socket.on('adminCritical', (payload) => {
-      if (!adminSockets.has(socket.id)) {
-        return;
-      }
-      const roomId = payload && payload.roomId;
-      if (typeof roomId !== 'string') {
-        return;
-      }
-      const room = rooms.get(roomId);
-      if (room) {
-        room.armCriticalHit();
-      }
-    });
-
-    socket.on('adminShatterTiles', (payload) => {
-      if (!adminSockets.has(socket.id)) {
-        return;
-      }
-      const roomId = payload && payload.roomId;
-      if (typeof roomId !== 'string') {
-        return;
-      }
-      const room = rooms.get(roomId);
-      if (room) {
-        room.triggerBossShatterSkill();
-      }
     });
 
     // Admin manually picked a room's card on the multi-room dashboard
