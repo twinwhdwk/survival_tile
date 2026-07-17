@@ -205,7 +205,12 @@ export default class Room {
     // is per-bot rather than one shared interval.
     this.botMoveIntervalMs = new Map();
     this.botNextMoveAt = new Map();
-    this.safeInset = 0;
+    // Tracked as two independent values (not one shared inset clamped per
+    // axis) so the column axis can close in over many steps while the row
+    // axis stays untouched until a single final squeeze -- see
+    // shrinkBoundary()'s own comment for why.
+    this.rowInset = 0;
+    this.colInset = 0;
     this.boundaryShrinkStepsDone = 0;
     this.lastRegenAt = 0;
     // Tracks the 0-alive -> 1-alive "last stand" state as an explicit
@@ -232,6 +237,14 @@ export default class Room {
         nickname,
         animalIndex,
         eliminated: false,
+        // Distinct from `eliminated` -- a human who dies mid-round is still
+        // connected and can be revived by a teammate's shared gauge (the
+        // whole point of TEAM mode's ghost-revival mechanic), so that alone
+        // must never end the room. Only set true by handleDisconnect(),
+        // which really does mean "gone for good, not coming back this
+        // round" -- see allHumansGone in eliminatePlayer() for the actual
+        // room-ending check this exists for.
+        disconnected: false,
         isBot: !!isBot,
         // Individual score, credited alongside the shared this.score by
         // addSurvivalScore() below — TEAM mode doesn't rank by this (the
@@ -332,10 +345,8 @@ export default class Room {
   }
 
   isSafeTile(row, col) {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
-    return row >= rowInset && row <= MAP_ROWS - 1 - rowInset
-      && col >= colInset && col <= MAP_COLS - 1 - colInset;
+    return row >= this.rowInset && row <= MAP_ROWS - 1 - this.rowInset
+      && col >= this.colInset && col <= MAP_COLS - 1 - this.colInset;
   }
 
   // How many rings inside the current safe rectangle (row, col) sits —
@@ -346,13 +357,11 @@ export default class Room {
   // now," so they aren't caught flat-footed by the next shrink step the
   // way a purely reactive "nearest safe tile" search would leave them.
   safeMargin(row, col) {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
     return Math.min(
-      row - rowInset,
-      (MAP_ROWS - 1 - rowInset) - row,
-      col - colInset,
-      (MAP_COLS - 1 - colInset) - col,
+      row - this.rowInset,
+      (MAP_ROWS - 1 - this.rowInset) - row,
+      col - this.colInset,
+      (MAP_COLS - 1 - this.colInset) - col,
     );
   }
 
@@ -361,19 +370,15 @@ export default class Room {
   // currently safe, rather than players only finding out tile-by-tile as
   // each one flashes a warning right before it burns.
   getSafeBounds() {
-    const rowInset = Math.min(this.safeInset, MAX_ROW_INSET);
-    const colInset = Math.min(this.safeInset, MAX_COL_INSET);
     return {
-      rowStart: rowInset,
-      rowEnd: MAP_ROWS - 1 - rowInset,
-      colStart: colInset,
-      colEnd: MAP_COLS - 1 - colInset,
+      rowStart: this.rowInset,
+      rowEnd: MAP_ROWS - 1 - this.rowInset,
+      colStart: this.colInset,
+      colEnd: MAP_COLS - 1 - this.colInset,
     };
   }
 
-  getSafeZoneTiles(inset = this.safeInset) {
-    const rowInset = Math.min(inset, MAX_ROW_INSET);
-    const colInset = Math.min(inset, MAX_COL_INSET);
+  getSafeZoneTiles(rowInset = this.rowInset, colInset = this.colInset) {
     const tiles = [];
     for (let row = rowInset; row <= MAP_ROWS - 1 - rowInset; row++) {
       for (let col = colInset; col <= MAP_COLS - 1 - colInset; col++) {
@@ -546,11 +551,17 @@ export default class Room {
     }
 
     const allEliminated = Object.values(this.players).every((p) => p.eliminated);
-    // TEAM mode ends the room the instant every real human is gone even if
-    // bots are still "alive" -- bots only exist for admin testing there,
-    // so there's no one left to actually watch the room continue.
-    const allHumansGone = this.gameMode !== 'SOLO'
-      && this.hasHumans && Object.values(this.players).every((p) => p.isBot || p.eliminated);
+    // TEAM mode ends the room once every real human has *disconnected* --
+    // bots only exist for admin testing there, so there's no one left to
+    // actually watch the room continue in that case. This checks
+    // `disconnected`, not `eliminated`: a human who dies mid-round but is
+    // still connected can be revived by a teammate's shared gauge, which is
+    // TEAM mode's whole point -- ending the room here the instant they die
+    // (this used to check `eliminated`) meant a room with one human and
+    // some bots never reached the ghost-revival phase at all, since the
+    // room finished the moment that one human went down.
+    const allHumansGone = this.gameMode !== 'SOLO' && this.hasHumans
+      && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected);
 
     // 개인전: once every real player in the room is gone, nobody is left who
     // would ever see how the remaining bots' round actually plays out, so
@@ -843,8 +854,8 @@ export default class Room {
     // safe zone would never get swept again — permanently wasting the tap
     // on ground nobody can get survivor credit for standing on (finishRoom's
     // SURVIVAL branch requires isSafeTile at round end). BOSS has no
-    // shrinking boundary (safeInset stays 0, isSafeTile covers the whole
-    // map), so this is a no-op there.
+    // shrinking boundary (rowInset/colInset stay 0, isSafeTile covers the
+    // whole map), so this is a no-op there.
     if (this.mode === 'SURVIVAL' && !this.isSafeTile(row, col)) {
       return;
     }
@@ -984,15 +995,41 @@ export default class Room {
   // vanishing all at once). Tiles are plain SOLID the whole time — there's
   // no special "safe zone" tile state or color; isSafeTile() alone
   // decides what still counts as inside the shrinking boundary.
+  //
+  // The column axis closes in by one ring per call, same as before, but
+  // the row axis stays untouched until the column axis has fully closed —
+  // only then does it take its own single, one-time squeeze. A landscape
+  // map is far wider than it is tall, so MAX_ROW_INSET ends up tiny next
+  // to MAX_COL_INSET; narrowing both axes in lockstep every step (the
+  // original design) meant the already-short vertical space took its one
+  // possible squeeze on literally the very first step and stayed that
+  // cramped for the rest of the round — every remaining step then had to
+  // be dodged on both a tight vertical band and a still-closing horizontal
+  // one simultaneously, which read as considerably harder than intended.
+  // Deferring the row squeeze to one single event right at the end keeps
+  // the full vertical space available for nearly the whole round, with
+  // only the horizontal edges actually closing in step by step until that
+  // final moment.
   shrinkBoundary() {
-    if (this.safeInset >= MAX_ROW_INSET && this.safeInset >= MAX_COL_INSET) {
+    if (this.colInset < MAX_COL_INSET) {
+      const oldColInset = this.colInset;
+      this.colInset += 1;
+      this.collapseTilesLeavingSafeZone(this.rowInset, oldColInset);
       return;
     }
 
-    const oldInset = this.safeInset;
-    this.safeInset += 1;
+    if (this.rowInset < MAX_ROW_INSET) {
+      const oldRowInset = this.rowInset;
+      this.rowInset = MAX_ROW_INSET;
+      this.collapseTilesLeavingSafeZone(oldRowInset, this.colInset);
+    }
+  }
 
-    this.getSafeZoneTiles(oldInset).forEach(({ row, col }) => {
+  // Shared by both branches of shrinkBoundary() above — burns every tile
+  // that was inside the safe zone at (oldRowInset, oldColInset) but isn't
+  // anymore at the room's current (this.rowInset, this.colInset).
+  collapseTilesLeavingSafeZone(oldRowInset, oldColInset) {
+    this.getSafeZoneTiles(oldRowInset, oldColInset).forEach(({ row, col }) => {
       if (this.isSafeTile(row, col) || this.tileMap[row][col] !== TILE_STATE.SOLID) {
         return;
       }
@@ -1270,7 +1307,7 @@ export default class Room {
   // through standing tiles with their own footsteps far faster than a
   // fixed-schedule trickle can keep up, independent of whatever the
   // boundary itself is doing). BOSS rounds have no shrinking boundary at
-  // all — this.safeInset stays 0 for their whole duration, so
+  // all — this.rowInset/this.colInset stay 0 for their whole duration, so
   // getSafeZoneTiles() below naturally covers the entire board instead of
   // a shrinking rectangle, and the exact same threshold/burst logic just
   // applies map-wide.
@@ -1338,8 +1375,8 @@ export default class Room {
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
 
     // Not SURVIVAL-only: BOSS rounds have no shrinking boundary, so
-    // this.safeInset stays 0 for their whole duration and getSafeZoneTiles()
-    // naturally covers the entire board — the same threshold/burst logic
+    // this.rowInset/this.colInset stay 0 for their whole duration and
+    // getSafeZoneTiles() naturally covers the entire board — the same threshold/burst logic
     // just applies map-wide instead of to a shrinking rectangle. BOSS mode
     // previously had no auto-regen at all (this check used to require
     // mode === 'SURVIVAL'), which meant the only tiles that ever came back
