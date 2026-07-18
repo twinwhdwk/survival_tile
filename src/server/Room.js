@@ -752,8 +752,11 @@ export default class Room {
   // this is what finally starts it collapsing instead of leaving it safe
   // forever. Mirrors respawnGhost()'s identical GHOST_RESPAWN_STILLNESS_MS
   // check for a revived *player's* own landing tile -- this is the same
-  // idea applied to regenerated *ground* instead.
-  scheduleRegenStillnessCheck(row, col) {
+  // idea applied to regenerated *ground* instead. `delay` matches whatever
+  // grace window the caller wrote into regenGraceUntil (REGEN_GRACE_MS by
+  // default; armShieldTile() passes SHIELD_GRACE_MS), so the re-check lands
+  // exactly as that immunity lapses rather than before or after it.
+  scheduleRegenStillnessCheck(row, col, delay = REGEN_GRACE_MS) {
     setTimeout(() => {
       if (this.finished) {
         return;
@@ -768,7 +771,7 @@ export default class Room {
       if (occupied) {
         this.triggerTileCollapse(row, col);
       }
-    }, REGEN_GRACE_MS);
+    }, delay);
   }
 
   dropPlayersOnTile(row, col) {
@@ -928,6 +931,14 @@ export default class Room {
           continue;
         }
         this.regenGraceUntil.set(`${row}_${col}`, until);
+        // Same anti-camping re-check every other grace-granting path already
+        // schedules (see scheduleRegenStillnessCheck()): the tile the player
+        // stepped onto to trigger this shield had its own normal collapse
+        // suppressed by the grace just written above, and a tile's collapse
+        // only ever starts on a fresh movePlayerTo() arrival — so without
+        // this, standing still on a shielded tile is permanently safe once
+        // the immunity lapses, with nothing left to re-light its fuse.
+        this.scheduleRegenStillnessCheck(row, col, SHIELD_GRACE_MS);
       }
     }
   }
