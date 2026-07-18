@@ -186,13 +186,18 @@ export const GHOST_REVIVE_LAST_STAND_COOLDOWN_MS = 400;
 // Bomb tiles: an environmental hazard layered on top of the normal tile
 // map (any mode, not gated to SURVIVAL/FINAL specifically) -- stepping on
 // one arms it, and after BOMB_FUSE_MS it blasts every tile within
-// BOMB_BLAST_RADIUS rings of it (see Room.explodeBombTile()) through the
-// same triggerTileCollapse() path an ordinary footstep already uses, so a
-// tile caught in the blast still gets its normal warning pulse before
-// actually collapsing, and anyone still standing there when it does is
-// eliminated exactly like any other collapse. Count scales with room size
-// (~1 per BOMB_TILES_PER_PLAYERS players) rather than a fixed number, the
-// same reasoning as the removed attack-tile mechanic's own scaling.
+// BOMB_BLAST_RADIUS rings of it (see Room.explodeBombTile()). Anyone still
+// standing in that radius at the instant of detonation is eliminated
+// immediately; every tile in the radius also still collapses through the
+// normal triggerTileCollapse() path (its own warning pulse, then GONE),
+// so someone who steps into the blast zone *after* it's already gone off
+// is still caught by that the same way an ordinary footstep collapse would
+// catch them. Count scales with how many players are *currently alive*
+// (~1 per BOMB_TILES_PER_PLAYERS, re-derived every checkRoundState tick via
+// Room.bombTileTarget/getAliveCount) rather than a fixed number or the
+// room's original headcount, so a dwindling handful of survivors isn't
+// still facing a hazard count sized for the room's original size -- same
+// reasoning as the removed attack-tile mechanic's own scaling.
 export const BOMB_TILES_PER_PLAYERS = 6;
 export const BOMB_FUSE_MS = 2000;
 // 1 ring = a 3x3 area centered on the bomb tile.

@@ -328,9 +328,12 @@ export default class Room {
     // BOMB_TILES_PER_PLAYERS' own comment in roundConfig.js for the
     // scaling reasoning. maintainBombTiles() (called every checkRoundState
     // tick) keeps this topped back up to the same target as the boundary
-    // shrinks tiles out from under some of them.
+    // shrinks tiles out from under some of them, re-derived from
+    // getAliveCount() every time so the count tracks down as players are
+    // eliminated (everyone's still alive at construction time, so this is
+    // just the full roster on this very first computation).
     this.bombTiles = [];
-    const bombTileCount = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
+    const bombTileCount = this.bombTileTarget();
     const initialZoneTiles = this.getSafeZoneTiles();
     for (let i = 0; i < bombTileCount; i++) {
       const spot = this.pickBombTileSpot(initialZoneTiles);
@@ -555,6 +558,22 @@ export default class Room {
     return tiles[Math.floor(Math.random() * tiles.length)];
   }
 
+  getAliveCount() {
+    return Object.values(this.players).filter((p) => !p.eliminated).length;
+  }
+
+  // Shared by the constructor's initial placement and maintainBombTiles()'s
+  // per-tick top-up -- scales with how many players are *currently alive*,
+  // not the room's full original roster, so a room that's lost half its
+  // players doesn't keep pressuring the dwindling survivors with a bomb
+  // count sized for the room's original headcount. Everyone's still alive
+  // at construction time, so the very first call from the constructor is
+  // numerically the same as counting the full roster -- this only starts
+  // diverging from that as players get eliminated.
+  bombTileTarget() {
+    return Math.max(1, Math.ceil(this.getAliveCount() / BOMB_TILES_PER_PLAYERS));
+  }
+
   // Bomb tiles always live inside the current safe zone (same reasoning as
   // pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
   // behind outside it would strand a hazard nobody can reach) and never
@@ -662,15 +681,35 @@ export default class Room {
     }, BOMB_FUSE_MS);
   }
 
-  // Every tile within BOMB_BLAST_RADIUS rings (1 = 3x3) of the bomb's own
-  // position goes through the exact same triggerTileCollapse() path an
-  // ordinary footstep already uses -- still gets its normal warning pulse
-  // before actually collapsing, and dropPlayersOnTile() (called from
-  // inside that same path once a tile actually goes GONE) still handles
-  // eliminating anyone caught standing on one when it does, with no
-  // bomb-specific elimination logic needed here at all.
+  // Anyone still standing in the blast radius at the instant of detonation
+  // is eliminated immediately -- an explosion is instantaneous, unlike an
+  // ordinary footstep's collapse (which still gives a WARNING_DELAY_MS
+  // pulse before the tile actually gives out, letting a player who reacts
+  // in time step off it first). Checked before the tile-collapse loop
+  // below so being here right now can't be "outrun" by moving away during
+  // the tiles' own warning window afterward. Every tile within
+  // BOMB_BLAST_RADIUS rings (1 = 3x3) of the bomb's own position still
+  // goes through the exact same triggerTileCollapse() path an ordinary
+  // footstep already uses (so the tiles themselves still get their normal
+  // warning pulse before actually collapsing, and dropPlayersOnTile()
+  // still handles anyone who steps into the radius *after* this instant,
+  // while it's still collapsing) -- this just adds the immediate-blast
+  // case on top, which that path alone can't cover since it isn't reached
+  // until WARNING_DELAY_MS + COLLAPSE_DELAY_MS (1200ms) later.
   explodeBombTile(centerRow, centerCol) {
     this.emit('bombExploded', { row: centerRow, col: centerCol });
+
+    Object.keys(this.players).forEach((id) => {
+      const player = this.players[id];
+      if (player.eliminated) {
+        return;
+      }
+      const { row, col } = this.getTileCoords(player.x, player.y);
+      if (Math.abs(row - centerRow) <= BOMB_BLAST_RADIUS && Math.abs(col - centerCol) <= BOMB_BLAST_RADIUS) {
+        this.eliminatePlayer(id);
+      }
+    });
+
     for (let dr = -BOMB_BLAST_RADIUS; dr <= BOMB_BLAST_RADIUS; dr++) {
       for (let dc = -BOMB_BLAST_RADIUS; dc <= BOMB_BLAST_RADIUS; dc++) {
         const row = centerRow + dr;
@@ -696,8 +735,16 @@ export default class Room {
     );
     let changed = this.bombTiles.length !== before;
 
-    const target = Math.max(1, Math.ceil(Object.keys(this.players).length / BOMB_TILES_PER_PLAYERS));
-    if (this.bombTiles.length < target) {
+    const target = this.bombTileTarget();
+    if (this.bombTiles.length > target) {
+      // Fewer players alive now than when the current count was last set --
+      // trim the excess rather than leaving a dwindling handful of
+      // survivors facing a hazard count sized for a fuller room. Which
+      // specific armed-but-unstepped bomb goes away has no gameplay
+      // significance, so trimming off the end is simplest.
+      this.bombTiles.length = target;
+      changed = true;
+    } else if (this.bombTiles.length < target) {
       // Computed once for the whole top-up pass rather than re-scanning the
       // full board inside pickBombTileSpot() on every iteration -- the
       // zone's own bounds/tile states can't change mid-call (no collapse
