@@ -318,6 +318,20 @@ const disconnectedSockets = new Set();
 const tokenToSocket = new Map();
 const socketToToken = new Map();
 const graceTimers = new Map();
+// Same idea as graceTimers, for a survivor whose socket drops while sitting
+// *between* stages (their own room already finished -- socketRoomMap has no
+// entry for them, so graceTimers/beginProxyControl's mid-room bot-proxy path
+// doesn't apply; there's no live avatar to proxy yet). Without this, a bare
+// connectivity blip during that wait (venue wifi hiccup, not necessarily
+// anything the player did) used to write them off the bracket immediately
+// via disconnectedSockets even though there's nothing to actually be "gone"
+// from -- see the 'disconnect' handler's own use of this map. If enough of a
+// newly-pooled stage's members hit this at once, startStage()'s
+// disconnectedSockets filter could empty the whole stage and end the
+// tournament right as it should have started (reported in practice: a room
+// full of survivors sees "다음 라운드를 기다리는 중" and then the tournament
+// just ends the moment the next stage would have begun).
+const betweenRoundsGraceTimers = new Map();
 
 // A single socket.io room that every admin and cut-player spectator joins,
 // so broadcastDashboard() can fan its (large, every-second) payload out
@@ -332,6 +346,35 @@ function clearGraceTimer(token) {
   }
 }
 
+function clearBetweenRoundsGraceTimer(token) {
+  const timer = betweenRoundsGraceTimers.get(token);
+  if (timer) {
+    clearTimeout(timer);
+    betweenRoundsGraceTimers.delete(token);
+  }
+}
+
+// A between-rounds reconnect returns under a brand new socket.id (a page
+// reload, same as every other reconnect -- see net/socket.js). Patches that
+// new id into any still-pending stageResults entry so the next stage's own
+// formStage2Groups()/formStage3Group() pooling (and startStage()'s
+// disconnectedSockets filter) finds this player under their current, live
+// connection instead of the now-dead old one. A no-op once stageResults has
+// already been consumed by startStage() for this stage -- see the
+// 'reconnectAttempt' handler's own socketRoomMap re-check for that case.
+function patchPendingSocketId(oldSocketId, newSocketId) {
+  stageResults.forEach((lineage) => {
+    if (!lineage) {
+      return;
+    }
+    lineage.members.forEach((m) => {
+      if (m.socketId === oldSocketId) {
+        m.socketId = newSocketId;
+      }
+    });
+  });
+}
+
 // Tears down all reconnect-tracking state at once. Called when a tournament
 // ends or the server is reset — without this, any grace timer still counting
 // down would fire ~20s later against an already-torn-down tournament, and
@@ -341,6 +384,8 @@ function clearGraceTimer(token) {
 function clearReconnectState() {
   graceTimers.forEach((timer) => clearTimeout(timer));
   graceTimers.clear();
+  betweenRoundsGraceTimers.forEach((timer) => clearTimeout(timer));
+  betweenRoundsGraceTimers.clear();
   tokenToSocket.clear();
   socketToToken.clear();
 }
@@ -863,43 +908,91 @@ function setServerHandlers() {
   io.on('connection', (socket) => {
     console.log('Socket connected: ' + socket.id);
 
-    // A reconnecting client offers its stable session token. If that token
-    // has a seat still inside its RECONNECT_GRACE_MS window (bot-proxied
-    // since the drop — see the disconnect handler), move that seat from the
-    // old socket.id onto this new one, stop the bot proxy, cancel the grace
-    // timeout, and resume the player right where their avatar is now, at its
-    // current score. Anything else (no such token, window already elapsed,
-    // seat already gone) is a clean rejection the client turns into a normal
+    // A reconnecting client offers its stable session token. Two distinct
+    // seats can be waiting for it:
+    //  1. A mid-round seat still inside its RECONNECT_GRACE_MS window
+    //     (bot-proxied since the drop -- see the disconnect handler): move
+    //     it onto this new socket.id, stop the bot proxy, and resume the
+    //     player right where their avatar is now, at its current score.
+    //  2. A between-rounds seat (no active Room -- the player's own room
+    //     already finished and they're just waiting for the next stage's
+    //     rooms to be built): nothing to bot-proxy, just move the pending
+    //     stageResults membership onto this socket.id so the next stage's
+    //     own pooling still finds them (see betweenRoundsGraceTimers).
+    // Anything else (no such token, both windows already elapsed, seat
+    // already gone) is a clean rejection the client turns into a normal
     // reload back to the login screen.
     socket.on('reconnectAttempt', (payload) => {
       const token = payload && typeof payload.token === 'string' ? payload.token : null;
-      if (!token || !graceTimers.has(token)) {
+      if (!token) {
         socket.emit('reconnectRejected', {});
         return;
       }
-      const oldSocketId = tokenToSocket.get(token);
-      const roomId = oldSocketId && socketRoomMap.get(oldSocketId);
-      const room = roomId && rooms.get(roomId);
-      if (!oldSocketId || !room || !room.players[oldSocketId] || room.finished) {
+
+      if (graceTimers.has(token)) {
+        const oldSocketId = tokenToSocket.get(token);
+        const roomId = oldSocketId && socketRoomMap.get(oldSocketId);
+        const room = roomId && rooms.get(roomId);
+        if (oldSocketId && room && room.players[oldSocketId] && !room.finished) {
+          clearGraceTimer(token);
+          // Re-key everything that was tracking the old socket.id onto the
+          // new one, then hand the avatar back to human control.
+          room.reassignPlayerSocket(oldSocketId, socket.id);
+          socketRoomMap.delete(oldSocketId);
+          socketRoomMap.set(socket.id, roomId);
+          socketToToken.delete(oldSocketId);
+          socketToToken.set(socket.id, token);
+          tokenToSocket.set(token, socket.id);
+          socket.join(roomId);
+          room.endProxyControl(socket.id, true);
+          socket.emit('reconnectAccepted', {});
+          socket.emit('gameStarting', room.getSnapshot());
+          return;
+        }
         clearGraceTimer(token);
         socket.emit('reconnectRejected', {});
         return;
       }
 
-      clearGraceTimer(token);
-      // Re-key everything that was tracking the old socket.id onto the new
-      // one, then hand the avatar back to human control.
-      room.reassignPlayerSocket(oldSocketId, socket.id);
-      socketRoomMap.delete(oldSocketId);
-      socketRoomMap.set(socket.id, roomId);
-      socketToToken.delete(oldSocketId);
-      socketToToken.set(socket.id, token);
-      tokenToSocket.set(token, socket.id);
-      socket.join(roomId);
-      room.endProxyControl(socket.id, true);
+      if (betweenRoundsGraceTimers.has(token)) {
+        clearBetweenRoundsGraceTimer(token);
+        const oldSocketId = tokenToSocket.get(token);
 
-      socket.emit('reconnectAccepted', {});
-      socket.emit('gameStarting', room.getSnapshot());
+        // The next stage's rooms may have already been built in the gap
+        // between this player's disconnect and this reconnect -- startStage()
+        // seats every member into socketRoomMap regardless of whether their
+        // socket is actually live (see its own members.forEach), so the old,
+        // now-dead socket.id can already be sitting as an unpiloted member of
+        // a brand new room. Reclaim that seat directly rather than just
+        // resuming the wait screen, or this player would be stuck as a silent
+        // phantom in a room that already started without them.
+        const newRoomId = oldSocketId && socketRoomMap.get(oldSocketId);
+        const newRoom = newRoomId && rooms.get(newRoomId);
+        if (oldSocketId && newRoom && newRoom.players[oldSocketId] && !newRoom.finished) {
+          newRoom.reassignPlayerSocket(oldSocketId, socket.id);
+          socketRoomMap.delete(oldSocketId);
+          socketRoomMap.set(socket.id, newRoomId);
+          socketToToken.delete(oldSocketId);
+          socketToToken.set(socket.id, token);
+          tokenToSocket.set(token, socket.id);
+          socket.join(newRoomId);
+          socket.emit('reconnectAccepted', {});
+          socket.emit('gameStarting', newRoom.getSnapshot());
+          return;
+        }
+
+        if (oldSocketId) {
+          patchPendingSocketId(oldSocketId, socket.id);
+          socketToToken.delete(oldSocketId);
+        }
+        socketToToken.set(socket.id, token);
+        tokenToSocket.set(token, socket.id);
+        socket.emit('reconnectAccepted', {});
+        socket.emit('resumeWaiting', {});
+        return;
+      }
+
+      socket.emit('reconnectRejected', {});
     });
 
     socket.on('join', (payload) => {
@@ -1210,13 +1303,37 @@ function setServerHandlers() {
         return;
       }
 
-      // Not in a room. Same bracket-tracking note as before.
+      // Not in a room -- either still in the lobby (globalPhase LOBBY,
+      // already handled above via lobbyPlayers) or, mid-tournament, a
+      // survivor sitting between stages waiting for the next one's rooms to
+      // be created (their own room's onFinished already deleted their
+      // socketRoomMap entry). A bare connectivity blip here -- venue wifi
+      // hiccup, not necessarily anything the player did -- used to write
+      // them off the bracket immediately via disconnectedSockets even
+      // though there's no active Room to actually be "gone" from yet. Give
+      // the same session token a RECONNECT_GRACE_MS window to reconnect
+      // (see 'reconnectAttempt's own betweenRoundsGraceTimers check) before
+      // actually marking them gone -- without this, several survivors
+      // hitting the same blip while waiting for the next stage could empty
+      // that stage's own member list and end the tournament right as it
+      // should have started.
+      const waitingToken = socketToToken.get(socket.id);
+      if (globalPhase === 'TOURNAMENT' && waitingToken) {
+        const timer = setTimeout(() => {
+          betweenRoundsGraceTimers.delete(waitingToken);
+          disconnectedSockets.add(socket.id);
+          tokenToSocket.delete(waitingToken);
+          socketToToken.delete(socket.id);
+        }, RECONNECT_GRACE_MS);
+        betweenRoundsGraceTimers.set(waitingToken, timer);
+        return;
+      }
+
       if (globalPhase === 'TOURNAMENT') {
         disconnectedSockets.add(socket.id);
       }
-      const lingeringToken = socketToToken.get(socket.id);
-      if (lingeringToken) {
-        tokenToSocket.delete(lingeringToken);
+      if (waitingToken) {
+        tokenToSocket.delete(waitingToken);
         socketToToken.delete(socket.id);
       }
     });
