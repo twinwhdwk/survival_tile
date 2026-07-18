@@ -1019,6 +1019,28 @@ export default class Room {
     // always record: whoever never gets eliminated stays null, which reads
     // as "still alive" / "the winner" wherever this is read back.
     player.eliminatedAt = Date.now();
+    // A ghost's translucent avatar stays rendered right where it died
+    // (client just fades/shrinks it in place -- see GameScene's
+    // playerEliminated handler) and never moves again on its own: a ghost
+    // bot only taps collapsed tiles via reviveTile(), it never calls
+    // movePlayerTo(), and respawnGhost() overwrites x/y outright once it
+    // actually comes back. Left where they died, that parked sprite sits
+    // right in among the still-living players inside the safe zone and
+    // gets in the way of reading the board. Shove it just outside the
+    // safe zone's right edge instead -- still visible (drawn dimmed, like
+    // the rest of the danger zone), but out of the actively-playable area.
+    // Only when there's an actual outside-the-boundary column left on the
+    // map to park it in (pre-shrink grace period, or a boundary whose right
+    // edge already IS the map edge, both leave nowhere valid to the right);
+    // in either of those cases just leave the ghost exactly where it died.
+    const parkBounds = this.getSafeBounds();
+    if (parkBounds.colEnd < MAP_COLS - 1) {
+      const { row: deathRow } = this.getTileCoords(player.x, player.y);
+      const parkRow = Math.min(Math.max(deathRow, parkBounds.rowStart), parkBounds.rowEnd);
+      const parked = hexToPixel(parkRow, parkBounds.colEnd + 1);
+      player.x = parked.x;
+      player.y = parked.y;
+    }
     // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
     // its own eventual ranking is by elimination order, not this score
     // (see the FINAL branch of handleRoomFinished's SOLO case), but the
@@ -1027,7 +1049,9 @@ export default class Room {
     if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
       this.addSurvivalScore(player, Date.now());
     }
-    this.emit('playerEliminated', { playerId: id, score: this.score, playerScore: player.score || 0 });
+    this.emit('playerEliminated', {
+      playerId: id, score: this.score, playerScore: player.score || 0, x: player.x, y: player.y,
+    });
 
     const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
     // Last-stand only means anything where ghosts can actually rally to
