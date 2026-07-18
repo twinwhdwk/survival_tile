@@ -63,11 +63,30 @@ app.get('/api/health', function(request, response) {
 });
 
 // Add static file middleware (to serve static files).
-app.use('/public', Express.static(Path.join(__dirname, '../public')));
+// The webpack bundle ships under a fixed name (bundle.js, no content hash),
+// so it can't be cached immutably — a deploy reuses the same URL for new
+// bytes. Use a short max-age plus must-revalidate: browsers may reuse it
+// within the window but always revalidate against the server afterward
+// (a 304 when unchanged is nearly free), so a returning player — including
+// the reconnect flow's own page reload — doesn't re-download ~1.2MB every
+// time, while a fresh deploy still reaches everyone within the window
+// rather than being pinned behind a stale immutable cache.
+app.use('/public', Express.static(Path.join(__dirname, '../public'), {
+  maxAge: '5m',
+  setHeaders: (response, filePath) => {
+    if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+      response.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    }
+  },
+}));
 
 // Request router.
 app.get('/', function(request, response) {
-   response.sendFile(Path.join(__dirname, '../public/index.html'));
+  // Never let a stale index.html get cached: it's the entry point that
+  // references the bundle, and it's tiny, so it should always be
+  // revalidated so a new deploy is picked up immediately.
+  response.setHeader('Cache-Control', 'no-cache');
+  response.sendFile(Path.join(__dirname, '../public/index.html'));
 })
 
 // Tell server to start listening for connections.
