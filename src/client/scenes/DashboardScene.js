@@ -412,7 +412,46 @@ export default class DashboardScene extends Phaser.Scene {
       align: 'left',
     }).setOrigin(0, 0.5);
 
-    container.add([minimap, bg, cardBorder, headerBar, label, aliveText, infoText]);
+    // Score + survivor-name panel, big and centered over the tile thumbnail
+    // -- this is now the headline content of the card (see
+    // updateCardContent), so it needs a solid backing to read at a glance
+    // over whatever tile colors are behind it. Sized off the card's own
+    // dimensions (fixed at creation, not recomputed per update) since stage
+    // 1's up-to-8-room grid and stage 2's up-to-4-room grid produce very
+    // differently sized cards.
+    const boxW = minimapInnerW - 10;
+    const boxH = minimapInnerH - 10;
+    const scoreBox = this.add.graphics();
+    drawRoundedRect(scoreBox, 0, 20, boxW, boxH, {
+      radius: 10, fillColor: 0x000000, fillAlpha: 0.5, strokeColor: 0xffd700, strokeAlpha: 0.35,
+    });
+
+    const scoreFontSize = Math.round(Math.min(cardW, cardH) * 0.26);
+    const scoreText = this.add.text(0, 20 - boxH / 2 + 6, '', {
+      fontFamily: FONT_DISPLAY,
+      fontSize: `${scoreFontSize}px`,
+      fontStyle: 'bold',
+      color: COLORS.textGold,
+      stroke: TEXT_STROKE,
+      strokeThickness: Math.max(3, Math.round(scoreFontSize * 0.12)),
+    }).setOrigin(0.5, 0);
+
+    // Currently-alive players' names, wrapped/centered under the score --
+    // this is the other half of what the box now shows (see
+    // updateCardContent). Font scales with the card too, just far more
+    // modestly than the score since a full roster of nicknames needs to fit.
+    const namesFontSize = Math.max(11, Math.round(Math.min(cardW, cardH) * 0.09));
+    const namesText = this.add.text(0, 20 - boxH / 2 + 6 + scoreFontSize + 8, '', {
+      fontFamily: FONT_BODY,
+      fontSize: `${namesFontSize}px`,
+      color: '#ffffff',
+      align: 'center',
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
+      wordWrap: { width: boxW - 16 },
+    }).setOrigin(0.5, 0);
+
+    container.add([minimap, bg, cardBorder, headerBar, label, aliveText, infoText, scoreBox, scoreText, namesText]);
 
     this.tweens.add({
       targets: container,
@@ -423,7 +462,7 @@ export default class DashboardScene extends Phaser.Scene {
     });
 
     return {
-      container, bg, cardBorder, label, aliveText, infoText,
+      container, bg, cardBorder, label, aliveText, infoText, scoreText, namesText,
       minimap, minimapTextureKey, minimapCanvas: null,
       roomId, cardW, cardH, prevAliveCount: null, borderFlashTimer: null,
     };
@@ -505,7 +544,9 @@ export default class DashboardScene extends Phaser.Scene {
     const mm = Math.floor(totalSeconds / 60);
     const ss = totalSeconds % 60;
     const timerStr = `${mm}:${ss.toString().padStart(2, '0')}`;
-    card.infoText.setText(`점수 ${summary.score} · 남은시간 ${timerStr}`);
+    card.infoText.setText(`남은시간 ${timerStr}`);
+    card.scoreText.setText(`${summary.score}`);
+    card.namesText.setText((summary.aliveNicknames || []).join(', '));
   }
 
 }

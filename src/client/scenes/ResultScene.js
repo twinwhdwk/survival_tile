@@ -36,6 +36,23 @@ export default class ResultScene extends Phaser.Scene {
     // screen, silently skipping the real re-add and leaving this second (or
     // later) results screen with no button at all.
     this.hasReturnButton = false;
+    // Same reused-Scene-instance caveat as hasReturnButton above: these
+    // generic this.input.on(...) listeners (see setUpRankingsScroll) are
+    // plugin-level, not tied to any GameObject's own lifecycle, so a second
+    // tournament's showRankings() in the same browser session would stack a
+    // duplicate set on top of the first's if they were never removed. Torn
+    // down in the 'shutdown' handler below and re-armed fresh each time
+    // showRankings() actually has overflowing content to scroll.
+    this.rankingsScrollCleanup = null;
+    // Registered unconditionally (unlike the socket cleanup below) since the
+    // data.rankings branch a few lines down returns early, before ever
+    // reaching that other shutdown listener.
+    this.events.once('shutdown', () => {
+      if (this.rankingsScrollCleanup) {
+        this.rankingsScrollCleanup();
+        this.rankingsScrollCleanup = null;
+      }
+    });
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
@@ -159,15 +176,37 @@ export default class ResultScene extends Phaser.Scene {
     drawRoundedPanel(this.messagePanel, WORLD_WIDTH / 2, 40, this.messageText.width + 28, 46);
     this.subText.setText('');
 
+    if (this.rankingsScrollCleanup) {
+      this.rankingsScrollCleanup();
+      this.rankingsScrollCleanup = null;
+    }
+
     const mySocketId = this.socket.id;
     const startY = 100;
     const rowCount = Math.max(rankings ? rankings.length : 0, 1);
-    const listCenterY = startY + ((rowCount - 1) * 26) / 2;
-    drawRoundedPanel(this.rankingsPanel, WORLD_WIDTH / 2, listCenterY, 360, rowCount * 26 + 30);
+    const contentHeight = rowCount * 26 + 30;
+
+    // Available vertical space for the list before it runs into the return
+    // button near the bottom of the screen. A bracket with more than a
+    // handful of finishers used to produce rows taller than this and they'd
+    // simply render off the bottom of the canvas -- Phaser doesn't clip or
+    // scroll anything on its own, so those rows were just gone with no way
+    // to reach them. Rows now live in their own container (rowsContainer,
+    // below), clipped to this window by a geometry mask and pannable via
+    // setUpRankingsScroll() whenever the content is actually taller than it.
+    const viewTop = startY - 15;
+    const viewBottom = WORLD_HEIGHT - 60;
+    const viewHeight = Math.max(26, viewBottom - viewTop);
+    const panelHeight = Math.min(contentHeight, viewHeight);
+    const listCenterY = viewTop + panelHeight / 2;
+    drawRoundedPanel(this.rankingsPanel, WORLD_WIDTH / 2, listCenterY, 360, panelHeight);
     this.rankingsPanel
       .setVisible(true)
       .setAlpha(0);
     this.tweens.add({ targets: this.rankingsPanel, alpha: 1, duration: 300 });
+
+    const rowsContainer = this.add.container(0, 0);
+    this.rankingTexts.push(rowsContainer);
 
     if (!rankings || rankings.length === 0) {
       const empty = this.add.text(WORLD_WIDTH / 2, startY, '결과가 없습니다.', {
@@ -175,7 +214,7 @@ export default class ResultScene extends Phaser.Scene {
         fontSize: '16px',
         color: COLORS.textMuted,
       }).setOrigin(0.5);
-      this.rankingTexts.push(empty);
+      rowsContainer.add(empty);
     }
 
     const RANK_COLORS = [COLORS.textGold, COLORS.textSilver, COLORS.textBronze];
@@ -201,6 +240,7 @@ export default class ResultScene extends Phaser.Scene {
         });
         this.tweens.add({ targets: highlight, alpha: 1, delay: i * 90, duration: 260 });
         this.rankingTexts.push(highlight);
+        rowsContainer.add(highlight);
       }
 
       const text = this.add.text(WORLD_WIDTH / 2, rowY, label, {
@@ -226,15 +266,90 @@ export default class ResultScene extends Phaser.Scene {
       });
 
       this.rankingTexts.push(text);
+      rowsContainer.add(text);
     });
 
     if (rankings.some((entry) => entry.result === 'champion')) {
       this.celebrateChampion();
     }
 
+    // Clip the rows to the panel's visible window, then wire up drag/wheel
+    // scrolling only if the content actually overflows it -- a short list
+    // (the common case) needs neither, and setUpRankingsScroll's own
+    // cleanup would just be a no-op churn for it.
+    const maskShape = this.make.graphics({}, false);
+    maskShape.fillStyle(0xffffff);
+    maskShape.fillRect(WORLD_WIDTH / 2 - 190, viewTop, 380, viewHeight);
+    rowsContainer.setMask(maskShape.createGeometryMask());
+
+    const maxScroll = Math.max(0, contentHeight - viewHeight);
+    if (maxScroll > 0) {
+      this.rankingsScrollCleanup = this.setUpRankingsScroll(rowsContainer, viewTop, viewBottom, maxScroll, maskShape);
+    } else {
+      this.rankingsScrollCleanup = () => maskShape.destroy();
+    }
+
     if (!this.hasReturnButton) {
       this.showReturnButton();
     }
+  }
+
+  // Lets the rankings list be dragged (touch/mouse) or wheel-scrolled once
+  // it's taller than its visible window. Returns a cleanup function that
+  // undoes every listener/GameObject this adds -- the caller (showRankings)
+  // runs it before rebuilding the list, and ResultScene's own shutdown
+  // handler runs it on scene teardown, since this scene's instance is
+  // reused across tournaments in the same browser session (see
+  // hasReturnButton's comment for the same caveat) and these this.input.on
+  // listeners are plugin-level, not tied to any GameObject's lifecycle that
+  // would otherwise clean them up automatically.
+  setUpRankingsScroll(container, viewTop, viewBottom, maxScroll, maskShape) {
+    const viewHeight = viewBottom - viewTop;
+    const centerY = viewTop + viewHeight / 2;
+    // Invisible drag surface over just the visible list window -- nothing
+    // else in this scene occupies that area, so it's safe as a full-window
+    // hit target for both touch drag and mouse wheel.
+    const zone = this.add.zone(WORLD_WIDTH / 2, centerY, 380, viewHeight)
+      .setOrigin(0.5)
+      .setInteractive();
+
+    const clamp = (y) => Phaser.Math.Clamp(y, -maxScroll, 0);
+
+    let dragStartPointerY = null;
+    let dragStartContainerY = 0;
+
+    const onZoneDown = (pointer) => {
+      dragStartPointerY = pointer.y;
+      dragStartContainerY = container.y;
+    };
+    const onPointerMove = (pointer) => {
+      if (dragStartPointerY === null) {
+        return;
+      }
+      container.y = clamp(dragStartContainerY + (pointer.y - dragStartPointerY));
+    };
+    const endDrag = () => {
+      dragStartPointerY = null;
+    };
+    const onWheel = (pointer, currentlyOver, deltaX, deltaY) => {
+      container.y = clamp(container.y - deltaY * 0.5);
+    };
+
+    zone.on('pointerdown', onZoneDown);
+    this.input.on('pointermove', onPointerMove);
+    this.input.on('pointerup', endDrag);
+    this.input.on('pointerupoutside', endDrag);
+    this.input.on('wheel', onWheel);
+
+    return () => {
+      zone.off('pointerdown', onZoneDown);
+      zone.destroy();
+      this.input.off('pointermove', onPointerMove);
+      this.input.off('pointerup', endDrag);
+      this.input.off('pointerupoutside', endDrag);
+      this.input.off('wheel', onWheel);
+      maskShape.destroy();
+    };
   }
 
   celebrateChampion() {
