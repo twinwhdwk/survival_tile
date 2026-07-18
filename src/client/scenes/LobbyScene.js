@@ -196,12 +196,29 @@ export default class LobbyScene extends Phaser.Scene {
     this.modeSoloButton = this.buttonNode.getChildByID('mode-solo-button');
     applyButtonFx(this.modeTeamButton);
     applyButtonFx(this.modeSoloButton);
+    // applyButtonFx already sets its own transition (transform/filter/
+    // box-shadow) via a plain assignment, which would silently clobber a
+    // transition declared in the button's original inline style -- appended
+    // here instead, once, so refreshModeButtons()'s active/inactive color
+    // swap below animates smoothly like every other button/input in the
+    // app rather than snapping instantly.
+    [this.modeTeamButton, this.modeSoloButton].forEach((btn) => {
+      btn.style.transition += ', background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease';
+    });
 
+    // Sets the three swapped properties directly rather than appending to
+    // cssText (the previous approach) -- cssText += kept concatenating a
+    // fresh copy of whichever style string was active onto the *existing*
+    // string every single toggle, growing unbounded over a long admin
+    // session's worth of clicks instead of actually replacing anything.
     const refreshModeButtons = () => {
-      const activeStyle = `background:${BUTTON.primaryBg};color:${BUTTON.primaryText};border:1px solid ${BUTTON.primaryBg};`;
-      const inactiveStyle = `background:${BUTTON.secondaryBg}cc;color:${BUTTON.secondaryText};border:1px solid ${BUTTON.secondaryBorder};`;
-      this.modeTeamButton.style.cssText += this.selectedGameMode === 'TEAM' ? activeStyle : inactiveStyle;
-      this.modeSoloButton.style.cssText += this.selectedGameMode === 'SOLO' ? activeStyle : inactiveStyle;
+      const apply = (btn, active) => {
+        btn.style.background = active ? BUTTON.primaryBg : `${BUTTON.secondaryBg}cc`;
+        btn.style.color = active ? BUTTON.primaryText : BUTTON.secondaryText;
+        btn.style.border = active ? `1px solid ${BUTTON.primaryBg}` : `1px solid ${BUTTON.secondaryBorder}`;
+      };
+      apply(this.modeTeamButton, this.selectedGameMode === 'TEAM');
+      apply(this.modeSoloButton, this.selectedGameMode === 'SOLO');
     };
     refreshModeButtons();
 
