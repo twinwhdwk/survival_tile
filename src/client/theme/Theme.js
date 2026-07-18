@@ -40,7 +40,7 @@ export const FONT_BODY_FAMILY = 'Gothic A1';
 export const EVENT_BANNER_TEXT = 'FIL2 소확행 EVENT';
 export const FONT_DISPLAY_SAMPLE_TEXT = [
   EVENT_BANNER_TEXT,
-  '🔥 타일 서바이벌 🔥',
+  '🔥 타일 서바이벌',
   '🔥 대기실',
   '라운드 조별 현황',
   '시작!',
@@ -141,3 +141,34 @@ export const COLORS = {
 };
 
 export const TEXT_STROKE = '#1a0f07';
+
+// DOM (HTML <button>/<input>) colors for every scene's action bar. Kept in
+// the same warm ember family as the Phaser-rendered panels above
+// (panelFill/panelBorder/textGold) rather than each scene picking its own
+// ad-hoc color -- previously a Tailwind-style grab bag (a cool green
+// "start" button, a cool indigo "add bot", a cool gray "clear") sat on top
+// of an otherwise warm, monochromatic fire-tile theme, and the clash was
+// one of the more obvious "looks unfinished" tells. One hue family, varied
+// by brightness/saturation for hierarchy, instead of a different hue per
+// button.
+export const BUTTON = {
+  // The one call-to-action per screen meant to draw the eye first (참가하기,
+  // 게임 시작, 대기실로 돌아가기) -- the brightest, most saturated fill in
+  // the palette, with dark text for contrast (mirrors panelFill/textGold's
+  // own "gold-on-dark" pairing, just inverted).
+  primaryBg: '#e6a13c',
+  primaryBgHover: '#f0b355',
+  primaryText: '#241a10',
+  // Routine, non-destructive actions (봇 추가) -- same warm-dark family as
+  // the panel chrome itself, one step brighter than panelFill so it still
+  // reads as a distinct, clickable surface.
+  secondaryBg: '#3a2c1f',
+  secondaryText: '#ffd9a0',
+  secondaryBorder: '#ffa94d66',
+  // Destructive/reset actions (초기화, 서버 초기화) -- a muted warm red,
+  // not a cold saturated one, so "danger" still reads as part of the same
+  // ember palette rather than a jarring, unrelated hue.
+  dangerBg: '#5c2020',
+  dangerText: '#ffd0d0',
+  dangerBorder: '#8a3030',
+};

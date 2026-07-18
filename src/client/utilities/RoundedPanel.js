@@ -25,6 +25,24 @@ export function drawRoundedRect(graphics, centerX, centerY, width, height, {
   const y = centerY - height / 2;
 
   graphics.clear();
+
+  // Soft drop shadow -- a slightly offset, darker duplicate of the panel's
+  // own silhouette underneath the fill, so every panel reads as sitting
+  // just above the scene instead of pasted flat onto it. Same flat-offset
+  // language as every DOM button's own box-shadow (ButtonFx.js) rather
+  // than a new one-off effect, and drawn through this one shared function
+  // so it applies uniformly everywhere a real panel is drawn. Skipped below
+  // a fill opacity of 0.3: fillAlpha: 0 callers (e.g. DashboardScene's card
+  // border) are a decorative outline-only overlay with no fill to look
+  // elevated at all, and a thin, mostly-transparent tint (e.g. ResultScene's
+  // 0.12-alpha "this is my rank" highlight bar) would otherwise get a
+  // shadow more visually prominent than the highlight itself -- backwards
+  // for something meant to read as a soft glow, not a physical panel.
+  if (fillAlpha >= 0.3) {
+    graphics.fillStyle(0x000000, 0.28);
+    graphics.fillRoundedRect(x + 2, y + 3, width, height, radius);
+  }
+
   graphics.fillStyle(fillColor, fillAlpha);
   graphics.fillRoundedRect(x, y, width, height, radius);
   graphics.lineStyle(strokeWidth, strokeColor, strokeAlpha);

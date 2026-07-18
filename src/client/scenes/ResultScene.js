@@ -8,7 +8,9 @@ import { applyButtonFx } from '../utilities/ButtonFx';
 import { playVictory } from '../utilities/SoundFx';
 import { vibrateVictory } from '../utilities/Haptics';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import {
+  FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, BUTTON,
+} from '../theme/Theme';
 import { drawRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 
 export default class ResultScene extends Phaser.Scene {
@@ -265,7 +267,7 @@ export default class ResultScene extends Phaser.Scene {
 
     const buttonHtml = `
       <button id="return-button" type="button"
-        style="padding:7px 18px;font-size:13px;border-radius:8px;border:none;background:#10b981;color:#ffffff;cursor:pointer;font-family:${FONT_BODY};">
+        style="padding:9px 20px;font-size:15px;border-radius:8px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
         대기실로 돌아가기
       </button>
     `;

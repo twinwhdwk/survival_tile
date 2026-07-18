@@ -481,12 +481,18 @@ export default class GameScene extends Phaser.Scene {
     // strip, since the camera never scrolls — never renders on top of it.
     this.timerPanel = this.add.graphics().setScrollFactor(0).setDepth(29);
 
+    // HUD label strokes are deliberately thinner (proportionally) than the
+    // display-tier titles/banners elsewhere -- a 3-4px stroke on this small
+    // a font was a much heavier relative outline than the same stroke on a
+    // 26-72px title (see BANNER_Y-area comment / showStartCountdown's own
+    // 72px/8px pairing), reading as thick "clip art" edges on quick-glance
+    // HUD text rather than the clean, modern look every other panel now has.
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
       fontFamily: FONT_BODY,
       fontSize: '20px',
       color: COLORS.textPrimary,
       stroke: TEXT_STROKE,
-      strokeThickness: 4,
+      strokeThickness: 3,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(30);
 
     this.playerCountPanel = this.add.graphics().setScrollFactor(0).setDepth(29);
@@ -496,7 +502,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '14px',
       color: COLORS.textPrimary,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
 
     this.bannerText = this.add.text(WORLD_WIDTH / 2, BANNER_Y, '', {
@@ -515,7 +521,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '14px',
       color: COLORS.textGold,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(30).setVisible(false);
 
     // Only shown when the admin reached this room by clicking a card on
@@ -554,7 +560,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '13px',
       color: COLORS.textInfo,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
 
     // Fills as this ghost successfully taps collapsed tiles (see the
@@ -763,7 +769,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '16px',
       color: '#ffdd55',
       stroke: TEXT_STROKE,
-      strokeThickness: 4,
+      strokeThickness: 3,
     }).setOrigin(0.5).setDepth(25);
 
     this.tweens.add({
@@ -782,7 +788,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '15px',
       color,
       stroke: TEXT_STROKE,
-      strokeThickness: 4,
+      strokeThickness: 3,
     }).setOrigin(0.5).setDepth(25).setScale(0.6).setAlpha(0);
 
     this.tweens.add({
@@ -842,7 +848,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '13px',
       color: '#88ff99',
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(31).setAlpha(0);
 
     this.tweens.add({
@@ -1897,9 +1903,9 @@ export default class GameScene extends Phaser.Scene {
 
   tileTintForTexture(key) {
     if (key === 'tile_warning') {
-      return 0xff6b5b;
+      return 0xff7a52;
     }
-    return 0x767fb8;
+    return 0xd9a95f;
   }
 
   stopTileTween(tile) {
@@ -2069,6 +2075,16 @@ export default class GameScene extends Phaser.Scene {
     const shadow = this.add.ellipse(0, 15, 22, 8, 0x000000, 0.35);
     children.push(shadow);
 
+    // A soft, dark backing plate behind the head -- PIL-verified (no
+    // browser in this session) that this meaningfully improves contrast for
+    // lighter-colored species (white rabbit/panda, gray elephant) against
+    // the board's own warm bronze tiles, and gives every avatar a "sticker"
+    // cushion instead of floating bare on the tile. Placed before the
+    // self-only spotlight/halo below so those still render on top and stay
+    // the dominant "this is you" cue rather than being dimmed by it.
+    const iconBacking = this.add.circle(0, 0, 20, 0x000000, 0.22);
+    children.push(iconBacking);
+
     if (isSelf) {
       // A steady, always-at-least-partly-visible spotlight ring so self is
       // easy to spot at a glance, plus the original expanding sonar ping
@@ -2111,7 +2127,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '11px',
       color: labelColor,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // The one remaining flat square-cornered chip in the app — every other
