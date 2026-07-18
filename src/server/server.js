@@ -1306,6 +1306,25 @@ function setServerHandlers() {
 
       if (lobbyPlayers[socket.id]) {
         delete lobbyPlayers[socket.id];
+        // Every non-admin join records this socket's session token (see the
+        // 'join' handler). Every other disconnect branch below cleans that
+        // up, but this one used to return early without it -- so a browser
+        // that opens the page, joins the lobby, and leaves without ever
+        // entering a tournament leaked one entry per visit in both token
+        // maps, which are otherwise only ever cleared by clearReconnectState()
+        // at tournament end (an idle or lobby-only server never reaches it).
+        // Same unbounded-growth class as the disconnectedSockets leak. The
+        // token->socket delete is guarded on this socket still being the one
+        // it points at: a page-reload reconnect joins a fresh socket under
+        // the same token before the old socket's disconnect fires here, and
+        // that newer socket must keep the mapping.
+        const lobbyToken = socketToToken.get(socket.id);
+        if (lobbyToken) {
+          socketToToken.delete(socket.id);
+          if (tokenToSocket.get(lobbyToken) === socket.id) {
+            tokenToSocket.delete(lobbyToken);
+          }
+        }
         broadcastLobby();
         return;
       }
