@@ -356,7 +356,12 @@ export default class GameScene extends Phaser.Scene {
     this.scoreText.setVisible(!this.isSpectator);
     this.updateScoreText(score || 0);
 
-    this.cameras.main.fadeIn(400, 9, 11, 24);
+    // Fades in from the same warm near-black the scene's own background
+    // gradient/canvas backgroundColor settle on (EffectTextures.js /
+    // client.js's #0d0805, in decimal RGB) rather than a mismatched color,
+    // so the very first frame of a round doesn't visibly flash before
+    // easing into place.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
     this.showStartCountdown(() => {
       // Both messages are player instructions ("버티세요", "물리치세요") --
       // meaningless to an admin who's only watching, so skip the banner
