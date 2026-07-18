@@ -313,6 +313,19 @@ function clearGraceTimer(token) {
   }
 }
 
+// Tears down all reconnect-tracking state at once. Called when a tournament
+// ends or the server is reset — without this, any grace timer still counting
+// down would fire ~20s later against an already-torn-down tournament, and
+// (more importantly) the token<->socket maps would accumulate an entry per
+// player across every tournament for as long as the instance stays up, the
+// same unbounded-growth class of leak as the disconnectedSockets one.
+function clearReconnectState() {
+  graceTimers.forEach((timer) => clearTimeout(timer));
+  graceTimers.clear();
+  tokenToSocket.clear();
+  socketToToken.clear();
+}
+
 function sanitizeNickname(raw) {
   if (typeof raw !== 'string') {
     return '';
@@ -755,6 +768,7 @@ function endTournament() {
   finalRankings = [];
   disconnectedSockets.clear();
   spectatorSockets.clear();
+  clearReconnectState();
   broadcastLobby();
 
   return { rankings };
@@ -800,6 +814,7 @@ function resetServerState() {
   finalRankings = [];
   disconnectedSockets.clear();
   spectatorSockets.clear();
+  clearReconnectState();
   broadcastLobby();
 
   // An admin currently parked on DashboardScene or a spectated GameScene
