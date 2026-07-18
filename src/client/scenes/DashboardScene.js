@@ -105,6 +105,8 @@ export default class DashboardScene extends Phaser.Scene {
         fontFamily: FONT_BODY,
         fontSize: '12px',
         color: COLORS.textMuted,
+        stroke: TEXT_STROKE,
+        strokeThickness: 2,
       },
     ).setOrigin(0.5);
 
@@ -112,6 +114,8 @@ export default class DashboardScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '16px',
       color: COLORS.textMuted,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // Emergency "start over" if a tournament gets stuck mid-event (see

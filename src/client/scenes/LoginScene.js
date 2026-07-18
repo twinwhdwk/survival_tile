@@ -66,6 +66,8 @@ export default class LoginScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textInfo,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // Same warm ember-bordered panel as every other headline in the app
@@ -111,6 +113,8 @@ export default class LoginScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     const formHtml = `
