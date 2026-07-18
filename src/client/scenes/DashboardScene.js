@@ -158,7 +158,10 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.on('gameStarting', this.handleGameStarting);
     this.socket.on('tournamentEnded', this.handleTournamentEnded);
 
-    this.events.once('shutdown', () => this.cleanup());
+    this.events.once('shutdown', () => {
+      this.cleanup();
+      this.destroyMinimapTextures();
+    });
   }
 
   // Jumps the admin straight into a specific room's full GameScene as a
@@ -184,6 +187,32 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.off('dashboardStarting', this.handleDashboardStarting);
     this.socket.off('gameStarting', this.handleGameStarting);
     this.socket.off('tournamentEnded', this.handleTournamentEnded);
+  }
+
+  // Phaser's TextureManager is game-global, not scene-scoped, so these
+  // canvas textures outlive the scene that made them unless removed by
+  // hand — every stale-card path already does exactly this, but shutdown
+  // (spectating into a room, a stage restart, the tournament ending) tore
+  // the cards down without ever passing through it, stranding one canvas
+  // per room seen. Also fixes a stale-frame glitch on re-entry: createCard
+  // reuses any texture already registered under the same deterministic
+  // `dashboard_minimap_<roomId>` key, so a re-created card would briefly
+  // show the *previous* tournament's final board until its first redraw.
+  //
+  // Deliberately NOT folded into cleanup(): that's called eagerly, before
+  // scene.start(), specifically to stop handling socket events during the
+  // transition — but the cards are still on a live, rendering display list
+  // at that point, so pulling their textures out from under them there
+  // could flash a broken frame. Systems.shutdown() sets the scene
+  // inactive/invisible before emitting SHUTDOWN, so by the time this runs
+  // nothing is drawing these any more.
+  destroyMinimapTextures() {
+    Object.values(this.cardsByRoomId).forEach(({ minimapTextureKey }) => {
+      if (minimapTextureKey && this.textures.exists(minimapTextureKey)) {
+        this.textures.remove(minimapTextureKey);
+      }
+    });
+    this.cardsByRoomId = {};
   }
 
   // Stage 1 expects up to ~8 simultaneous groups arranged 4 wide x 2 tall;

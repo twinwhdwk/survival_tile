@@ -786,18 +786,23 @@ export default class Room {
       this.randomizeBotResults();
     }
 
-    // 개인전's own last-survivor case: only reachable with a *human* as the
-    // sole remaining player now -- soloAllHumansEliminated above already
-    // ends the round the instant the last human dies, so a bot can never
-    // again be the one left standing alone by the time this check runs.
-    // Still worth ending early (rather than idling out the rest of the
-    // round with no bots left to threaten them) and topping the winner's
-    // score up — see SOLO_LAST_SURVIVOR_BONUS_SCORE's own comment.
+    // 개인전's own last-survivor case. soloAllHumansEliminated above already
+    // ends the round the instant the last *human* dies, so whenever this
+    // room has any human in it the sole survivor here is necessarily one of
+    // them. An all-bot room (admin testing with 봇 추가 and nobody joining)
+    // has hasHumans false, which makes soloAllHumansEliminated permanently
+    // false — so this branch was reachable there with a *bot* as the lone
+    // survivor, handing SOLO_LAST_SURVIVOR_BONUS_SCORE to a bot. Harmless
+    // in practice (nobody is watching a bots-only room, and its scores go
+    // nowhere), but it made the bonus a lie about what it rewards, so
+    // resolve the survivor first and gate the bonus on them actually being
+    // a real player. The round still ends early either way, rather than
+    // idling out the clock with nothing left to threaten whoever's left.
     const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated
       && !soloAllHumansEliminated && aliveCount === 1;
     if (soloLastSurvivorStanding) {
       const winner = Object.values(this.players).find((p) => !p.eliminated);
-      if (winner) {
+      if (winner && !winner.isBot) {
         winner.score = (winner.score || 0) + SOLO_LAST_SURVIVOR_BONUS_SCORE;
       }
     }
