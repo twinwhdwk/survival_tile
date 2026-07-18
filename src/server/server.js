@@ -1240,8 +1240,16 @@ function setServerHandlers() {
       socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
     });
 
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected: ' + socket.id);
+    // socket.io's own disconnect reason (e.g. 'transport close', 'ping
+    // timeout', 'transport error', 'client namespace disconnect', 'server
+    // namespace disconnect') was previously discarded entirely -- logged now
+    // so a real disconnect during play (as opposed to an intentional kick
+    // via clearLobby/resetServer, which always logs as 'server namespace
+    // disconnect' or 'transport close' right after this socket's own
+    // .disconnect(true) call) can actually be diagnosed after the fact
+    // instead of guessing.
+    socket.on('disconnect', (reason) => {
+      console.log(`Socket disconnected: ${socket.id} (reason: ${reason})`);
       adminSockets.delete(socket.id);
       spectatorSockets.delete(socket.id);
 

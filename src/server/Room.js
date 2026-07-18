@@ -1784,6 +1784,15 @@ export default class Room {
       nickname: this.players[id].nickname,
       animalIndex: this.players[id].animalIndex,
       score: this.players[id].score || 0,
+      // Missing here, every bot advancing to the next stage silently became
+      // a "human" in the new Room's constructor (isBot defaults falsy on an
+      // absent field) -- moveBotsRandomly() only ever drives isBot (or
+      // proxyControlled) players, so a former bot with this dropped just
+      // stood still on its spawn tile until ROUND_START_STILLNESS_MS
+      // collapsed it out from under it. In an all-bot-survivor room (a
+      // common admin-test shape) that reproduced as "stage 2 starts and
+      // everyone dies almost immediately."
+      isBot: !!this.players[id].isBot,
     }));
 
     // onFinished may end the whole tournament right here (this was the last
