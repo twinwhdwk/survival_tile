@@ -1035,16 +1035,30 @@ function setServerHandlers() {
         return;
       }
 
+      // Only meaningful mid-tournament: this set exists purely so
+      // startStage()'s member filter can skip someone who dropped while
+      // sitting between rooms, and it's only ever cleared when a
+      // tournament ends (endTournament/resetServerState). Recording every
+      // disconnect regardless of phase meant each casual visitor who just
+      // opened the page and closed the tab without ever joining left a
+      // permanent entry behind -- verified as exactly 300 stranded entries
+      // after 300 such visits with no tournament running, growing without
+      // bound for as long as the instance stays up between events. Anyone
+      // who disconnects during LOBBY is either an actual lobby player
+      // (already removed from lobbyPlayers by the early return above, so
+      // they'd never be seated anyway) or someone with no bracket standing
+      // to skip in the first place.
+      if (globalPhase === 'TOURNAMENT') {
+        disconnectedSockets.add(socket.id);
+      }
+
       const roomId = socketRoomMap.get(socket.id);
       if (roomId) {
-        disconnectedSockets.add(socket.id);
         const room = rooms.get(roomId);
         if (room) {
           room.handleDisconnect(socket.id);
         }
         socketRoomMap.delete(socket.id);
-      } else {
-        disconnectedSockets.add(socket.id);
       }
     });
   });
