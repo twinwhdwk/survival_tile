@@ -696,6 +696,37 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
 
   stageResults[lineageIndex] = { members: advancing, score: finalScore };
 
+  // A survivor who dropped mid-round is still bot-proxied inside their
+  // RECONNECT_GRACE_MS window (see the disconnect handler's canReclaim path).
+  // Their team surviving to round end advances that still-live avatar here,
+  // but this room is about to be deleted -- which strands the mid-round grace
+  // timer pointing at a roomId that no longer exists: a reconnect would then
+  // look up socketRoomMap for the now-gone room and get wrongly rejected, and
+  // a timeout would clear the token maps without ever adding the seat to
+  // disconnectedSockets, so it rides into the next stage as an unpiloted
+  // phantom. Hand the timer over to the between-rounds machinery instead,
+  // which is built for exactly "dropped while waiting for the next stage":
+  // a reclaim now resolves through betweenRoundsGraceTimers, and a timeout
+  // marks them gone via disconnectedSockets so the next stage filters them out.
+  advancing.forEach((m) => {
+    const player = room && room.players[m.socketId];
+    if (!player || !player.proxyControlled) {
+      return;
+    }
+    const token = socketToToken.get(m.socketId);
+    if (!token || !graceTimers.has(token)) {
+      return;
+    }
+    clearGraceTimer(token);
+    const timer = setTimeout(() => {
+      betweenRoundsGraceTimers.delete(token);
+      disconnectedSockets.add(m.socketId);
+      tokenToSocket.delete(token);
+      socketToToken.delete(m.socketId);
+    }, RECONNECT_GRACE_MS);
+    betweenRoundsGraceTimers.set(token, timer);
+  });
+
   // One finalRankings entry per player, individually, same shape the SOLO
   // branch above already uses -- an earlier version grouped everyone cut
   // together (whole wipe, or the partial-cut subset below) into a single
