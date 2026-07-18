@@ -696,13 +696,29 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
 
   stageResults[lineageIndex] = { members: advancing, score: finalScore };
 
+  // One finalRankings entry per player, individually, same shape the SOLO
+  // branch above already uses -- an earlier version grouped everyone cut
+  // together (whole wipe, or the partial-cut subset below) into a single
+  // row with their scores summed together. That reads fine as long as
+  // every merged row happens to land on a different rank from every other
+  // row, but two or more players who each separately earned the very same
+  // individual score would get sorted onto the same rank while the row
+  // shown for it displayed their *combined* total -- looking like that
+  // rank's score had jumped for no reason, when it was actually just N
+  // people's equal scores added together. Individual rows sidestep that
+  // entirely: a tie in score is now a tie in rank between separate rows,
+  // each still showing its own real number.
+  const scoreById = new Map(playerResults.map((p) => [p.socketId, p.score || 0]));
+
   if (advancing.length === 0) {
-    finalRankings.push({
-      nicknames: allMembers.map((m) => m.nickname),
-      socketIds: allMembers.map((m) => m.socketId),
-      score: finalScore,
-      result: 'eliminated',
-      stage: currentStage,
+    allMembers.forEach((m) => {
+      finalRankings.push({
+        nicknames: [m.nickname],
+        socketIds: [m.socketId],
+        score: scoreById.get(m.socketId) || 0,
+        result: 'eliminated',
+        stage: currentStage,
+      });
     });
     // A wiped room's whole roster is done for the tournament -- seat every
     // real player among them (bots silently no-op, see seatSpectator) into
@@ -722,26 +738,16 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     // pooled and reshuffled everyone into entirely different rooms.
     const advancingIds = new Set(advancing.map((m) => m.socketId));
     const eliminatedHere = allMembers.filter((m) => !advancingIds.has(m.socketId));
-    if (eliminatedHere.length > 0) {
-      // finalScore is this *room's* shared total -- every member's score
-      // summed together, including whoever's still advancing. Using it here
-      // would credit this cut subset with the whole room's combined score
-      // (survivors' contributions included), inflating them well past what
-      // they actually earned and easily outranking the eventual champion's
-      // own, much smaller individual total. Sum just their own individual
-      // scores instead (playerResults, from Room.getPlayerResults() --
-      // already tracked per-player the same way SOLO's ranking uses above).
-      const scoreById = new Map(playerResults.map((p) => [p.socketId, p.score || 0]));
-      const eliminatedScore = eliminatedHere.reduce((sum, m) => sum + (scoreById.get(m.socketId) || 0), 0);
+    eliminatedHere.forEach((m) => {
       finalRankings.push({
-        nicknames: eliminatedHere.map((m) => m.nickname),
-        socketIds: eliminatedHere.map((m) => m.socketId),
-        score: eliminatedScore,
+        nicknames: [m.nickname],
+        socketIds: [m.socketId],
+        score: scoreById.get(m.socketId) || 0,
         result: 'eliminated',
         stage: currentStage,
       });
-      eliminatedHere.forEach((m) => seatSpectator(m.socketId));
-    }
+    });
+    eliminatedHere.forEach((m) => seatSpectator(m.socketId));
   }
 
   if (room) {

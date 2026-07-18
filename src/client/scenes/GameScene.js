@@ -121,12 +121,15 @@ const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치하세�
 // pointermove pixel.
 const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 
-// Shield tiles render as this exact purple, both for the persistent tint on
-// an armed-but-unstepped shield tile (initShieldTiles()) and as the "from"
-// color of the temporary glow the protected 3x3 area pulses through when
-// one's actually stepped on (playShieldGlow()) -- one shared constant so
-// the two don't drift into two different purples.
-const SHIELD_COLOR = 0xaa55ff;
+// The "from" color of the temporary deep-gold glow the protected 3x3 area
+// pulses through once a shield tile's actually stepped on (playShieldGlow())
+// -- an armed-but-unstepped shield tile itself is marked with its own golden
+// shield shape instead (createShieldTileMarker()), not a tile tint. Deep
+// gold (not the board's own lighter bronze tile tint, nor the app's
+// brighter textGold accent) so the shielded area still reads as distinct
+// from ordinary ground while staying in the same warm palette as everything
+// else -- purple was tried first and didn't fit that palette.
+const SHIELD_COLOR = 0xd4af37;
 
 export default class GameScene extends Phaser.Scene {
 
@@ -171,7 +174,7 @@ export default class GameScene extends Phaser.Scene {
     this.score = 0;
     this.bombTileMarkers = [];
     this.bombFuseMarkers = {};
-    this.shieldTileKeys = [];
+    this.shieldTileMarkers = [];
     this.angelTileMarker = null;
     this.lastLiveScoreSecond = null;
     this.lastTimerSecond = null;
@@ -781,29 +784,76 @@ export default class GameScene extends Phaser.Scene {
     return marker;
   }
 
-  // Rebuilds which of this room's tiles currently carry an armed (not-yet-
-  // stepped-on) shield, from scratch on each shieldTiles snapshot -- same
-  // clear-then-recreate lifecycle as initBombTiles(), just tinting the tile
-  // itself purple instead of adding a separate marker on top of it (a
-  // shield tile's whole point is being recognizable ground, not a hazard
-  // sitting on it -- see SHIELD_COLOR's own comment).
+  // Rebuilds every armed-but-not-yet-stepped-on shield tile's marker from
+  // scratch on each shieldTiles snapshot -- same clear-then-recreate
+  // lifecycle as initBombTiles().
   initShieldTiles(shieldTiles) {
-    (this.shieldTileKeys || []).forEach((key) => {
-      const tile = this.tileSprites[key];
-      if (tile) {
-        tile.clearTint();
-      }
-    });
-    this.shieldTileKeys = (shieldTiles || []).map((t) => `${t.row}_${t.col}`);
-    this.shieldTileKeys.forEach((key) => {
-      const tile = this.tileSprites[key];
-      if (tile) {
-        tile.setTint(SHIELD_COLOR);
-      }
+    (this.shieldTileMarkers || []).forEach((marker) => marker.destroy());
+    this.shieldTileMarkers = [];
+    (shieldTiles || []).forEach((tile) => {
+      this.shieldTileMarkers.push(this.createShieldTileMarker(tile));
     });
   }
 
-  // Purple pulse across the 3x3 area a shield tile just protected (see
+  // Drawn as a real shield silhouette (outer bronze-gold body + a smaller
+  // inset bright-gold panel for a raised/embossed look) rather than the 🛡️
+  // emoji -- an emoji glyph's own colors are fixed and mostly blue/steel on
+  // every platform's emoji font, so it can't actually be made to read as
+  // "golden" the way this shape can.
+  createShieldTileMarker(tile) {
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    const marker = this.add.graphics({ x, y }).setDepth(12);
+
+    const outer = [
+      { x: -9, y: -11 }, { x: 9, y: -11 }, { x: 9, y: 3 }, { x: 0, y: 12 }, { x: -9, y: 3 },
+    ];
+    const inner = outer.map((p) => ({ x: p.x * 0.6, y: p.y * 0.6 - 1 }));
+
+    // Same offset-dark-silhouette drop shadow every panel in the app already
+    // uses (see RoundedPanel.js's drawRoundedRect) -- gives the shield a
+    // lifted, "sitting on the tile" feel instead of a flat sticker.
+    const shadow = outer.map((p) => ({ x: p.x + 1.5, y: p.y + 2 }));
+    marker.fillStyle(0x000000, 0.3);
+    marker.fillPoints(shadow, true);
+
+    marker.fillStyle(0x8a6a10, 1);
+    marker.fillPoints(outer, true);
+    marker.lineStyle(1.5, 0xfff2b0, 0.9);
+    marker.strokePoints(outer, true);
+    marker.fillStyle(0xffd700, 1);
+    marker.fillPoints(inner, true);
+
+    // A bright diagonal streak, like polished metal catching the light, plus
+    // a small bronze diamond emblem centered on the panel -- both purely
+    // decorative detail so the shield reads as a crafted object rather than
+    // a flat gold shape.
+    marker.fillStyle(0xfff6c8, 0.65);
+    marker.beginPath();
+    marker.moveTo(-4, -5);
+    marker.lineTo(-1, -5);
+    marker.lineTo(-3, 4);
+    marker.lineTo(-6, 4);
+    marker.closePath();
+    marker.fillPath();
+
+    marker.fillStyle(0x8a6a10, 1);
+    marker.fillPoints([
+      { x: 0, y: -3 }, { x: 3, y: 0 }, { x: 0, y: 3 }, { x: -3, y: 0 },
+    ], true);
+
+    this.tweens.add({
+      targets: marker,
+      scale: 1.18,
+      duration: 480,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return marker;
+  }
+
+  // Deep-gold pulse across the 3x3 area a shield tile just protected (see
   // Room.armShieldTile()) -- reuses the same tile.graceTintTween/
   // stopTileTween() interplay playReviveGraceGlow() already established,
   // just without that one's alpha-from-zero fade-in (these tiles are
@@ -846,11 +896,51 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // One feathered wing, drawn as a curved cream-white panel with a few
+  // stroked "feather" lines fanning out from the body toward the tip.
+  // mirrored (scaleX -1) for the left half of the pair -- a real drawn
+  // shape reads far better at this size than any stock emoji glyph, whose
+  // fixed art/colors can't be tuned to match the rest of the game's warm,
+  // hand-drawn look.
+  createWingGraphic(x, mirrored) {
+    const g = this.add.graphics({ x, y: 0 });
+    if (mirrored) {
+      g.scaleX = -1;
+    }
+
+    g.fillStyle(0x000000, 0.25);
+    g.beginPath();
+    g.moveTo(1.5, 4);
+    g.quadraticCurveTo(6.5, -8, 17.5, -12);
+    g.quadraticCurveTo(13.5, -1, 14.5, 7);
+    g.quadraticCurveTo(6.5, 8, 1.5, 4);
+    g.closePath();
+    g.fillPath();
+
+    g.fillStyle(0xfff6e8, 1);
+    g.lineStyle(1.2, 0xd9b466, 0.9);
+    g.beginPath();
+    g.moveTo(0, 3);
+    g.quadraticCurveTo(5, -9, 16, -13);
+    g.quadraticCurveTo(12, -2, 13, 6);
+    g.quadraticCurveTo(5, 7, 0, 3);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+
+    g.lineStyle(1, 0xd9b466, 0.6);
+    g.lineBetween(2, 1, 12.5, -7.5);
+    g.lineBetween(3, 3.2, 11.5, -1.5);
+    g.lineBetween(4, 5, 10, 3.5);
+
+    return g;
+  }
+
   createAngelTileMarker(tile) {
     const { x, y } = hexToPixel(tile.row, tile.col);
-    const marker = this.add.text(x, y, '👼', {
-      fontSize: '24px',
-    }).setOrigin(0.5).setDepth(12);
+    const leftWing = this.createWingGraphic(-2, true);
+    const rightWing = this.createWingGraphic(2, false);
+    const marker = this.add.container(x, y, [leftWing, rightWing]).setDepth(12);
 
     this.tweens.add({
       targets: marker,
@@ -1279,10 +1369,10 @@ export default class GameScene extends Phaser.Scene {
       },
 
       // The 3x3 area Room.armShieldTile() just protected -- pulses every
-      // tile in it purple for roughly SHIELD_GRACE_MS (see
+      // tile in it deep gold for roughly SHIELD_GRACE_MS (see
       // playShieldGlow()). The stepped-on tile itself already lost its own
-      // persistent tint via shieldTilesUpdate just above, so this is the
-      // only cue for it (and the only cue at all for its 8 neighbors).
+      // 🛡️ marker via shieldTilesUpdate just above, so this is the only
+      // cue for it (and the only cue at all for its 8 neighbors).
       shieldActivated: ({ row, col }) => {
         playClick();
         vibrateTap();

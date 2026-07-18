@@ -737,6 +737,40 @@ export default class Room {
     }, WARNING_DELAY_MS);
   }
 
+  // A tile that comes back to SOLID (autoRegenerateTiles()'s burst, or a
+  // ghost's reviveTile() tap) is immune to collapsing for REGEN_GRACE_MS
+  // (regenGraceUntil), same as the other grace-window cases -- but nothing
+  // ever re-checked it once that window actually lapsed. A player who
+  // walked onto it during the immune window (which does still call
+  // triggerTileCollapse(), just a no-op while the grace holds) and then
+  // simply never moved again had effectively found a permanently safe tile:
+  // the only thing that ever starts a tile's collapse countdown is a fresh
+  // arrival via movePlayerTo(), and someone standing still generates no new
+  // arrivals. Scheduled once per regenerated tile, right alongside the
+  // regenGraceUntil write that grants its immunity -- if anyone is still
+  // standing on this exact tile the moment that immunity actually expires,
+  // this is what finally starts it collapsing instead of leaving it safe
+  // forever. Mirrors respawnGhost()'s identical GHOST_RESPAWN_STILLNESS_MS
+  // check for a revived *player's* own landing tile -- this is the same
+  // idea applied to regenerated *ground* instead.
+  scheduleRegenStillnessCheck(row, col) {
+    setTimeout(() => {
+      if (this.finished) {
+        return;
+      }
+      const occupied = Object.values(this.players).some((p) => {
+        if (p.eliminated) {
+          return false;
+        }
+        const coords = this.getTileCoords(p.x, p.y);
+        return coords.row === row && coords.col === col;
+      });
+      if (occupied) {
+        this.triggerTileCollapse(row, col);
+      }
+    }, REGEN_GRACE_MS);
+  }
+
   dropPlayersOnTile(row, col) {
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
@@ -1029,18 +1063,24 @@ export default class Room {
     // gets in the way of reading the board. Shove it just outside the
     // safe zone's right edge instead -- still visible (drawn dimmed, like
     // the rest of the danger zone), but out of the actively-playable area.
-    // Only when there's an actual outside-the-boundary column left on the
-    // map to park it in (pre-shrink grace period, or a boundary whose right
-    // edge already IS the map edge, both leave nowhere valid to the right);
-    // in either of those cases just leave the ghost exactly where it died.
+    // Unconditional now (an earlier version skipped this whenever
+    // safeBounds.colEnd was still MAP_COLS - 1 -- the pre-shrink grace
+    // period, or the tail end of a round where the right edge already IS
+    // the map edge -- which in practice left the large share of
+    // eliminations that happen before the boundary starts shrinking
+    // exactly where they died after all). Clamping the target column to
+    // MAP_COLS - 1 covers that same "no real outside yet" case instead of
+    // skipping it: pre-shrink, this just walks the ghost to the map's own
+    // right edge -- not truly outside a boundary that doesn't exist yet,
+    // but still off to the side and out of the center where the actual
+    // fight is happening.
     const parkBounds = this.getSafeBounds();
-    if (parkBounds.colEnd < MAP_COLS - 1) {
-      const { row: deathRow } = this.getTileCoords(player.x, player.y);
-      const parkRow = Math.min(Math.max(deathRow, parkBounds.rowStart), parkBounds.rowEnd);
-      const parked = hexToPixel(parkRow, parkBounds.colEnd + 1);
-      player.x = parked.x;
-      player.y = parked.y;
-    }
+    const { row: deathRow } = this.getTileCoords(player.x, player.y);
+    const parkRow = Math.min(Math.max(deathRow, parkBounds.rowStart), parkBounds.rowEnd);
+    const parkCol = Math.min(parkBounds.colEnd + 1, MAP_COLS - 1);
+    const parked = hexToPixel(parkRow, parkCol);
+    player.x = parked.x;
+    player.y = parked.y;
     // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
     // its own eventual ranking is by elimination order, not this score
     // (see the FINAL branch of handleRoomFinished's SOLO case), but the
@@ -1348,6 +1388,7 @@ export default class Room {
 
     this.tileMap[row][col] = TILE_STATE.SOLID;
     this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
+    this.scheduleRegenStillnessCheck(row, col);
     // causedBy lets the tapping client's own UI (see GameScene's
     // handleGhostScreenTap/tileRevived handler) tell "my tap actually
     // revived something" apart from an unattributed auto-regen burst or
@@ -1952,6 +1993,7 @@ export default class Room {
     goneTiles.slice(0, burstSize).forEach(({ row, col }) => {
       this.tileMap[row][col] = TILE_STATE.SOLID;
       this.regenGraceUntil.set(`${row}_${col}`, Date.now() + REGEN_GRACE_MS);
+      this.scheduleRegenStillnessCheck(row, col);
       this.emit('tileRevived', { row, col });
     });
     return true;
