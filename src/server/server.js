@@ -851,7 +851,7 @@ function setServerHandlers() {
       socketToToken.set(socket.id, token);
       tokenToSocket.set(token, socket.id);
       socket.join(roomId);
-      room.endProxyControl(socket.id);
+      room.endProxyControl(socket.id, true);
 
       socket.emit('reconnectAccepted', {});
       socket.emit('gameStarting', room.getSnapshot());

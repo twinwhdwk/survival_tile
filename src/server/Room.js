@@ -27,6 +27,7 @@ import {
   SOLO_BOT_SCORE_GAP_MIN,
   SOLO_BOT_SCORE_GAP_MAX,
   REGEN_GRACE_MS,
+  RECONNECT_RESPAWN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
   GHOST_RESPAWN_STILLNESS_MS,
@@ -1813,14 +1814,25 @@ export default class Room {
     this.emit('playerProxyControl', { playerId: socketId, proxied: true });
   }
 
-  // Reconnect landed in time (or the grace window elapsed and the caller is
-  // about to eliminate them anyway) — return the avatar to human control.
-  endProxyControl(socketId) {
+  // Reconnect landed in time (reclaimed=true, called from the reclaim path)
+  // or the grace window elapsed and the caller is about to eliminate them
+  // anyway (reclaimed=false) — return the avatar to human control. On a
+  // genuine reclaim, give the tile the avatar is standing on a brief
+  // immunity (RECONNECT_RESPAWN_GRACE_MS) so the bot's last parking spot
+  // doesn't collapse out from under the returning player in the beat before
+  // they re-engage — see that constant's own comment.
+  endProxyControl(socketId, reclaimed = false) {
     const player = this.players[socketId];
     if (!player) {
       return;
     }
     player.proxyControlled = false;
+    if (reclaimed && !player.eliminated) {
+      const { row, col } = this.getTileCoords(player.x, player.y);
+      if (this.tileMap[row][col] === TILE_STATE.SOLID) {
+        this.regenGraceUntil.set(`${row}_${col}`, Date.now() + RECONNECT_RESPAWN_GRACE_MS);
+      }
+    }
     this.emit('playerProxyControl', { playerId: socketId, proxied: false });
   }
 

@@ -208,3 +208,13 @@ export const BOMB_BLAST_RADIUS = 1;
 // reconnect (page reload + re-join round-trip) but not so long that a genuinely
 // gone player leaves a bot-piloted seat lingering for the rest of a round.
 export const RECONNECT_GRACE_MS = 20000;
+
+// The moment a reconnecting player reclaims their avatar, the bot proxy
+// hands control back — but there's a real beat before the human's eyes and
+// fingers re-engage, during which the tile the bot last parked them on may
+// already be counting down to collapse. Give just that one tile (the
+// avatar's current hex, not an area) a brief immunity so a returning player
+// doesn't lose the round in the first second back before they can even
+// react. Scoped tight and short on purpose: it's a re-entry cushion, not a
+// safe-haven.
+export const RECONNECT_RESPAWN_GRACE_MS = 3000;
