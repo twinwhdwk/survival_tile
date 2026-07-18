@@ -1,6 +1,6 @@
 # 타일 서바이벌 (Survival Tile)
 
-Real-time multiplayer "last tile standing" browser game built on Phaser 3 + Socket.io. Players spawn on a grid of hex tiles that collapse when stepped on; survivors advance through a tournament bracket that culminates in boss fights.
+Real-time multiplayer "last tile standing" browser game built on Phaser 3 + Socket.io. Players spawn on a grid of hex tiles that collapse when stepped on; survivors advance through a 3-stage tournament bracket (two closing-boundary survival rounds, then a solo finale) that culminates in one champion.
 
 ## Quick start
 

@@ -1,7 +1,7 @@
 {
   "name": "survival-tile",
   "version": "1.0.0",
-  "description": "Real-time multiplayer \"last tile standing\" browser game (Phaser 3 + Socket.io): hex-grid tile-collapse survival rounds, boss fights, and tournament bracket progression.",
+  "description": "Real-time multiplayer \"last tile standing\" browser game (Phaser 3 + Socket.io): hex-grid tile-collapse survival rounds, bomb-tile hazards, and tournament bracket progression.",
   "scripts": {
     "build": "webpack --config webpack.server.config.js && webpack --config webpack.client.config.js",
     "start": "node dist/server.bundle.js",

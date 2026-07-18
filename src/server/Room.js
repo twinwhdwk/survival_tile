@@ -925,10 +925,14 @@ export default class Room {
     }
   }
 
-  // Shared by reviveTile() (a real ghost's own tap) and moveBotsRandomly()
-  // (a ghost bot's auto-tap, gated on this same cooldown before it even
-  // scans for a target tile) -- see reviveTile()'s own comment on why the
-  // last-stand rally shortens this.
+  // The cooldown *value* a ghost's revive tap is currently subject to (see
+  // reviveTile()'s own comment on why last-stand shortens it) -- shared by
+  // reviveTile() itself and moveBotsRandomly()'s ghost-bot branch (which
+  // checks it first purely to skip pickRandomGoneTile()'s full-board scan
+  // when a tap couldn't land anyway), so the two formulas can't drift out
+  // of sync with each other. Each caller still reads this.reviveCooldowns
+  // and Date.now() itself, since those are one-liners with no real
+  // duplication risk of their own.
   ghostReviveCooldownMs() {
     const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
     return aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
@@ -960,9 +964,10 @@ export default class Room {
     // faster than normal, just not literally unbounded. Checked before
     // resolving a target tile below so a tap still inside the cooldown
     // window never pays for a map scan it can't use anyway.
+    const cooldownMs = this.ghostReviveCooldownMs();
     const now = Date.now();
     const lastRevive = this.reviveCooldowns.get(id) || 0;
-    if (now - lastRevive < this.ghostReviveCooldownMs()) {
+    if (now - lastRevive < cooldownMs) {
       return;
     }
 
@@ -1462,15 +1467,16 @@ export default class Room {
         // pickRandomGoneTile() scan entirely there too — there's no point
         // spending a tile scan every tick on a tap that can never do
         // anything in this mode. Same reasoning for the cooldown check
-        // below: reviveTile() re-derives and checks this exact same
-        // cooldown internally before touching a target, so without this a
-        // ghost bot was paying for a full 7x18 grid scan (pickRandomGoneTile)
-        // on every BOT_TICK_MS tick (100ms) even while its own tap could
-        // never land -- live (non-ghost) bots already gate their own
-        // movement scan the same way via botNextMoveAt.
+        // below (see ghostReviveCooldownMs(), shared with reviveTile()'s
+        // own identical check): without this a ghost bot was paying for a
+        // full 7x18 grid scan (pickRandomGoneTile) on every BOT_TICK_MS
+        // tick (100ms) even while its own tap could never land -- live
+        // (non-ghost) bots already gate their own movement scan the same
+        // way via botNextMoveAt.
         if (this.gameMode !== 'SOLO') {
+          const cooldownMs = this.ghostReviveCooldownMs();
           const lastRevive = this.reviveCooldowns.get(id) || 0;
-          if (Date.now() - lastRevive >= this.ghostReviveCooldownMs()) {
+          if (Date.now() - lastRevive >= cooldownMs) {
             const target = this.pickRandomGoneTile();
             if (target) {
               this.reviveTile(id, target.row, target.col);

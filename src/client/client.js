@@ -54,8 +54,9 @@ const config = {
   // Matches the CSS body background and the outer edge of every scene's
   // own radial gradient (EffectTextures.js) rather than pure black, so
   // there's no visible seam anywhere -- canvas edges, CSS letterboxing,
-  // and each scene's own background all agree on the same dark navy.
-  backgroundColor: '0x090b18',
+  // and each scene's own background all agree on the same warm near-black
+  // bronze (EffectTextures.js was reskinned off the original dark navy).
+  backgroundColor: '0x0d0805',
   dom: {
     createContainer: true,
   },

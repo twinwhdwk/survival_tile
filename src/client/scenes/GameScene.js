@@ -356,7 +356,12 @@ export default class GameScene extends Phaser.Scene {
     this.scoreText.setVisible(!this.isSpectator);
     this.updateScoreText(score || 0);
 
-    this.cameras.main.fadeIn(400, 9, 11, 24);
+    // Fades in from the same warm near-black the scene's own background
+    // gradient/canvas backgroundColor settle on (EffectTextures.js /
+    // client.js's #0d0805, in decimal RGB) rather than a mismatched color,
+    // so the very first frame of a round doesn't visibly flash before
+    // easing into place.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
     this.showStartCountdown(() => {
       // Both messages are player instructions ("버티세요", "물리치세요") --
       // meaningless to an admin who's only watching, so skip the banner
@@ -2148,10 +2153,13 @@ export default class GameScene extends Phaser.Scene {
     // already got the rounded treatment; this nickname tag just predates
     // it. No border (strokeAlpha: 0) to match the original plain-fill
     // Rectangle exactly, just with rounded corners instead of square ones.
+    // fillColor uses the shared COLORS.panelFill (warm ember tone) rather
+    // than its own hardcoded cool navy -- another leftover from before the
+    // board/HUD reskin, same as the frame colors fixed earlier.
     const labelBounds = label.getBounds();
     const labelBg = this.add.graphics();
     drawRoundedRect(labelBg, 0, -26, labelBounds.width + 10, labelBounds.height + 3, {
-      radius: 4, fillColor: 0x0b0e1c, fillAlpha: 0.5, strokeAlpha: 0,
+      radius: 4, fillColor: COLORS.panelFill, fillAlpha: 0.5, strokeAlpha: 0,
     });
     children.push(labelBg, label);
 
