@@ -5,7 +5,9 @@ import { generateBackgroundTexture, generateParticleTextures } from '../utilitie
 import { createAmbientEmbers } from '../utilities/SceneFx';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '../../shared/hexGrid';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
-import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
+import {
+  FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE, BUTTON,
+} from '../theme/Theme';
 import { fitTitlePanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { playClick } from '../utilities/SoundFx';
 import { vibrateTap } from '../utilities/Haptics';
@@ -24,9 +26,11 @@ const DOUBLE_CLICK_MS = 350;
 // Colors for the live per-room tile thumbnail. Deliberately distinct from
 // the board's own beveled-hex palette (EffectTextures.js) rather than
 // reusing it exactly — at thumbnail size the bevel/gradient detail would
-// be lost anyway, so flat, high-contrast fills read better small.
+// be lost anyway, so flat, high-contrast fills read better small. Still the
+// same warm family as the board itself now (was a cool blue-indigo, left
+// over from before the board's own tiles were reskinned warm).
 const MINIMAP_COLORS = {
-  [TILE_STATE.SOLID]: '#4b5aa0',
+  [TILE_STATE.SOLID]: '#9c7a45',
   [TILE_STATE.WARNING]: '#ff6b4a',
   [TILE_STATE.GONE]: '#05060c',
 };
@@ -85,11 +89,6 @@ export default class DashboardScene extends Phaser.Scene {
     // out past the panel border on both sides.
     fitTitlePanel(this.titlePanel, WORLD_WIDTH / 2, 31, 34, this.titleText, 28);
 
-    // No mention of C/S here (or anywhere on this screen) — this dashboard
-    // gets projected on a TV for everyone to see, and the whole point of
-    // the admin skills is that nobody watching can tell they exist, let
-    // alone that clicking a card arms one. Only the harmless spectate hint
-    // stays.
     // Only true for the admin -- a non-admin spectator can't actually
     // double-click into a specific room (see spectateRoom()'s own guard
     // below), so showing this hint to them would just be a promise the UI
@@ -116,15 +115,13 @@ export default class DashboardScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Emergency "start over" if a tournament gets stuck mid-event (see
-    // server.js's resetServer handler) — kept small and muted in a corner,
-    // matching this screen's existing "nobody watching can tell an
-    // admin capability is even here" design (same reasoning as the C/S
-    // skills' deliberately unlabeled keys) rather than LobbyScene's louder,
-    // plainly-visible version, since *this* screen is the one that may be
-    // projected on a TV for the whole event to see.
+    // server.js's resetServer handler) — kept small and muted in a corner
+    // rather than LobbyScene's louder, plainly-visible version, since *this*
+    // screen is the one that may be projected on a TV for the whole event
+    // to see.
     const resetButtonHtml = `
       <button id="dashboard-reset-server-button" type="button"
-        style="width:70px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid #7f1d1d;background:#1c0d0dcc;color:#d99;cursor:pointer;font-family:${FONT_BODY};">
+        style="width:70px;height:20px;font-size:10px;padding:0;border-radius:5px;border:1px solid ${BUTTON.dangerBorder};background:#1c0d0dcc;color:${BUTTON.dangerText};cursor:pointer;font-family:${FONT_BODY};">
         서버 초기화
       </button>
     `;
@@ -316,12 +313,12 @@ export default class DashboardScene extends Phaser.Scene {
     const minimap = this.add.image(0, 20, minimapTextureKey)
       .setDisplaySize(minimapInnerW, Math.max(minimapInnerH, 10));
 
-    // bg stays a plain Rectangle purely for its native hit-testing (click
-    // to select, double-click to spectate) — Graphics has no built-in hit
-    // area the way Rectangle does, and this card's interaction is the one
-    // thing not worth any risk to. Its own border is left off; the rounded
-    // outline below is a separate, purely decorative layer drawn at the
-    // same bounds, so the square-cornered box the interactive rectangle
+    // bg stays a plain Rectangle purely for its native hit-testing
+    // (double-click to spectate) — Graphics has no built-in hit area the
+    // way Rectangle does, and this card's interaction is the one thing not
+    // worth any risk to. Its own border is left off; the rounded outline
+    // below is a separate, purely decorative layer drawn at the same
+    // bounds, so the square-cornered box the interactive rectangle
     // technically is never actually gets seen.
     const bg = this.add.rectangle(0, 0, cardW, cardH, COLORS.panelFill, 0.35)
       .setInteractive({ useHandCursor: true });
@@ -372,7 +369,7 @@ export default class DashboardScene extends Phaser.Scene {
       fontSize: '15px',
       color: COLORS.textGold,
       stroke: TEXT_STROKE,
-      strokeThickness: 3,
+      strokeThickness: 2,
     }).setOrigin(0, 0.5);
     const aliveText = this.add.text(cardW / 2 - 10, -cardH / 2 + 12, '', {
       fontFamily: FONT_BODY,
