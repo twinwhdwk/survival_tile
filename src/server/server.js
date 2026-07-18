@@ -723,10 +723,20 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
     const advancingIds = new Set(advancing.map((m) => m.socketId));
     const eliminatedHere = allMembers.filter((m) => !advancingIds.has(m.socketId));
     if (eliminatedHere.length > 0) {
+      // finalScore is this *room's* shared total -- every member's score
+      // summed together, including whoever's still advancing. Using it here
+      // would credit this cut subset with the whole room's combined score
+      // (survivors' contributions included), inflating them well past what
+      // they actually earned and easily outranking the eventual champion's
+      // own, much smaller individual total. Sum just their own individual
+      // scores instead (playerResults, from Room.getPlayerResults() --
+      // already tracked per-player the same way SOLO's ranking uses above).
+      const scoreById = new Map(playerResults.map((p) => [p.socketId, p.score || 0]));
+      const eliminatedScore = eliminatedHere.reduce((sum, m) => sum + (scoreById.get(m.socketId) || 0), 0);
       finalRankings.push({
         nicknames: eliminatedHere.map((m) => m.nickname),
         socketIds: eliminatedHere.map((m) => m.socketId),
-        score: finalScore,
+        score: eliminatedScore,
         result: 'eliminated',
         stage: currentStage,
       });
