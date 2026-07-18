@@ -387,19 +387,44 @@ export default class Room {
   // can render a small live thumbnail of the board instead of just numbers.
   getSummary() {
     const players = Object.values(this.players);
-    const aliveCount = players.filter((p) => !p.eliminated).length;
+    const alivePlayers = players.filter((p) => !p.eliminated);
     const elapsed = Date.now() - this.roundStartTime;
     const remainingMs = Math.max(0, this.roundDurationMs - elapsed);
     return {
       roomId: this.id,
       mode: this.mode,
       gameMode: this.gameMode,
-      aliveCount,
+      aliveCount: alivePlayers.length,
       totalCount: players.length,
-      score: this.score,
+      // Nicknames only (not the whole player object) -- the dashboard's
+      // survivor box just lists names, and this rides the same once-a-
+      // second broadcast every other summary field already uses.
+      aliveNicknames: alivePlayers.map((p) => p.nickname),
+      score: this.getLiveScore(),
       remainingMs,
       tileMap: this.tileMap,
     };
+  }
+
+  // Dashboard-only projection of this.score: adds each still-alive player's
+  // not-yet-credited elapsed time on top of the real credited total, so the
+  // number the admin dashboard shows climbs every broadcast tick instead of
+  // only jumping at eliminations/finishRoom (see addSurvivalScore()). Purely
+  // a read — doesn't touch this.score/player.score/lastScoreCreditAt, so the
+  // actual credited totals (and addSurvivalScore's anti-exploit accounting)
+  // are untouched.
+  getLiveScore() {
+    if (this.mode !== 'SURVIVAL' && this.mode !== 'FINAL') {
+      return this.score;
+    }
+    const now = Date.now();
+    return Object.values(this.players).reduce((total, player) => {
+      if (player.eliminated) {
+        return total;
+      }
+      const creditFrom = player.lastScoreCreditAt || this.roundStartTime;
+      return total + Math.floor(Math.max(0, now - creditFrom) / 1000) * SURVIVAL_SCORE_PER_SECOND;
+    }, this.score);
   }
 
   getTileCoords(x, y) {
@@ -985,6 +1010,15 @@ export default class Room {
     return aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
   }
 
+  // Stage 2's SURVIVAL round is deliberately harder to rally in: halving the
+  // per-tap gauge fill here means the same team needs twice as many taps to
+  // bring a ghost back as they would have in stage 1, for the same
+  // GHOST_REVIVE_GAUGE_MAX. Stage 1 (and any other caller) keeps the normal
+  // per-tap value.
+  ghostReviveGaugePerTap() {
+    return this.stage >= 2 ? GHOST_REVIVE_GAUGE_PER_TAP / 2 : GHOST_REVIVE_GAUGE_PER_TAP;
+  }
+
   reviveTile(id, row, col) {
     // 개인전 has no ghost tile-revival/respawn mechanic at all — elimination
     // is permanent, so there's nothing for a ghost's tap to do. Guarding
@@ -1072,7 +1106,7 @@ export default class Room {
     // it climb. Reaching GHOST_REVIVE_GAUGE_MAX brings one random ghost
     // back (see respawnRandomGhost), rather than each ghost grinding a
     // private per-player meter as before.
-    this.teamRevivalGauge = Math.min(GHOST_REVIVE_GAUGE_MAX, this.teamRevivalGauge + GHOST_REVIVE_GAUGE_PER_TAP);
+    this.teamRevivalGauge = Math.min(GHOST_REVIVE_GAUGE_MAX, this.teamRevivalGauge + this.ghostReviveGaugePerTap());
     this.emit('reviveGaugeUpdate', { gauge: this.teamRevivalGauge, max: GHOST_REVIVE_GAUGE_MAX });
     if (this.teamRevivalGauge >= GHOST_REVIVE_GAUGE_MAX) {
       this.respawnRandomGhost();
