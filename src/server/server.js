@@ -161,18 +161,17 @@ function broadcastDashboard() {
       console.error(`Room ${room.id} summary failed:`, error);
     }
   });
-  adminSockets.forEach((adminId) => {
-    const adminSocket = io.sockets.sockets[adminId];
-    if (adminSocket) {
-      adminSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: true });
-    }
-  });
-  spectatorSockets.forEach((spectatorId) => {
-    const spectatorSocket = io.sockets.sockets[spectatorId];
-    if (spectatorSocket) {
-      spectatorSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: false });
-    }
-  });
+  // Fan out through the shared DASHBOARD_ROOM rather than a per-socket emit
+  // loop. This runs every second and each payload embeds every room's full
+  // tileMap (~300 tiles x N rooms), so with the old loop socket.io
+  // re-serialized that entire ~3KB+ blob once per admin/spectator; through a
+  // room it serializes once and fans out natively. isAdmin was dropped from
+  // the payload deliberately: DashboardScene only ever reads isAdmin from
+  // its scene-entry data (dashboardStarting/gameStarting), never from these
+  // per-tick dashboardUpdate messages, so it was a dead field here — and
+  // dropping it is exactly what lets every recipient share one identical
+  // payload. Admin-vs-spectator capability is already fixed at scene entry.
+  io.to(DASHBOARD_ROOM).emit('dashboardUpdate', { stage: currentStage, rooms: summaries });
 }
 
 // Seats a real player cut from the bracket into the dashboard the room's
@@ -193,6 +192,7 @@ function seatSpectator(socketId) {
     return;
   }
   spectatorSockets.add(socketId);
+  socket.join(DASHBOARD_ROOM);
   socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: false });
 }
 
@@ -299,6 +299,11 @@ const disconnectedSockets = new Set();
 const tokenToSocket = new Map();
 const socketToToken = new Map();
 const graceTimers = new Map();
+
+// A single socket.io room that every admin and cut-player spectator joins,
+// so broadcastDashboard() can fan its (large, every-second) payload out
+// with one serialization instead of a per-socket emit loop.
+const DASHBOARD_ROOM = 'dashboard-viewers';
 
 function clearGraceTimer(token) {
   const timer = graceTimers.get(token);
@@ -557,8 +562,14 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
             return;
           }
           if (stage <= 2) {
+            observerSocket.join(DASHBOARD_ROOM);
             observerSocket.emit('dashboardStarting', { stage, roomCount: active.length, isAdmin });
           } else {
+            // Stage 3+ is watched as a full in-room spectator, not via the
+            // dashboard — leave the dashboard room so a lingering membership
+            // from an earlier stage doesn't keep delivering dashboard fan-out
+            // to a client now rendering a single live board.
+            observerSocket.leave(DASHBOARD_ROOM);
             observerSocket.join(roomId);
             observerSocket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true, isAdmin });
           }
@@ -1072,6 +1083,10 @@ function setServerHandlers() {
       if (!room) {
         return;
       }
+      // Leaving the dashboard fan-out room while watching one full board,
+      // so a stale membership doesn't keep pushing every-room dashboard
+      // payloads to a client now rendering a single live game.
+      socket.leave(DASHBOARD_ROOM);
       socket.join(roomId);
       socket.emit('gameStarting', {
         ...room.getSnapshot(), isSpectator: true, fromDashboard: true, isAdmin: true,
@@ -1094,6 +1109,7 @@ function setServerHandlers() {
       if (currentStage === 0 || currentStage > 2) {
         return;
       }
+      socket.join(DASHBOARD_ROOM);
       socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
     });
 
