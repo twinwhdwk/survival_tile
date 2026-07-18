@@ -2237,6 +2237,14 @@ export default class Room {
       const { row, col } = this.getTileCoords(player.x, player.y);
       if (this.tileMap[row][col] === TILE_STATE.SOLID) {
         this.regenGraceUntil.set(`${row}_${col}`, Date.now() + RECONNECT_RESPAWN_GRACE_MS);
+        // Same anti-camping re-check every other regenGraceUntil writer
+        // pairs with (see scheduleRegenStillnessCheck()): this immunity
+        // suppresses the reclaimed tile's collapse, and a tile's fuse only
+        // ever re-lights on a fresh movePlayerTo() arrival — so a returning
+        // player who simply never moves again would otherwise hold this exact
+        // spot permanently once the immunity lapses, with nothing left to
+        // start it collapsing.
+        this.scheduleRegenStillnessCheck(row, col, RECONNECT_RESPAWN_GRACE_MS);
       }
     }
     this.emit('playerProxyControl', { playerId: socketId, proxied: false });
