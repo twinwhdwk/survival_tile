@@ -9,6 +9,7 @@ import { ANIMAL_COUNT } from '../shared/animals';
 import {
   NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, MAX_PLAYERS, STAGE_2_MAX_GROUP_SIZE,
 } from '../shared/roomConfig';
+import { RECONNECT_GRACE_MS } from '../shared/roundConfig';
 import Room from './Room';
 
 // A crash from one bad message (or an edge case this file didn't
@@ -285,6 +286,27 @@ let finalRankings = [];
 // disconnected player's slot silently resurrect as an unpiloted "ghost" who
 // can never be eliminated and would wrongly ride along to the next round.
 const disconnectedSockets = new Set();
+
+// Reconnect support. sessionToken (a stable per-browser id the client sends
+// with join and reconnectAttempt) is the thing we match a returning player
+// against, since their socket.id changes on every reconnect. tokenToSocket
+// maps a live token to the socket.id currently holding it; graceTimers holds
+// the RECONNECT_GRACE_MS countdown for a token whose socket just dropped
+// mid-round — during that window the player's avatar is bot-proxied inside
+// its Room (Room.beginProxyControl) rather than eliminated, and a
+// reconnectAttempt with the same token reclaims it. If the timer fires first,
+// the reclaim window is over and the normal disconnect elimination runs.
+const tokenToSocket = new Map();
+const socketToToken = new Map();
+const graceTimers = new Map();
+
+function clearGraceTimer(token) {
+  const timer = graceTimers.get(token);
+  if (timer) {
+    clearTimeout(timer);
+    graceTimers.delete(token);
+  }
+}
 
 function sanitizeNickname(raw) {
   if (typeof raw !== 'string') {
@@ -796,6 +818,45 @@ function setServerHandlers() {
   io.on('connection', (socket) => {
     console.log('Socket connected: ' + socket.id);
 
+    // A reconnecting client offers its stable session token. If that token
+    // has a seat still inside its RECONNECT_GRACE_MS window (bot-proxied
+    // since the drop — see the disconnect handler), move that seat from the
+    // old socket.id onto this new one, stop the bot proxy, cancel the grace
+    // timeout, and resume the player right where their avatar is now, at its
+    // current score. Anything else (no such token, window already elapsed,
+    // seat already gone) is a clean rejection the client turns into a normal
+    // reload back to the login screen.
+    socket.on('reconnectAttempt', (payload) => {
+      const token = payload && typeof payload.token === 'string' ? payload.token : null;
+      if (!token || !graceTimers.has(token)) {
+        socket.emit('reconnectRejected', {});
+        return;
+      }
+      const oldSocketId = tokenToSocket.get(token);
+      const roomId = oldSocketId && socketRoomMap.get(oldSocketId);
+      const room = roomId && rooms.get(roomId);
+      if (!oldSocketId || !room || !room.players[oldSocketId] || room.finished) {
+        clearGraceTimer(token);
+        socket.emit('reconnectRejected', {});
+        return;
+      }
+
+      clearGraceTimer(token);
+      // Re-key everything that was tracking the old socket.id onto the new
+      // one, then hand the avatar back to human control.
+      room.reassignPlayerSocket(oldSocketId, socket.id);
+      socketRoomMap.delete(oldSocketId);
+      socketRoomMap.set(socket.id, roomId);
+      socketToToken.delete(oldSocketId);
+      socketToToken.set(socket.id, token);
+      tokenToSocket.set(token, socket.id);
+      socket.join(roomId);
+      room.endProxyControl(socket.id);
+
+      socket.emit('reconnectAccepted', {});
+      socket.emit('gameStarting', room.getSnapshot());
+    });
+
     socket.on('join', (payload) => {
       const nickname = sanitizeNickname(payload && payload.nickname);
       if (!nickname) {
@@ -838,6 +899,18 @@ function setServerHandlers() {
       }
 
       lobbyPlayers[socket.id] = { nickname, animalIndex: Math.floor(Math.random() * ANIMAL_COUNT) };
+
+      // Remember which browser (stable token) this socket belongs to, so a
+      // later reconnectAttempt with the same token can be matched back to
+      // whatever room seat this socket ends up in. Only regular players are
+      // tracked for reclaim — an admin reconnect already has its own
+      // re-auth path and never occupies a room seat.
+      const token = payload && typeof payload.token === 'string' ? payload.token : null;
+      if (token && !isAdminAttempt) {
+        socketToToken.set(socket.id, token);
+        tokenToSocket.set(token, socket.id);
+      }
+
       broadcastLobby();
     });
 
@@ -1035,30 +1108,66 @@ function setServerHandlers() {
         return;
       }
 
-      // Only meaningful mid-tournament: this set exists purely so
-      // startStage()'s member filter can skip someone who dropped while
-      // sitting between rooms, and it's only ever cleared when a
-      // tournament ends (endTournament/resetServerState). Recording every
-      // disconnect regardless of phase meant each casual visitor who just
-      // opened the page and closed the tab without ever joining left a
-      // permanent entry behind -- verified as exactly 300 stranded entries
-      // after 300 such visits with no tournament running, growing without
-      // bound for as long as the instance stays up between events. Anyone
-      // who disconnects during LOBBY is either an actual lobby player
-      // (already removed from lobbyPlayers by the early return above, so
-      // they'd never be seated anyway) or someone with no bracket standing
-      // to skip in the first place.
-      if (globalPhase === 'TOURNAMENT') {
-        disconnectedSockets.add(socket.id);
-      }
-
       const roomId = socketRoomMap.get(socket.id);
       if (roomId) {
         const room = rooms.get(roomId);
+        const token = socketToToken.get(socket.id);
+
+        // Mid-round drop of a real player who has a session token and isn't
+        // already out: don't eliminate yet. Hand their avatar to the bot AI
+        // (Room.beginProxyControl) and start a RECONNECT_GRACE_MS countdown.
+        // A reconnectAttempt with the same token before it fires reclaims
+        // the seat in place; if it fires first, the reclaim window is over
+        // and we run the normal disconnect elimination.
+        const player = room && room.players[socket.id];
+        const canReclaim = room && token && player && !player.eliminated && !room.finished;
+
+        if (canReclaim) {
+          room.beginProxyControl(socket.id);
+          // socketRoomMap still points token's old socket.id at this room so
+          // the grace timer and a reclaim can both find it; cleaned up
+          // either on reclaim (moved to the new socket.id) or on timeout.
+          const timer = setTimeout(() => {
+            graceTimers.delete(token);
+            const liveRoom = rooms.get(roomId);
+            if (liveRoom) {
+              liveRoom.endProxyControl(socket.id);
+              liveRoom.handleDisconnect(socket.id);
+            }
+            socketRoomMap.delete(socket.id);
+            tokenToSocket.delete(token);
+            socketToToken.delete(socket.id);
+          }, RECONNECT_GRACE_MS);
+          graceTimers.set(token, timer);
+          // Deliberately DON'T record into disconnectedSockets yet — that's
+          // for players truly gone from the bracket; a reclaimable seat is
+          // still in play. The timeout path above (via handleDisconnect)
+          // covers the genuinely-gone case.
+          return;
+        }
+
+        if (globalPhase === 'TOURNAMENT') {
+          disconnectedSockets.add(socket.id);
+        }
         if (room) {
           room.handleDisconnect(socket.id);
         }
         socketRoomMap.delete(socket.id);
+        if (token) {
+          tokenToSocket.delete(token);
+          socketToToken.delete(socket.id);
+        }
+        return;
+      }
+
+      // Not in a room. Same bracket-tracking note as before.
+      if (globalPhase === 'TOURNAMENT') {
+        disconnectedSockets.add(socket.id);
+      }
+      const lingeringToken = socketToToken.get(socket.id);
+      if (lingeringToken) {
+        tokenToSocket.delete(lingeringToken);
+        socketToToken.delete(socket.id);
       }
     });
   });

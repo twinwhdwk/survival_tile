@@ -1441,7 +1441,11 @@ export default class Room {
 
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
-      if (!player.isBot) {
+      // proxyControlled: a real player who dropped mid-round and is inside
+      // their reconnect grace window (see beginProxyControl) — the bot AI
+      // keeps their seat alive and playing exactly as it does for a real
+      // bot, so they can reclaim a still-live avatar rather than a corpse.
+      if (!player.isBot && !player.proxyControlled) {
         return;
       }
 
@@ -1789,6 +1793,69 @@ export default class Room {
       score: this.score,
       rankings: (tournamentResult && tournamentResult.rankings) || null,
     });
+  }
+
+  // Reconnect support: a real player's socket dropped mid-round. Rather
+  // than eliminate them, mark the avatar proxy-controlled so the bot AI
+  // steers it (moveBotsRandomly treats proxyControlled the same as isBot —
+  // it keeps the seat alive and playing during the RECONNECT_GRACE_MS
+  // window). Nothing else about the player changes: same score, same
+  // eliminated state, same nickname/animal, so a reclaim resumes exactly
+  // where the avatar is now. A no-op if the player's already gone/eliminated.
+  beginProxyControl(socketId) {
+    const player = this.players[socketId];
+    if (!player || player.eliminated) {
+      return;
+    }
+    player.proxyControlled = true;
+    // Let everyone see the avatar is now on autopilot (client dims it, same
+    // cue a spectator/ghost gets) rather than looking like a normal player.
+    this.emit('playerProxyControl', { playerId: socketId, proxied: true });
+  }
+
+  // Reconnect landed in time (or the grace window elapsed and the caller is
+  // about to eliminate them anyway) — return the avatar to human control.
+  endProxyControl(socketId) {
+    const player = this.players[socketId];
+    if (!player) {
+      return;
+    }
+    player.proxyControlled = false;
+    this.emit('playerProxyControl', { playerId: socketId, proxied: false });
+  }
+
+  // Moves a player's entire seat from one socket.id key to another (a
+  // reconnect gets a brand new socket.id). Everything about the player
+  // object itself is preserved; only the key it lives under changes, plus
+  // the per-socket side maps that key off it. Called by server.js's
+  // reconnectAttempt handler before it re-adds the new socket to the room's
+  // broadcast channel.
+  reassignPlayerSocket(oldId, newId) {
+    const player = this.players[oldId];
+    if (!player || oldId === newId) {
+      return;
+    }
+    player.playerId = newId;
+    this.players[newId] = player;
+    delete this.players[oldId];
+
+    // The per-socket bookkeeping maps are all keyed by socket.id too.
+    if (this.reviveCooldowns.has(oldId)) {
+      this.reviveCooldowns.set(newId, this.reviveCooldowns.get(oldId));
+      this.reviveCooldowns.delete(oldId);
+    }
+    const moveState = this.moveBroadcast.get(oldId);
+    if (moveState) {
+      if (moveState.timer) {
+        clearTimeout(moveState.timer);
+        moveState.timer = null;
+      }
+      this.moveBroadcast.delete(oldId);
+    }
+    if (this.botHeadings && this.botHeadings.has(oldId)) {
+      this.botHeadings.set(newId, this.botHeadings.get(oldId));
+      this.botHeadings.delete(oldId);
+    }
   }
 
   handleDisconnect(socketId) {
