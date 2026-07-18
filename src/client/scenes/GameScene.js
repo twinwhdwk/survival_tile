@@ -588,10 +588,27 @@ export default class GameScene extends Phaser.Scene {
     // 'reviveGaugeUpdate' handler) — reaching the end respawns them back
     // into the round (Room.respawnGhost), so this doubles as visible
     // progress toward that instead of tapping feeling directionless.
-    this.reviveGaugeBarBg = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT - 70, 160, 10, 0x222222)
-      .setScrollFactor(0).setDepth(29).setVisible(false);
-    this.reviveGaugeBarFill = this.add.rectangle(WORLD_WIDTH / 2 - 80, WORLD_HEIGHT - 70, 0, 8, 0x88ccff)
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+    // Graphics (rounded, bordered), not a flat Rectangle -- every other
+    // bar/panel in the app already gets the rounded-with-border treatment
+    // (drawRoundedRect), and this was the one remaining flat-cornered,
+    // borderless HUD element next to it.
+    this.reviveGaugeX = WORLD_WIDTH / 2 - 80;
+    this.reviveGaugeY = WORLD_HEIGHT - 70;
+    this.reviveGaugeWidth = 160;
+    this.reviveGaugeHeight = 8;
+    this.reviveGaugeBarBg = this.add.graphics().setScrollFactor(0).setDepth(29).setVisible(false);
+    drawRoundedRect(
+      this.reviveGaugeBarBg,
+      this.reviveGaugeX + this.reviveGaugeWidth / 2,
+      this.reviveGaugeY,
+      this.reviveGaugeWidth,
+      this.reviveGaugeHeight + 2,
+      {
+        radius: 5, fillColor: 0x1a1108, fillAlpha: 0.85, strokeColor: 0x88ccff, strokeAlpha: 0.35, strokeWidth: 1,
+      },
+    );
+    this.reviveGaugeBarFill = this.add.graphics().setScrollFactor(0).setDepth(30).setVisible(false);
+    this.drawReviveGaugeFill(0);
 
     // A whole-screen blue-gray wash so ghost mode reads as "you're now
     // spectating," not just a slightly-faded version of normal play —
@@ -1721,7 +1738,8 @@ export default class GameScene extends Phaser.Scene {
       });
 
       this.reviveGaugeBarBg.setVisible(true);
-      this.reviveGaugeBarFill.setVisible(true).setSize(0, 8);
+      this.reviveGaugeBarFill.setVisible(true);
+      this.drawReviveGaugeFill(0);
     }
 
     this.tweens.add({ targets: this.ghostOverlay, alpha: 0.3, duration: 600 });
@@ -1733,7 +1751,32 @@ export default class GameScene extends Phaser.Scene {
   // never leave the bar showing a stale value for long.
   updateReviveGauge(gauge, max) {
     const ratio = max > 0 ? Phaser.Math.Clamp(gauge / max, 0, 1) : 0;
-    this.reviveGaugeBarFill.setSize(160 * ratio, 8);
+    this.drawReviveGaugeFill(ratio);
+  }
+
+  // Graphics has no persistent .setSize() the way the old flat Rectangle
+  // did, so growing the fill means clearing + redrawing it at the new
+  // width every update, same as every other rounded bar/panel in the app.
+  // Radius is clamped to the fill's own half-height/half-width so a
+  // near-empty gauge (a few px wide) doesn't ask fillRoundedRect for a
+  // corner radius bigger than the shape itself.
+  drawReviveGaugeFill(ratio) {
+    this.reviveGaugeBarFill.clear();
+    const width = this.reviveGaugeWidth * ratio;
+    if (width <= 0) {
+      return;
+    }
+    const radius = Math.min(4, this.reviveGaugeHeight / 2, width / 2);
+    drawRoundedRect(
+      this.reviveGaugeBarFill,
+      this.reviveGaugeX + width / 2,
+      this.reviveGaugeY,
+      width,
+      this.reviveGaugeHeight,
+      {
+        radius, fillColor: 0x88ccff, fillAlpha: 1, strokeAlpha: 0,
+      },
+    );
   }
 
   // Inverse of hideJoystick() — needed once a ghost fills their revival
@@ -1785,9 +1828,16 @@ export default class GameScene extends Phaser.Scene {
       this.reviveGaugeBarFill.setVisible(false);
       // Tweened alpha to 0 for the fade-out above; restore full alpha now
       // so these are ready to fade back in cleanly next time this player
-      // is eliminated again.
+      // is eliminated again. The gauge bars were missing from this reset
+      // (only the ghost-hint text/panel got it) -- since nothing else in
+      // handleOwnElimination() ever restores their alpha either, a player
+      // revived once would find the gauge bar permanently stuck invisible
+      // (alpha 0, even though .setVisible(true) fires again) every time
+      // they died again for the rest of that room.
       this.ghostHintText.setAlpha(1);
       this.ghostHintPanel.setAlpha(1);
+      this.reviveGaugeBarBg.setAlpha(1);
+      this.reviveGaugeBarFill.setAlpha(1);
     } });
     this.tweens.add({ targets: this.ghostOverlay, alpha: 0, duration: 400 });
 
