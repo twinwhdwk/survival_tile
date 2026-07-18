@@ -382,76 +382,68 @@ export default class DashboardScene extends Phaser.Scene {
     drawRoundedRect(cardBorder, 0, 0, cardW, cardH, { fillAlpha: 0, strokeWidth: 1, strokeColor: 0xffd700, strokeAlpha: 0.25, radius: 8 });
 
     // Header strip: solid backing so text stays readable over the
-    // thumbnail, holding the group label + alive count + timer/score.
-    // Rounded on the top two corners only (matching cardBorder's radius:8)
-    // -- flush against the card's own rounded top edge, a plain square-
-    // cornered Rectangle here poked its sharp top corners out past the
-    // smooth curve of the border drawn right behind it.
+    // thumbnail, holding just the group label and its score -- alive count
+    // and the round timer used to be duplicated/shown here too, but every
+    // card shares the exact same timer (useless per-card) and the alive
+    // count was already restated right below in the survivor-name box, so
+    // both were dropped rather than kept as redundant clutter. Rounded on
+    // the top two corners only (matching cardBorder's radius:8) -- flush
+    // against the card's own rounded top edge, a plain square-cornered
+    // Rectangle here poked its sharp top corners out past the smooth curve
+    // of the border drawn right behind it.
     const headerBar = this.add.graphics();
     drawRoundedRect(headerBar, 0, -cardH / 2 + 20, cardW, 40, {
       radius: { tl: 8, tr: 8, bl: 0, br: 0 },
       fillAlpha: 0.82,
     });
 
-    const label = this.add.text(-cardW / 2 + 10, -cardH / 2 + 12, '', {
+    const label = this.add.text(-cardW / 2 + 10, -cardH / 2 + 20, '', {
       fontFamily: FONT_BODY,
       fontSize: '15px',
       color: COLORS.textGold,
       stroke: TEXT_STROKE,
       strokeThickness: 2,
     }).setOrigin(0, 0.5);
-    const aliveText = this.add.text(cardW / 2 - 10, -cardH / 2 + 12, '', {
-      fontFamily: FONT_BODY,
-      fontSize: '13px',
-      color: '#ffffff',
-    }).setOrigin(1, 0.5);
-    const infoText = this.add.text(-cardW / 2 + 10, -cardH / 2 + 28, '', {
-      fontFamily: FONT_BODY,
-      fontSize: '12px',
-      color: COLORS.textMuted,
-      align: 'left',
-    }).setOrigin(0, 0.5);
-
-    // Score + survivor-name panel, big and centered over the tile thumbnail
-    // -- this is now the headline content of the card (see
-    // updateCardContent), so it needs a solid backing to read at a glance
-    // over whatever tile colors are behind it. Sized off the card's own
-    // dimensions (fixed at creation, not recomputed per update) since stage
-    // 1's up-to-8-room grid and stage 2's up-to-4-room grid produce very
-    // differently sized cards.
-    const boxW = minimapInnerW - 10;
-    const boxH = minimapInnerH - 10;
-    const scoreBox = this.add.graphics();
-    drawRoundedRect(scoreBox, 0, 20, boxW, boxH, {
-      radius: 10, fillColor: 0x000000, fillAlpha: 0.5, strokeColor: 0xffd700, strokeAlpha: 0.35,
-    });
-
-    const scoreFontSize = Math.round(Math.min(cardW, cardH) * 0.26);
-    const scoreText = this.add.text(0, 20 - boxH / 2 + 6, '', {
+    // The score is the other headline stat for the card (see
+    // updateCardContent) -- big and bold within the header's fixed 40px
+    // strip, right-aligned opposite the room label.
+    const scoreFontSize = Math.min(22, Math.round(cardH * 0.16));
+    const scoreText = this.add.text(cardW / 2 - 10, -cardH / 2 + 20, '', {
       fontFamily: FONT_DISPLAY,
       fontSize: `${scoreFontSize}px`,
       fontStyle: 'bold',
       color: COLORS.textGold,
       stroke: TEXT_STROKE,
-      strokeThickness: Math.max(3, Math.round(scoreFontSize * 0.12)),
-    }).setOrigin(0.5, 0);
+      strokeThickness: 3,
+    }).setOrigin(1, 0.5);
 
-    // Currently-alive players' names, wrapped/centered under the score --
-    // this is the other half of what the box now shows (see
-    // updateCardContent). Font scales with the card too, just far more
-    // modestly than the score since a full roster of nicknames needs to fit.
-    const namesFontSize = Math.max(11, Math.round(Math.min(cardW, cardH) * 0.09));
-    const namesText = this.add.text(0, 20 - boxH / 2 + 6 + scoreFontSize + 8, '', {
+    // Survivor-name panel, big and centered over the tile thumbnail -- this
+    // is the headline content of the card (see updateCardContent), so it
+    // needs a solid backing to read at a glance over whatever tile colors
+    // are behind it. Sized off the card's own dimensions (fixed at
+    // creation, not recomputed per update) since stage 1's up-to-8-room
+    // grid and stage 2's up-to-4-room grid produce very differently sized
+    // cards.
+    const boxW = minimapInnerW - 10;
+    const boxH = minimapInnerH - 10;
+    const namesBox = this.add.graphics();
+    drawRoundedRect(namesBox, 0, 20, boxW, boxH, {
+      radius: 10, fillColor: 0x000000, fillAlpha: 0.5, strokeColor: 0xffd700, strokeAlpha: 0.35,
+    });
+
+    const namesFontSize = Math.max(13, Math.round(Math.min(cardW, cardH) * 0.13));
+    const namesText = this.add.text(0, 20, '', {
       fontFamily: FONT_BODY,
       fontSize: `${namesFontSize}px`,
+      fontStyle: 'bold',
       color: '#ffffff',
       align: 'center',
       stroke: TEXT_STROKE,
-      strokeThickness: 2,
+      strokeThickness: 3,
       wordWrap: { width: boxW - 16 },
-    }).setOrigin(0.5, 0);
+    }).setOrigin(0.5, 0.5);
 
-    container.add([minimap, bg, cardBorder, headerBar, label, aliveText, infoText, scoreBox, scoreText, namesText]);
+    container.add([minimap, bg, cardBorder, headerBar, label, scoreText, namesBox, namesText]);
 
     this.tweens.add({
       targets: container,
@@ -462,7 +454,7 @@ export default class DashboardScene extends Phaser.Scene {
     });
 
     return {
-      container, bg, cardBorder, label, aliveText, infoText, scoreText, namesText,
+      container, bg, cardBorder, label, scoreText, namesText,
       minimap, minimapTextureKey, minimapCanvas: null,
       roomId, cardW, cardH, prevAliveCount: null, borderFlashTimer: null,
     };
@@ -495,7 +487,7 @@ export default class DashboardScene extends Phaser.Scene {
     // This dashboard only ever covers stage 1/2 (see broadcastDashboard() in
     // server.js, currentStage <= 2) — both are SURVIVAL now that the boss
     // mechanic has been removed, so there's no other mode to label here.
-    card.label.setText(`${i + 1}조 🏃 생존`);
+    card.label.setText(`${i + 1}조`);
 
     this.drawMinimap(card, summary.tileMap);
 
@@ -536,17 +528,14 @@ export default class DashboardScene extends Phaser.Scene {
     }
     card.prevAliveCount = summary.aliveCount;
 
+    card.scoreText.setText(`${summary.score}`);
+
+    // Same red/gold/green read the old "생존 N/M" text used to carry,
+    // just moved onto the name list itself now that the count isn't
+    // spelled out as a separate number anywhere on the card.
     const aliveRatio = summary.totalCount > 0 ? summary.aliveCount / summary.totalCount : 0;
     const aliveColor = aliveRatio >= 0.7 ? '#88ff99' : (aliveRatio >= 0.4 ? '#ffd700' : '#ff6666');
-    card.aliveText.setColor(aliveColor).setText(`생존 ${summary.aliveCount}/${summary.totalCount}`);
-
-    const totalSeconds = Math.ceil(summary.remainingMs / 1000);
-    const mm = Math.floor(totalSeconds / 60);
-    const ss = totalSeconds % 60;
-    const timerStr = `${mm}:${ss.toString().padStart(2, '0')}`;
-    card.infoText.setText(`남은시간 ${timerStr}`);
-    card.scoreText.setText(`${summary.score}`);
-    card.namesText.setText((summary.aliveNicknames || []).join(', '));
+    card.namesText.setColor(aliveColor).setText((summary.aliveNicknames || []).join(', '));
   }
 
 }
