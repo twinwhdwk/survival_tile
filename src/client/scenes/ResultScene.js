@@ -218,15 +218,42 @@ export default class ResultScene extends Phaser.Scene {
     }
 
     const RANK_COLORS = [COLORS.textGold, COLORS.textSilver, COLORS.textBronze];
-    const RANK_MEDALS = ['🥇 ', '🥈 ', '🥉 '];
+    const RANK_MEDALS = ['🥇', '🥈', '🥉'];
+    // Column layout (rank | name | score) rather than one long sentence per
+    // row -- a real leaderboard reads by scanning a column, not by reading
+    // full sentences n times. All three x-anchors are relative to the fixed
+    // 360-wide rankingsPanel, same as the highlight/zebra bars below.
+    const rankX = WORLD_WIDTH / 2 - 170;
+    const nameX = WORLD_WIDTH / 2 - 112;
+    const scoreX = WORLD_WIDTH / 2 + 170;
+    const nameMaxWidth = scoreX - 80 - nameX;
 
     rankings.forEach((entry, i) => {
       const isMine = (entry.socketIds || []).includes(mySocketId);
+      const isPodium = i < 3;
       const medal = RANK_MEDALS[i] || '';
       const champTag = entry.result === 'champion' ? ' 🏆' : '';
-      const label = `${i + 1}위 ${medal}${entry.nicknames.join(', ')} - ${entry.score}점${champTag}`;
-      const color = isMine ? '#55ff88' : (RANK_COLORS[i] || '#ffffff');
+      const rankLabel = medal ? `${medal} ${i + 1}` : `${i + 1}위`;
+      const nameLabel = entry.nicknames.join(', ');
+      const scoreLabel = `${entry.score}점${champTag}`;
+      const rankColor = isMine ? '#55ff88' : (RANK_COLORS[i] || '#ffffff');
+      const nameColor = isMine ? '#55ff88' : '#ffffff';
+      const scoreColor = isMine ? '#55ff88' : COLORS.textGold;
       const rowY = startY + i * 26;
+      const fontSize = isPodium ? '16px' : '15px';
+      const fontStyle = isPodium ? 'bold' : 'normal';
+
+      // Alternating row tint so a long, scrolled list stays easy to scan by
+      // eye -- drawn first (bottom of the row's own z-order) so isMine's own
+      // highlight below can still layer cleanly on top of it.
+      if (i % 2 === 1) {
+        const zebra = this.add.graphics();
+        drawRoundedRect(zebra, WORLD_WIDTH / 2, rowY, 340, 24, {
+          fillColor: 0xffffff, fillAlpha: 0.05, strokeAlpha: 0, radius: 6,
+        });
+        this.rankingTexts.push(zebra);
+        rowsContainer.add(zebra);
+      }
 
       if (isMine) {
         // A quiet highlight bar so the viewer's own placement doesn't get
@@ -243,30 +270,48 @@ export default class ResultScene extends Phaser.Scene {
         rowsContainer.add(highlight);
       }
 
-      const text = this.add.text(WORLD_WIDTH / 2, rowY, label, {
+      const rankText = this.add.text(rankX, rowY, rankLabel, {
         fontFamily: FONT_BODY,
-        fontSize: '15px',
-        color,
-      }).setOrigin(0.5);
+        fontSize,
+        fontStyle,
+        color: rankColor,
+      }).setOrigin(0, 0.5);
+
+      const nameText = this.add.text(nameX, rowY, nameLabel, {
+        fontFamily: FONT_BODY,
+        fontSize,
+        fontStyle,
+        color: nameColor,
+      }).setOrigin(0, 0.5);
       // A merged team (later bracket stages) can join several nicknames
-      // into one row — at full size that easily runs wider than the
-      // rankingsPanel itself (360px) and spilled out both edges instead of
-      // staying inside it. Scaling the whole row down to fit keeps every
-      // name intact rather than truncating anyone out of their own result.
-      const fitScale = Math.min(1, 336 / text.width);
-      text.setScale(fitScale * 0.7).setAlpha(0);
+      // into one row — at full size that easily runs wider than its column,
+      // which would either overlap the score or spill past the panel.
+      // Scaling just the name down to fit keeps every name intact rather
+      // than truncating anyone out of their own result, without affecting
+      // the rank/score columns' own alignment.
+      const nameFitScale = Math.min(1, nameMaxWidth / nameText.width);
 
-      this.tweens.add({
-        targets: text,
-        scale: fitScale,
-        alpha: 1,
-        delay: i * 90,
-        duration: 260,
-        ease: 'Back.easeOut',
+      const scoreText = this.add.text(scoreX, rowY, scoreLabel, {
+        fontFamily: FONT_BODY,
+        fontSize,
+        fontStyle,
+        color: scoreColor,
+      }).setOrigin(1, 0.5);
+
+      [rankText, nameText, scoreText].forEach((obj, colIdx) => {
+        const targetScale = colIdx === 1 ? nameFitScale : 1;
+        obj.setScale(targetScale * 0.7).setAlpha(0);
+        this.tweens.add({
+          targets: obj,
+          scale: targetScale,
+          alpha: 1,
+          delay: i * 90,
+          duration: 260,
+          ease: 'Back.easeOut',
+        });
+        this.rankingTexts.push(obj);
+        rowsContainer.add(obj);
       });
-
-      this.rankingTexts.push(text);
-      rowsContainer.add(text);
     });
 
     if (rankings.some((entry) => entry.result === 'champion')) {
