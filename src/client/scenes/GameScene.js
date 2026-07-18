@@ -1246,7 +1246,6 @@ export default class GameScene extends Phaser.Scene {
         if (this.roomFinished) {
           return;
         }
-        this.roomFinished = true;
 
         const proceed = () => {
           if (this.isSpectator) {
@@ -1255,8 +1254,19 @@ export default class GameScene extends Phaser.Scene {
             // path below) or this room's round wrapped and the bracket is
             // about to advance to the next stage. In the latter case there's
             // nothing to transition to yet; just wait here for the
-            // 'gameStarting'/'tournamentEnded' handlers below to fire next.
+            // 'dashboardStarting'/'gameStarting'/'tournamentEnded' handlers
+            // below to fire next -- roomFinished deliberately stays false
+            // in that branch (only set right before an actual scene.start()
+            // below), since setting it here too would make THEIR own
+            // anti-double-transition guard incorrectly treat this "just
+            // show a banner and keep waiting" moment as if this scene had
+            // already transitioned away, permanently skipping the real
+            // transition once the next stage actually starts (observed
+            // live: a stage-<=2 admin spectating a room stayed stuck on
+            // its stale "라운드 종료" banner instead of following the
+            // bracket into DashboardScene).
             if (rankings) {
+              this.roomFinished = true;
               this.scene.start('ResultScene', { status: 'waiting', rankings });
             } else {
               this.showBanner('라운드 종료! 다음 라운드를 준비하는 중...', '#ffd700');
@@ -1264,6 +1274,7 @@ export default class GameScene extends Phaser.Scene {
             return;
           }
 
+          this.roomFinished = true;
           this.eliminated = true;
 
           // If the tournament ended in this same moment, the final rankings
