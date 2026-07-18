@@ -203,6 +203,32 @@ export const BOMB_FUSE_MS = 2000;
 // 1 ring = a 3x3 area centered on the bomb tile.
 export const BOMB_BLAST_RADIUS = 1;
 
+// Shield tiles: the same generation rule as bomb tiles (environmental
+// hazard/boon layered on top of the normal tile map in any mode, not gated
+// to SURVIVAL/FINAL) -- count scales with how many players are currently
+// alive, same ~1-per-N-players/topped-up-every-tick pattern as
+// BOMB_TILES_PER_PLAYERS (see Room.shieldTileTarget()/maintainShieldTiles()).
+// Stepping on one shields every tile within SHIELD_RADIUS rings of it
+// (itself included) from collapsing for SHIELD_GRACE_MS -- see
+// Room.armShieldTile(), which reuses the same regenGraceUntil map every
+// other "this tile is briefly immune" case already writes into (auto-regen
+// burst, ghost respawn, reconnect immunity).
+export const SHIELD_TILES_PER_PLAYERS = 6;
+export const SHIELD_GRACE_MS = 3000;
+// 1 ring = a 3x3 area centered on the shield tile.
+export const SHIELD_RADIUS = 1;
+
+// Angel tile: a rescue mechanic, not a hazard whose pressure should scale
+// with room size -- unlike bomb/shield tiles there is ever only one on the
+// map at a time, placed at most once every ANGEL_TILE_INTERVAL_MS (see
+// Room.maintainAngelTile()). Stepping on it immediately revives one random
+// ghost from the room's own roster (Room.armAngelTile()). TEAM-only -- this
+// room's whole player list already *is* its "team" (see
+// chunkForInitialRound()/formStage2Groups() in server.js), and 개인전 (SOLO)
+// has no ghost/revival mechanic at all (Room.reviveTile()'s own SOLO guard),
+// so an angel tile there would have nothing to do.
+export const ANGEL_TILE_INTERVAL_MS = 30000;
+
 // When a real player's socket drops mid-round, they aren't eliminated
 // immediately — their avatar is handed to the bot AI as a "proxy" for this
 // long, giving them a window to reconnect (a backgrounded phone, a brief

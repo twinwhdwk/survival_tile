@@ -20,7 +20,9 @@ import { vibrateWarning, vibrateEliminate, vibrateVictory, vibrateTap, vibrateBo
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
 import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
-import { START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND, BOMB_FUSE_MS } from '../../shared/roundConfig';
+import {
+  START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND, BOMB_FUSE_MS, SHIELD_GRACE_MS, SHIELD_RADIUS,
+} from '../../shared/roundConfig';
 import { fitAnchoredRoundedPanel, drawRoundedRect } from '../utilities/RoundedPanel';
 import { applyButtonFx } from '../utilities/ButtonFx';
 
@@ -119,6 +121,13 @@ const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치하세�
 // pointermove pixel.
 const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 
+// Shield tiles render as this exact purple, both for the persistent tint on
+// an armed-but-unstepped shield tile (initShieldTiles()) and as the "from"
+// color of the temporary glow the protected 3x3 area pulses through when
+// one's actually stepped on (playShieldGlow()) -- one shared constant so
+// the two don't drift into two different purples.
+const SHIELD_COLOR = 0xaa55ff;
+
 export default class GameScene extends Phaser.Scene {
 
   constructor() {
@@ -162,6 +171,8 @@ export default class GameScene extends Phaser.Scene {
     this.score = 0;
     this.bombTileMarkers = [];
     this.bombFuseMarkers = {};
+    this.shieldTileKeys = [];
+    this.angelTileMarker = null;
     this.lastLiveScoreSecond = null;
     this.lastTimerSecond = null;
     this.lastRemainingSeconds = null;
@@ -302,7 +313,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles,
+    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
@@ -315,6 +326,8 @@ export default class GameScene extends Phaser.Scene {
     this.fromDashboard = !!fromDashboard;
     this.renderMap(tileMap);
     this.initBombTiles(bombTiles);
+    this.initShieldTiles(shieldTiles);
+    this.initAngelTile(angelTile);
 
     // A spectator's own socket id is never a key in `players` (the server
     // never seats an admin into a room — see startTournament/startStage in
@@ -768,6 +781,90 @@ export default class GameScene extends Phaser.Scene {
     return marker;
   }
 
+  // Rebuilds which of this room's tiles currently carry an armed (not-yet-
+  // stepped-on) shield, from scratch on each shieldTiles snapshot -- same
+  // clear-then-recreate lifecycle as initBombTiles(), just tinting the tile
+  // itself purple instead of adding a separate marker on top of it (a
+  // shield tile's whole point is being recognizable ground, not a hazard
+  // sitting on it -- see SHIELD_COLOR's own comment).
+  initShieldTiles(shieldTiles) {
+    (this.shieldTileKeys || []).forEach((key) => {
+      const tile = this.tileSprites[key];
+      if (tile) {
+        tile.clearTint();
+      }
+    });
+    this.shieldTileKeys = (shieldTiles || []).map((t) => `${t.row}_${t.col}`);
+    this.shieldTileKeys.forEach((key) => {
+      const tile = this.tileSprites[key];
+      if (tile) {
+        tile.setTint(SHIELD_COLOR);
+      }
+    });
+  }
+
+  // Purple pulse across the 3x3 area a shield tile just protected (see
+  // Room.armShieldTile()) -- reuses the same tile.graceTintTween/
+  // stopTileTween() interplay playReviveGraceGlow() already established,
+  // just without that one's alpha-from-zero fade-in (these tiles are
+  // already fully visible, nothing to materialize in). Purely cosmetic --
+  // the real protection is the server's regenGraceUntil window; this only
+  // needs to roughly track SHIELD_GRACE_MS so the glow fades out around
+  // when the protection actually lapses.
+  playShieldGlow(tile) {
+    const fromColor = Phaser.Display.Color.ValueToColor(SHIELD_COLOR);
+    const toColor = Phaser.Display.Color.ValueToColor(0xffffff);
+    tile.setTint(SHIELD_COLOR);
+
+    tile.graceTintTween = this.tweens.addCounter({
+      from: 0,
+      to: 100,
+      duration: SHIELD_GRACE_MS,
+      ease: 'Linear',
+      onUpdate: (tween) => {
+        const step = Phaser.Display.Color.Interpolate.ColorWithColor(fromColor, toColor, 100, tween.getValue());
+        tile.setTint(Phaser.Display.Color.GetColor(step.r, step.g, step.b));
+      },
+      onComplete: () => {
+        tile.clearTint();
+        tile.graceTintTween = null;
+      },
+    });
+  }
+
+  // Mirrors initBombTiles()'s clear-then-recreate lifecycle for the single
+  // angel tile -- there's ever at most one on the map at a time (see
+  // Room.maintainAngelTile()), so this is just a destroy-if-present /
+  // create-if-given pair rather than a full array rebuild.
+  initAngelTile(angelTile) {
+    if (this.angelTileMarker) {
+      this.angelTileMarker.destroy();
+      this.angelTileMarker = null;
+    }
+    if (angelTile) {
+      this.angelTileMarker = this.createAngelTileMarker(angelTile);
+    }
+  }
+
+  createAngelTileMarker(tile) {
+    const { x, y } = hexToPixel(tile.row, tile.col);
+    const marker = this.add.text(x, y, '👼', {
+      fontSize: '24px',
+    }).setOrigin(0.5).setDepth(12);
+
+    this.tweens.add({
+      targets: marker,
+      y: y - 6,
+      scale: 1.12,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return marker;
+  }
+
   showFloatingDamage(x, y, amount) {
     const text = this.add.text(x, y - 10, `-${amount}`, {
       fontFamily: FONT_BODY,
@@ -1171,6 +1268,42 @@ export default class GameScene extends Phaser.Scene {
         this.shatterEmitter.explode(24, x, y);
         playBombExplode();
         vibrateBombExplode();
+      },
+
+      // Room.armShieldTile() sends this both when a shield is stepped on
+      // (its spot leaves this.shieldTiles) and again right after with a
+      // fresh replacement spot already appended -- same full-re-render
+      // approach as bombTilesUpdate above.
+      shieldTilesUpdate: ({ shieldTiles }) => {
+        this.initShieldTiles(shieldTiles);
+      },
+
+      // The 3x3 area Room.armShieldTile() just protected -- pulses every
+      // tile in it purple for roughly SHIELD_GRACE_MS (see
+      // playShieldGlow()). The stepped-on tile itself already lost its own
+      // persistent tint via shieldTilesUpdate just above, so this is the
+      // only cue for it (and the only cue at all for its 8 neighbors).
+      shieldActivated: ({ row, col }) => {
+        playClick();
+        vibrateTap();
+        for (let dr = -SHIELD_RADIUS; dr <= SHIELD_RADIUS; dr++) {
+          for (let dc = -SHIELD_RADIUS; dc <= SHIELD_RADIUS; dc++) {
+            const tile = this.tileSprites[`${row + dr}_${col + dc}`];
+            if (tile) {
+              this.stopTileTween(tile);
+              this.playShieldGlow(tile);
+            }
+          }
+        }
+      },
+
+      // Room.maintainAngelTile()/armAngelTile() both send this -- a fresh
+      // placement, a stranded one swept away by the boundary, or the spot
+      // just stepped on (see Room.armAngelTile(), which revives a ghost
+      // separately -- that side of it already rides the existing
+      // playerRevived handler below with no extra wiring needed here).
+      angelTileUpdate: ({ angelTile }) => {
+        this.initAngelTile(angelTile);
       },
 
       playerMoved: (playerInfo) => {

@@ -37,6 +37,10 @@ import {
   BOMB_TILES_PER_PLAYERS,
   BOMB_FUSE_MS,
   BOMB_BLAST_RADIUS,
+  SHIELD_TILES_PER_PLAYERS,
+  SHIELD_GRACE_MS,
+  SHIELD_RADIUS,
+  ANGEL_TILE_INTERVAL_MS,
 } from '../shared/roundConfig';
 
 const CENTER_ROW = Math.floor(MAP_ROWS / 2);
@@ -189,6 +193,13 @@ export default class Room {
     this.tileMap = createSolidTileMap();
     this.pendingTiles = new Set();
     this.roundStartTime = Date.now();
+    // Scoring only begins once the pre-round countdown actually releases
+    // movement (see movePlayerTo()'s START_COUNTDOWN_MS freeze) -- nobody
+    // can move or be eliminated during that freeze, so crediting from
+    // roundStartTime instead credited every player ~10s of "survival" for
+    // time they spent literally unable to do anything yet, showing up as
+    // score that had already ticked up the instant the round appeared.
+    this.scoringStartTime = this.roundStartTime + START_COUNTDOWN_MS;
     this.finished = false;
     this.reviveCooldowns = new Map();
     // One shared, room-wide revival gauge that every ghost's successful
@@ -286,8 +297,10 @@ export default class Room {
         score: score || 0,
         // Start of the window addSurvivalScore() will next credit — see that
         // method for why this can't just always be roundStartTime once
-        // ghost respawns are in play.
-        lastScoreCreditAt: this.roundStartTime,
+        // ghost respawns are in play. scoringStartTime (not roundStartTime
+        // itself) so the pre-round countdown freeze never counts as
+        // survived time.
+        lastScoreCreditAt: this.scoringStartTime,
       };
 
       // A player who never moves at all keeps standing on this exact spawn
@@ -333,14 +346,41 @@ export default class Room {
     // eliminated (everyone's still alive at construction time, so this is
     // just the full roster on this very first computation).
     this.bombTiles = [];
-    const bombTileCount = this.bombTileTarget();
+    // Declared (empty) before the bomb-placement loop below even though
+    // shield tiles aren't placed until after it -- pickBombTileSpot() below
+    // already cross-checks this.shieldTiles/this.angelTile so the two
+    // hazard types and the angel tile never land on the same cell, so both
+    // fields need to exist from the start regardless of placement order.
+    this.shieldTiles = [];
+    this.angelTile = null;
+
     const initialZoneTiles = this.getSafeZoneTiles();
+
+    const bombTileCount = this.bombTileTarget();
     for (let i = 0; i < bombTileCount; i++) {
       const spot = this.pickBombTileSpot(initialZoneTiles);
       if (spot) {
         this.bombTiles.push(spot);
       }
     }
+
+    // Same generation rule as bomb tiles (see SHIELD_TILES_PER_PLAYERS'
+    // own comment) -- maintainShieldTiles() (called every checkRoundState
+    // tick, same as maintainBombTiles()) keeps this topped up the same way.
+    const shieldTileCount = this.shieldTileTarget();
+    for (let i = 0; i < shieldTileCount; i++) {
+      const spot = this.pickShieldTileSpot(initialZoneTiles);
+      if (spot) {
+        this.shieldTiles.push(spot);
+      }
+    }
+
+    // TEAM-only (see ANGEL_TILE_INTERVAL_MS's own comment) -- a SOLO room
+    // simply never reaches its spawn time, so maintainAngelTile() never
+    // places one there.
+    this.angelTileNextSpawnAt = this.gameMode === 'SOLO'
+      ? Infinity
+      : this.roundStartTime + ANGEL_TILE_INTERVAL_MS;
   }
 
   getSnapshot() {
@@ -355,6 +395,8 @@ export default class Room {
       roundStartTime: this.roundStartTime,
       roundDuration: this.roundDurationMs,
       bombTiles: this.bombTiles,
+      shieldTiles: this.shieldTiles,
+      angelTile: this.angelTile,
     };
   }
 
@@ -422,7 +464,7 @@ export default class Room {
       if (player.eliminated) {
         return total;
       }
-      const creditFrom = player.lastScoreCreditAt || this.roundStartTime;
+      const creditFrom = player.lastScoreCreditAt || this.scoringStartTime;
       return total + Math.floor(Math.max(0, now - creditFrom) / 1000) * SURVIVAL_SCORE_PER_SECOND;
     }, this.score);
   }
@@ -577,17 +619,71 @@ export default class Room {
   // Bomb tiles always live inside the current safe zone (same reasoning as
   // pickRandomSolidTileInSafeZone -- a shrinking boundary that leaves one
   // behind outside it would strand a hazard nobody can reach) and never
-  // overlap another already-armed bomb tile. zoneTiles is optional -- a
-  // single call can let it default to a fresh scan, but a caller placing
-  // several bomb tiles in one pass (the constructor, maintainBombTiles())
-  // computes the (unchanging, mid-tick) zone once and passes it in rather
-  // than re-scanning the full board on every iteration.
+  // overlap another already-armed bomb tile, a shield tile, or the angel
+  // tile (stacking two special tiles on one cell would make one of them
+  // silently unreachable). zoneTiles is optional -- a single call can let
+  // it default to a fresh scan, but a caller placing several bomb tiles in
+  // one pass (the constructor, maintainBombTiles()) computes the
+  // (unchanging, mid-tick) zone once and passes it in rather than
+  // re-scanning the full board on every iteration.
   pickBombTileSpot(zoneTiles = this.getSafeZoneTiles()) {
     const candidates = zoneTiles.filter(({ row, col }) => {
       if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
         return false;
       }
+      if (this.shieldTiles.some((t) => t.row === row && t.col === col)) {
+        return false;
+      }
+      if (this.angelTile && this.angelTile.row === row && this.angelTile.col === col) {
+        return false;
+      }
       return !this.bombTiles.some((t) => t.row === row && t.col === col);
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  // Same generation rule as bombTileTarget() (see SHIELD_TILES_PER_PLAYERS'
+  // own comment) -- scales with currently-alive players, not the room's
+  // original headcount.
+  shieldTileTarget() {
+    return Math.max(1, Math.ceil(this.getAliveCount() / SHIELD_TILES_PER_PLAYERS));
+  }
+
+  // Mirrors pickBombTileSpot() exactly, just checking the other two hazard
+  // types instead (never overlaps a bomb tile, another shield tile, or the
+  // angel tile).
+  pickShieldTileSpot(zoneTiles = this.getSafeZoneTiles()) {
+    const candidates = zoneTiles.filter(({ row, col }) => {
+      if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
+        return false;
+      }
+      if (this.bombTiles.some((t) => t.row === row && t.col === col)) {
+        return false;
+      }
+      if (this.angelTile && this.angelTile.row === row && this.angelTile.col === col) {
+        return false;
+      }
+      return !this.shieldTiles.some((t) => t.row === row && t.col === col);
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  // Mirrors pickBombTileSpot()/pickShieldTileSpot() -- never overlaps a
+  // bomb or shield tile. Doesn't need to check this.angelTile itself (only
+  // ever called when there isn't one, see maintainAngelTile()).
+  pickAngelTileSpot(zoneTiles = this.getSafeZoneTiles()) {
+    const candidates = zoneTiles.filter(({ row, col }) => {
+      if (this.tileMap[row][col] !== TILE_STATE.SOLID) {
+        return false;
+      }
+      return !this.bombTiles.some((t) => t.row === row && t.col === col)
+        && !this.shieldTiles.some((t) => t.row === row && t.col === col);
     });
     if (candidates.length === 0) {
       return null;
@@ -766,6 +862,124 @@ export default class Room {
     }
   }
 
+  // Stepping on a shield tile shields every tile within SHIELD_RADIUS rings
+  // of it (itself included) from collapsing for SHIELD_GRACE_MS, by writing
+  // a future timestamp into the same regenGraceUntil map triggerTileCollapse()
+  // already consults for every other "briefly immune" case. Must run
+  // *before* movePlayerTo() calls triggerTileCollapse() for the tile just
+  // stepped onto (see its own call site) -- that grace check only blocks a
+  // *new* collapse from starting, so setting it after the landing tile's
+  // own collapse had already been triggered would let that one tile pop on
+  // its normal timer regardless, directly contradicting "this tile doesn't
+  // break for 3 seconds." Swapped out for a fresh spot immediately, same
+  // reasoning as armBombTile()'s own comment on why the live count can't
+  // dip for the whole grace window.
+  armShieldTile(index) {
+    const shield = this.shieldTiles[index];
+    this.shieldTiles.splice(index, 1);
+
+    const spot = this.pickShieldTileSpot();
+    if (spot) {
+      this.shieldTiles.push(spot);
+    }
+    this.emit('shieldTilesUpdate', { shieldTiles: this.shieldTiles });
+    this.emit('shieldActivated', { row: shield.row, col: shield.col });
+
+    const until = Date.now() + SHIELD_GRACE_MS;
+    for (let dr = -SHIELD_RADIUS; dr <= SHIELD_RADIUS; dr++) {
+      for (let dc = -SHIELD_RADIUS; dc <= SHIELD_RADIUS; dc++) {
+        const row = shield.row + dr;
+        const col = shield.col + dc;
+        if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) {
+          continue;
+        }
+        this.regenGraceUntil.set(`${row}_${col}`, until);
+      }
+    }
+  }
+
+  // Mirrors maintainBombTiles() exactly -- prunes any shield tile the
+  // shrinking boundary has swept out from under, then tops the count back
+  // up to shieldTileTarget().
+  maintainShieldTiles() {
+    const before = this.shieldTiles.length;
+    this.shieldTiles = this.shieldTiles.filter(
+      ({ row, col }) => this.tileMap[row][col] === TILE_STATE.SOLID && this.isSafeTile(row, col),
+    );
+    let changed = this.shieldTiles.length !== before;
+
+    const target = this.shieldTileTarget();
+    if (this.shieldTiles.length > target) {
+      this.shieldTiles.length = target;
+      changed = true;
+    } else if (this.shieldTiles.length < target) {
+      const zoneTiles = this.getSafeZoneTiles();
+      while (this.shieldTiles.length < target) {
+        const spot = this.pickShieldTileSpot(zoneTiles);
+        if (!spot) {
+          break;
+        }
+        this.shieldTiles.push(spot);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.emit('shieldTilesUpdate', { shieldTiles: this.shieldTiles });
+    }
+  }
+
+  // Stepping on the angel tile immediately revives one random ghost from
+  // this room's own roster -- picks its own random ghost rather than going
+  // through respawnRandomGhost() so this stays independent of the tap-filled
+  // team revival gauge (reusing that method would also zero out gauge
+  // progress the team had already built toward its own separate revival,
+  // an unrelated side effect an angel-tile pickup shouldn't cause). Only
+  // ever reachable in TEAM mode -- see movePlayerTo()'s angel-tile check,
+  // gated the same way maintainAngelTile() gates placement.
+  armAngelTile() {
+    this.angelTile = null;
+    this.emit('angelTileUpdate', { angelTile: null });
+    this.angelTileNextSpawnAt = Date.now() + ANGEL_TILE_INTERVAL_MS;
+
+    const ghosts = Object.keys(this.players).filter((pid) => this.players[pid].eliminated);
+    if (ghosts.length === 0) {
+      return;
+    }
+    const luckyId = ghosts[Math.floor(Math.random() * ghosts.length)];
+    this.respawnGhost(luckyId);
+  }
+
+  // Called once per checkRoundState() tick, same as maintainBombTiles(). A
+  // SOLO room's angelTileNextSpawnAt is fixed at Infinity (see the
+  // constructor), so the time check below just never passes there and this
+  // never places one -- no separate mode check needed here.
+  maintainAngelTile() {
+    if (this.angelTile) {
+      // Same reasoning as pickBombTileSpot()'s own comment on a stranded,
+      // unreachable hazard -- swept away unused rather than left behind
+      // outside the safe zone. The next check (below, on the *next* tick)
+      // sees angelTile as null and angelTileNextSpawnAt already in the past,
+      // so a fresh one is placed on the very next tick rather than waiting
+      // out another full interval.
+      if (this.tileMap[this.angelTile.row][this.angelTile.col] !== TILE_STATE.SOLID
+          || !this.isSafeTile(this.angelTile.row, this.angelTile.col)) {
+        this.angelTile = null;
+        this.emit('angelTileUpdate', { angelTile: null });
+      }
+      return;
+    }
+    if (Date.now() < this.angelTileNextSpawnAt) {
+      return;
+    }
+    const spot = this.pickAngelTileSpot();
+    if (!spot) {
+      return;
+    }
+    this.angelTile = spot;
+    this.emit('angelTileUpdate', { angelTile: this.angelTile });
+  }
+
   // SURVIVAL/FINAL rounds have no other scoring mechanic, so the score
   // instead rewards how long each teammate personally lasted (whole
   // seconds, summed across the lineage) — called once per player, either
@@ -773,7 +987,8 @@ export default class Room {
   // finishRoom time.
   //
   // Credits only the window since this player's last credited timestamp
-  // (initialized to roundStartTime, advanced on every credit and on every
+  // (initialized to scoringStartTime -- roundStartTime plus the pre-round
+  // countdown, see its own comment -- advanced on every credit and on every
   // ghost respawn — see respawnGhost()), not the full time since round
   // start. The ghost-revival gauge lets an eliminated player come back and
   // potentially get eliminated again later in the same round; crediting
@@ -782,7 +997,7 @@ export default class Room {
   // exploitable by deliberately cycling elimination/respawn for a better
   // score than just surviving normally.
   addSurvivalScore(player, endTime) {
-    const creditFrom = player.lastScoreCreditAt || this.roundStartTime;
+    const creditFrom = player.lastScoreCreditAt || this.scoringStartTime;
     const survivedMs = Math.max(0, endTime - creditFrom);
     const gained = Math.floor(survivedMs / 1000) * SURVIVAL_SCORE_PER_SECOND;
     this.score += gained;
@@ -947,11 +1162,27 @@ export default class Room {
     player.x = x;
     player.y = y;
     this.broadcastPlayerMoved(player);
+
+    // Checked (and, if hit, armed) *before* triggerTileCollapse() below --
+    // armShieldTile() needs to have already written this grace window for
+    // the landing tile itself before triggerTileCollapse() runs its own
+    // regenGraceUntil check, or the very tile just stepped onto would start
+    // collapsing on its normal timer regardless of the shield (see
+    // armShieldTile()'s own comment).
+    const shieldIndex = this.shieldTiles.findIndex((t) => t.row === row && t.col === col);
+    if (shieldIndex !== -1) {
+      this.armShieldTile(shieldIndex);
+    }
+
     this.triggerTileCollapse(row, col);
 
     const bombIndex = this.bombTiles.findIndex((t) => t.row === row && t.col === col);
     if (bombIndex !== -1) {
       this.armBombTile(bombIndex);
+    }
+
+    if (this.angelTile && this.angelTile.row === row && this.angelTile.col === col) {
+      this.armAngelTile();
     }
   }
 
@@ -1711,6 +1942,8 @@ export default class Room {
     const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
 
     this.maintainBombTiles();
+    this.maintainShieldTiles();
+    this.maintainAngelTile();
 
     // Not SURVIVAL-only: getSafeZoneTiles() naturally covers the entire
     // board when every edge inset is still 0 (FINAL's own grace period,

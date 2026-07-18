@@ -679,11 +679,6 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
         score: p.score,
         result: p.eliminated ? 'eliminated' : 'survived',
         stage: currentStage,
-        // Only actually used for ranking at stage 3 (see endTournament()'s
-        // stage-aware sort) -- a standalone 개인전 tournament (SOLO chosen
-        // at stage 1) still ranks by score, unchanged. Harmless to always
-        // carry: null means "never eliminated," i.e. the winner.
-        eliminatedAt: p.eliminatedAt || null,
       });
     });
 
@@ -793,32 +788,41 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
 // better than anyone cut in stage 1/2, which a pure score sort can't
 // guarantee (a long-surviving stage-1 elimination could easily outscore a
 // stage-3 entrant who died early in the chaotic final). Within the same
-// stage: stage 3 (the FINAL/SOLO finale) ranks by elimination order --
-// never-eliminated (the winner) first, then whoever lasted longest -- per
-// the operator's explicit call that the finale isn't score-based. Every
-// other stage keeps the original score-based ordering (also covers a
-// standalone 개인전 tournament, which is always "stage 1" and never
-// reaches this eliminatedAt-based branch).
+// stage, every stage (stage 3's FINAL/SOLO finale included) ranks by score --
+// score is each player's own running total carried across every stage they
+// reached (see Room.js's constructor/finishRoom comments on player.score),
+// so this is what actually guarantees "rank 1 has the highest score," full
+// stop. Stage 3 used to rank by elimination order instead (never-eliminated
+// first, then whoever lasted longest) on an earlier explicit call that the
+// finale shouldn't be score-based -- reversed because that let someone who
+// merely outlasted the field in the final numerically outrank a finalist
+// with a higher carried-in total from stage 1/2, reading as "1st place isn't
+// even the highest score" once both were shown side by side on the results
+// screen.
 function compareRankings(a, b) {
   if (a.stage !== b.stage) {
     return b.stage - a.stage;
-  }
-  if (a.stage === 3) {
-    const aAlive = a.eliminatedAt == null;
-    const bAlive = b.eliminatedAt == null;
-    if (aAlive !== bAlive) {
-      return aAlive ? -1 : 1;
-    }
-    if (aAlive) {
-      return 0; // both never eliminated -- shouldn't happen (one true winner), stable no-op
-    }
-    return b.eliminatedAt - a.eliminatedAt;
   }
   return b.score - a.score;
 }
 
 function endTournament() {
   const rankings = [...finalRankings].sort(compareRankings);
+
+  // Exactly one entry is ever 'survived' (the SOLO branch above sets it only
+  // for whoever wasn't eliminated in the deciding SOLO round -- every TEAM-
+  // stage entry is unconditionally 'eliminated', since by definition those
+  // are lineages/players who did NOT advance) -- covers both a normal
+  // bracket's stage-3 finale and a standalone 개인전 tournament. Promoted to
+  // 'champion' here, once the whole tournament is actually ending, rather
+  // than at push time in handleRoomFinished, which has no way to know yet
+  // whether the SOLO round it just saw finish was the tournament's last one.
+  // ResultScene's celebrateChampion()/🏆 tag key off this exact string.
+  const champion = rankings.find((entry) => entry.result === 'survived');
+  if (champion) {
+    champion.result = 'champion';
+  }
+
   // Global broadcast covers anyone already parked on a result screen from a
   // lineage that finished earlier; the room that just triggered this also
   // gets the rankings bundled directly into its own roomResult (see Room.js)
