@@ -59,6 +59,12 @@ export default class ResultScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     createAmbientEmbers(this);
 
+    // Same warm near-black fade every scene now opens with (see GameScene's
+    // identical fadeIn) -- layers fine underneath the eliminated/waiting
+    // status flash() below, which is a separate additive color pulse over
+    // whatever's already on screen, not a from-black fade.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
+
     // Backing panels behind the headline and (later) the ranking list, in
     // the same warm ember-bordered language used everywhere else now —
     // previously a flat navy fill with a near-invisible white hairline,
