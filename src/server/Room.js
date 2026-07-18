@@ -919,6 +919,15 @@ export default class Room {
     }
   }
 
+  // Shared by reviveTile() (a real ghost's own tap) and moveBotsRandomly()
+  // (a ghost bot's auto-tap, gated on this same cooldown before it even
+  // scans for a target tile) -- see reviveTile()'s own comment on why the
+  // last-stand rally shortens this.
+  ghostReviveCooldownMs() {
+    const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
+    return aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
+  }
+
   reviveTile(id, row, col) {
     // 개인전 has no ghost tile-revival/respawn mechanic at all — elimination
     // is permanent, so there's nothing for a ghost's tap to do. Guarding
@@ -945,11 +954,9 @@ export default class Room {
     // faster than normal, just not literally unbounded. Checked before
     // resolving a target tile below so a tap still inside the cooldown
     // window never pays for a map scan it can't use anyway.
-    const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
-    const cooldownMs = aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
     const now = Date.now();
     const lastRevive = this.reviveCooldowns.get(id) || 0;
-    if (now - lastRevive < cooldownMs) {
+    if (now - lastRevive < this.ghostReviveCooldownMs()) {
       return;
     }
 
@@ -1452,10 +1459,8 @@ export default class Room {
         // never land -- live (non-ghost) bots already gate their own
         // movement scan the same way via botNextMoveAt.
         if (this.gameMode !== 'SOLO') {
-          const aliveCount = Object.values(this.players).filter((p) => !p.eliminated).length;
-          const cooldownMs = aliveCount > 1 ? GHOST_REVIVE_COOLDOWN_MS : GHOST_REVIVE_LAST_STAND_COOLDOWN_MS;
           const lastRevive = this.reviveCooldowns.get(id) || 0;
-          if (Date.now() - lastRevive >= cooldownMs) {
+          if (Date.now() - lastRevive >= this.ghostReviveCooldownMs()) {
             const target = this.pickRandomGoneTile();
             if (target) {
               this.reviveTile(id, target.row, target.col);

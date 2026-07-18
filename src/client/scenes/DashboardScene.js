@@ -52,11 +52,10 @@ export default class DashboardScene extends Phaser.Scene {
     // Since 502a092/this change, a real player cut from the bracket also
     // reaches this scene (see server.js's seatSpectator()) with the exact
     // same payload shape an admin gets, minus isAdmin -- every admin-only
-    // control below (서버 초기화, C/S balance keys, double-click into an
-    // arbitrary room) must gate on this, not just "did I get here at all."
+    // control below (서버 초기화, double-click into an arbitrary room) must
+    // gate on this, not just "did I get here at all."
     this.isAdmin = !!data.isAdmin;
     this.cardsByRoomId = {};
-    this.selectedRoomId = null;
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);
@@ -162,30 +161,7 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.on('gameStarting', this.handleGameStarting);
     this.socket.on('tournamentEnded', this.handleTournamentEnded);
 
-    // Click a card to target it, then C/S apply to whichever room is
-    // selected — see server.js's 'adminCritical'/'adminShatterTiles'
-    // handlers. Deliberately no on-screen label for what these keys do:
-    // this admin screen may be projected on a TV, and the whole point is
-    // that nobody watching can tell an intervention happened. A second,
-    // quick click on the same card instead jumps into that room's full
-    // game view (see spectateRoom()) — see the hintText above.
-    this.handleKeyC = () => this.triggerAdminSkill('adminCritical');
-    this.handleKeyS = () => this.triggerAdminSkill('adminShatterTiles');
-    this.input.keyboard.on('keydown-C', this.handleKeyC);
-    this.input.keyboard.on('keydown-S', this.handleKeyS);
-
-    this.events.once('shutdown', () => {
-      this.input.keyboard.off('keydown-C', this.handleKeyC);
-      this.input.keyboard.off('keydown-S', this.handleKeyS);
-      this.cleanup();
-    });
-  }
-
-  selectRoom(roomId) {
-    this.selectedRoomId = this.selectedRoomId === roomId ? null : roomId;
-    Object.values(this.cardsByRoomId).forEach((card) => {
-      card.selectionRing.setVisible(card.roomId === this.selectedRoomId);
-    });
+    this.events.once('shutdown', () => this.cleanup());
   }
 
   // Jumps the admin straight into a specific room's full GameScene as a
@@ -204,21 +180,6 @@ export default class DashboardScene extends Phaser.Scene {
       return;
     }
     this.socket.emit('adminSpectateRoom', { roomId });
-  }
-
-  triggerAdminSkill(eventName) {
-    if (!this.isAdmin || !this.selectedRoomId || !this.cardsByRoomId[this.selectedRoomId]) {
-      return;
-    }
-    this.socket.emit(eventName, { roomId: this.selectedRoomId });
-
-    // A brief pulse on the selection ring is the only feedback — visible
-    // only to the admin, and reads as nothing more than routine UI polish
-    // to anyone glancing at the screen.
-    const ring = this.cardsByRoomId[this.selectedRoomId].selectionRing;
-    this.tweens.killTweensOf(ring);
-    ring.setAlpha(1);
-    this.tweens.add({ targets: ring, alpha: 0.5, duration: 200, yoyo: true });
   }
 
   cleanup() {
@@ -328,9 +289,6 @@ export default class DashboardScene extends Phaser.Scene {
           },
         });
         delete this.cardsByRoomId[roomId];
-        if (this.selectedRoomId === roomId) {
-          this.selectedRoomId = null;
-        }
       }
     });
   }
@@ -392,20 +350,10 @@ export default class DashboardScene extends Phaser.Scene {
         return;
       }
       lastClickAt = now;
-      this.selectRoom(roomId);
     });
 
     const cardBorder = this.add.graphics();
     drawRoundedRect(cardBorder, 0, 0, cardW, cardH, { fillAlpha: 0, strokeWidth: 1, strokeColor: 0xffd700, strokeAlpha: 0.25, radius: 8 });
-
-    // A distinct ring (not just re-coloring bg's own border) so the
-    // persistent "this room is targeted" state never fights with the
-    // temporary red elimination-flash on bg itself. Same light blue as
-    // every other "interactive/highlighted" cue in the app (GameScene's
-    // ghost-revive tile highlight, frozen-countdown avatar tint) rather
-    // than a one-off brighter cyan that didn't match anything else.
-    const selectionRing = this.add.graphics().setVisible(false);
-    drawRoundedRect(selectionRing, 0, 0, cardW + 8, cardH + 8, { fillAlpha: 0, strokeWidth: 3, strokeColor: 0x88ccff, strokeAlpha: 1, radius: 10 });
 
     // Header strip: solid backing so text stays readable over the
     // thumbnail, holding the group label + alive count + timer/score.
@@ -438,7 +386,7 @@ export default class DashboardScene extends Phaser.Scene {
       align: 'left',
     }).setOrigin(0, 0.5);
 
-    container.add([minimap, bg, cardBorder, selectionRing, headerBar, label, aliveText, infoText]);
+    container.add([minimap, bg, cardBorder, headerBar, label, aliveText, infoText]);
 
     this.tweens.add({
       targets: container,
@@ -449,7 +397,7 @@ export default class DashboardScene extends Phaser.Scene {
     });
 
     return {
-      container, bg, cardBorder, selectionRing, label, aliveText, infoText,
+      container, bg, cardBorder, label, aliveText, infoText,
       minimap, minimapTextureKey, minimapCanvas: null,
       roomId, cardW, cardH, prevAliveCount: null, borderFlashTimer: null,
     };
