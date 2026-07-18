@@ -1201,7 +1201,7 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
-      playerEliminated: ({ playerId, score, playerScore }) => {
+      playerEliminated: ({ playerId, score, playerScore, x, y }) => {
         // eliminatePlayer() can finish the room in this exact same call
         // (see the roomTransitionHoldUntil constants' own comments) --
         // regardless of whose elimination this is. A spectator (never a
@@ -1230,7 +1230,7 @@ export default class GameScene extends Phaser.Scene {
         }
 
         if (playerId === this.socket.id) {
-          this.handleOwnElimination();
+          this.handleOwnElimination(x, y);
           return;
         }
         const avatar = this.otherPlayers[playerId];
@@ -1238,6 +1238,17 @@ export default class GameScene extends Phaser.Scene {
           this.eliminationEmitter.explode(14, avatar.x, avatar.y);
           this.showFloatingLabel(avatar.x, avatar.y, '탈락!', COLORS.textDanger);
           this.tweens.add({ targets: avatar, alpha: 0.35, scale: 0.85, duration: 300 });
+          // The server parks a ghost's x/y just outside the safe zone the
+          // instant it dies (Room.js's eliminatePlayer()), so its floating
+          // corpse stops cluttering the actively-playable area. Reusing
+          // avatar.targetX/Y here (not a snap) rides the same per-frame
+          // lerp interpolateOtherPlayers() already applies to ordinary
+          // movement, so the ghost visibly drifts off to the side rather
+          // than teleporting.
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            avatar.targetX = x;
+            avatar.targetY = y;
+          }
           playOtherEliminate();
         }
       },
@@ -1420,7 +1431,7 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  handleOwnElimination() {
+  handleOwnElimination(x, y) {
     if (this.eliminated) {
       return;
     }
@@ -1433,8 +1444,19 @@ export default class GameScene extends Phaser.Scene {
       // here vs #ff8888 there) for the exact same message with no
       // discernible reason to.
       this.showFloatingLabel(this.player.x, this.player.y, '탈락!', COLORS.textDanger);
-      this.tweens.add({ targets: this.player, alpha: 0.35, scale: 0.85, duration: 300 });
+      // Death effects (explosion/label/aura, all above and below) stay
+      // right where it happened -- only the avatar itself drifts off to
+      // the server-parked spot just outside the safe zone (see Room.js's
+      // eliminatePlayer()), same reasoning as the other-player case just
+      // above. update() already no-ops movement once eliminated, so
+      // nothing fights this tween the way interpolateOtherPlayers() would.
       this.startGhostAura(this.player.x, this.player.y);
+      const tweenTarget = { targets: this.player, alpha: 0.35, scale: 0.85, duration: 300 };
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        tweenTarget.x = x;
+        tweenTarget.y = y;
+      }
+      this.tweens.add(tweenTarget);
     }
 
     this.cameras.main.flash(300, 255, 80, 80);
