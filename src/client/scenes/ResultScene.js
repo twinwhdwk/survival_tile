@@ -108,6 +108,8 @@ export default class ResultScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // The tournament can end in the exact same instant this player's own
@@ -213,6 +215,8 @@ export default class ResultScene extends Phaser.Scene {
         fontFamily: FONT_BODY,
         fontSize: '16px',
         color: COLORS.textMuted,
+        stroke: TEXT_STROKE,
+        strokeThickness: 2,
       }).setOrigin(0.5);
       rowsContainer.add(empty);
     }
