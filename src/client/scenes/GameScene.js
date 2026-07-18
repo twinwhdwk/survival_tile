@@ -2140,10 +2140,13 @@ export default class GameScene extends Phaser.Scene {
     // already got the rounded treatment; this nickname tag just predates
     // it. No border (strokeAlpha: 0) to match the original plain-fill
     // Rectangle exactly, just with rounded corners instead of square ones.
+    // fillColor uses the shared COLORS.panelFill (warm ember tone) rather
+    // than its own hardcoded cool navy -- another leftover from before the
+    // board/HUD reskin, same as the frame colors fixed earlier.
     const labelBounds = label.getBounds();
     const labelBg = this.add.graphics();
     drawRoundedRect(labelBg, 0, -26, labelBounds.width + 10, labelBounds.height + 3, {
-      radius: 4, fillColor: 0x0b0e1c, fillAlpha: 0.5, strokeAlpha: 0,
+      radius: 4, fillColor: COLORS.panelFill, fillAlpha: 0.5, strokeAlpha: 0,
     });
     children.push(labelBg, label);
 
