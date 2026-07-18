@@ -66,6 +66,11 @@ export default class DashboardScene extends Phaser.Scene {
     this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'bg_gradient').setDepth(-30);
     createAmbientEmbers(this);
 
+    // Same warm near-black fade every scene now opens with (see GameScene's
+    // identical fadeIn) -- handleDashboardStarting's scene.restart() re-runs
+    // create() on every stage transition, so this fires again each time too.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
+
     // Same warm ember-bordered panel language as every other HUD readout
     // (GameScene's timer/score panels, ResultScene's headline).
     this.titlePanel = this.add.graphics();

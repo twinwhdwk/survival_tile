@@ -80,6 +80,12 @@ export default class LobbyScene extends Phaser.Scene {
     this.createFloatingAnimals();
     createAmbientEmbers(this);
 
+    // Same warm near-black fade every scene now opens with (see GameScene's
+    // identical fadeIn) -- this scene is re-entered every time a round ends
+    // and the bracket loops back here, so this fires on every return trip
+    // too, not just the very first visit.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
+
     // Event banner, pinned to the very top of the screen and sized to read
     // from across the room — separate from (and above) the room's own
     // "🔥 대기실" title below it. See LoginScene for the matching banner.

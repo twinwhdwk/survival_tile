@@ -43,6 +43,12 @@ export default class LoginScene extends Phaser.Scene {
     this.createFloatingAnimals();
     createAmbientEmbers(this);
 
+    // Same warm near-black fade every scene now opens with (see GameScene's
+    // identical fadeIn) -- this is the very first screen anyone sees, so an
+    // instant hard cut here was the most visible un-faded transition in the
+    // whole app.
+    this.cameras.main.fadeIn(400, 13, 8, 5);
+
     // Event banner, pinned to the very top of the screen and sized to read
     // from across the room — separate from the game's own title below it.
     this.add.text(WORLD_WIDTH / 2, 30, EVENT_BANNER_TEXT, {
