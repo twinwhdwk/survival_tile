@@ -158,9 +158,7 @@ export default class DashboardScene extends Phaser.Scene {
     this.socket.on('gameStarting', this.handleGameStarting);
     this.socket.on('tournamentEnded', this.handleTournamentEnded);
 
-    this.events.once('shutdown', () => {
-      this.cleanup();
-    });
+    this.events.once('shutdown', () => this.cleanup());
   }
 
   // Jumps the admin straight into a specific room's full GameScene as a
