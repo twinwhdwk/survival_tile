@@ -284,7 +284,39 @@ export default class ResultScene extends Phaser.Scene {
 
     const maxScroll = Math.max(0, contentHeight - viewHeight);
     if (maxScroll > 0) {
-      this.rankingsScrollCleanup = this.setUpRankingsScroll(rowsContainer, viewTop, viewBottom, maxScroll, maskShape);
+      // The drag/wheel handling below has no visual footprint of its own --
+      // without some on-screen cue, a long ranking list just looks like it
+      // stops short with no indication the rest is one drag/scroll away.
+      // A slim track + thumb on the panel's right edge (like a native
+      // scrollbar) makes that discoverable at a glance.
+      // Drawn by hand rather than through drawRoundedRect -- that helper's
+      // drop shadow/stroke/inset-line are tuned for full panels and would
+      // read as visual noise on a bar this thin (4px wide).
+      const trackX = WORLD_WIDTH / 2 + 172;
+      const barRadius = 2;
+      const scrollTrack = this.add.graphics();
+      scrollTrack.fillStyle(0xffffff, 0.12);
+      scrollTrack.fillRoundedRect(trackX - 2, viewTop, 4, viewHeight, barRadius);
+      const thumbHeight = Math.max(20, viewHeight * (viewHeight / contentHeight));
+      const scrollThumb = this.add.graphics();
+      const drawThumb = (scrollY) => {
+        const ratio = maxScroll > 0 ? (-scrollY / maxScroll) : 0;
+        const thumbTravel = viewHeight - thumbHeight;
+        const thumbTop = viewTop + ratio * thumbTravel;
+        scrollThumb.clear();
+        scrollThumb.fillStyle(0xffd700, 0.7);
+        scrollThumb.fillRoundedRect(trackX - 2, thumbTop, 4, thumbHeight, barRadius);
+      };
+      drawThumb(0);
+      this.rankingsScrollCleanup = this.setUpRankingsScroll(
+        rowsContainer, viewTop, viewBottom, maxScroll, maskShape, drawThumb,
+      );
+      const innerCleanup = this.rankingsScrollCleanup;
+      this.rankingsScrollCleanup = () => {
+        innerCleanup();
+        scrollTrack.destroy();
+        scrollThumb.destroy();
+      };
     } else {
       this.rankingsScrollCleanup = () => maskShape.destroy();
     }
@@ -303,7 +335,7 @@ export default class ResultScene extends Phaser.Scene {
   // hasReturnButton's comment for the same caveat) and these this.input.on
   // listeners are plugin-level, not tied to any GameObject's lifecycle that
   // would otherwise clean them up automatically.
-  setUpRankingsScroll(container, viewTop, viewBottom, maxScroll, maskShape) {
+  setUpRankingsScroll(container, viewTop, viewBottom, maxScroll, maskShape, onScroll) {
     const viewHeight = viewBottom - viewTop;
     const centerY = viewTop + viewHeight / 2;
     // Invisible drag surface over just the visible list window -- nothing
@@ -314,6 +346,7 @@ export default class ResultScene extends Phaser.Scene {
       .setInteractive();
 
     const clamp = (y) => Phaser.Math.Clamp(y, -maxScroll, 0);
+    const notify = () => { if (onScroll) { onScroll(container.y); } };
 
     let dragStartPointerY = null;
     let dragStartContainerY = 0;
@@ -327,12 +360,14 @@ export default class ResultScene extends Phaser.Scene {
         return;
       }
       container.y = clamp(dragStartContainerY + (pointer.y - dragStartPointerY));
+      notify();
     };
     const endDrag = () => {
       dragStartPointerY = null;
     };
     const onWheel = (pointer, currentlyOver, deltaX, deltaY) => {
       container.y = clamp(container.y - deltaY * 0.5);
+      notify();
     };
 
     zone.on('pointerdown', onZoneDown);
