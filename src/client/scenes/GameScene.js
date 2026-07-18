@@ -568,9 +568,15 @@ export default class GameScene extends Phaser.Scene {
     // called it, so it alone felt inert/unresponsive next to everything else.
     applyButtonFx(this.backToDashboardButton);
     this.backToDashboardButton.addEventListener('click', () => {
-      this.socket.once('dashboardStarting', (payload) => {
-        this.scene.start('DashboardScene', payload);
-      });
+      // Just ask the server; the actual scene.start('DashboardScene') is left
+      // to the 'dashboardStarting' entry in this.handlers, which already
+      // listens for exactly this reply. A local socket.once here as well would
+      // fire *in addition* to that handler on the same event (component-emitter
+      // snapshots its listener list before dispatch, so once() removing itself
+      // doesn't spare the already-queued handlers-map handler), double-starting
+      // DashboardScene — it boots, then gets torn down and re-created mid-frame,
+      // replaying its fade-in and dropping any dashboardUpdate that lands in the
+      // gap.
       this.socket.emit('adminReturnToDashboard', { roomId: this.roomId });
     });
 
