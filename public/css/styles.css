@@ -13,7 +13,7 @@ html, body {
      them. Matching them makes the letterboxing read as an intentional
      dark frame instead of an unstyled gap.
      */
-  background-color: #090b18;
+  background-color: #0d0805;
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
@@ -72,7 +72,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: #090b18;
+  background: #0d0805;
   color: #ffd9a0;
   font-family: 'Gothic A1', 'Malgun Gothic', sans-serif;
   text-align: center;
