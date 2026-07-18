@@ -242,6 +242,12 @@ export default class ResultScene extends Phaser.Scene {
       const rowY = startY + i * 26;
       const fontSize = isPodium ? '16px' : '15px';
       const fontStyle = isPodium ? 'bold' : 'normal';
+      // Regular rows had no stroke at all -- a thin, regular-weight Gothic A1
+      // glyph at 15px anti-aliases into a soft, "muddy" edge next to the
+      // podium rows' bold weight (which reads clean by sheer stroke width
+      // alone). The same TEXT_STROKE outline every other panel/label in the
+      // app already gets fixes that without needing to touch weight/size.
+      const strokeThickness = isPodium ? 3 : 2;
 
       // Alternating row tint so a long, scrolled list stays easy to scan by
       // eye -- drawn first (bottom of the row's own z-order) so isMine's own
@@ -275,6 +281,8 @@ export default class ResultScene extends Phaser.Scene {
         fontSize,
         fontStyle,
         color: rankColor,
+        stroke: TEXT_STROKE,
+        strokeThickness,
       }).setOrigin(0, 0.5);
 
       const nameText = this.add.text(nameX, rowY, nameLabel, {
@@ -282,6 +290,8 @@ export default class ResultScene extends Phaser.Scene {
         fontSize,
         fontStyle,
         color: nameColor,
+        stroke: TEXT_STROKE,
+        strokeThickness,
       }).setOrigin(0, 0.5);
       // A merged team (later bracket stages) can join several nicknames
       // into one row — at full size that easily runs wider than its column,
@@ -296,6 +306,8 @@ export default class ResultScene extends Phaser.Scene {
         fontSize,
         fontStyle,
         color: scoreColor,
+        stroke: TEXT_STROKE,
+        strokeThickness,
       }).setOrigin(1, 0.5);
 
       [rankText, nameText, scoreText].forEach((obj, colIdx) => {

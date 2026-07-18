@@ -95,6 +95,8 @@ export default class LobbyScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '18px',
       color: COLORS.textInfo,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // Same warm ember-bordered panel language as every other HUD readout in
@@ -125,6 +127,8 @@ export default class LobbyScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color: COLORS.textMuted,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     this.statusText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - 70, '', {
@@ -132,6 +136,8 @@ export default class LobbyScene extends Phaser.Scene {
       fontSize: '14px',
       color: COLORS.textGold,
       align: 'center',
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     // Everything that used to be two stacked rows (action buttons above,
@@ -438,6 +444,8 @@ export default class LobbyScene extends Phaser.Scene {
       fontFamily: FONT_BODY,
       fontSize: '14px',
       color,
+      stroke: TEXT_STROKE,
+      strokeThickness: 2,
     }).setOrigin(0, 0.5);
     // Nicknames can be up to NICKNAME_MAX_LENGTH (8) characters — at full
     // Korean-glyph width that's wider than this cell has room for, and
