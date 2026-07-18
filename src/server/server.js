@@ -9,6 +9,7 @@ import { ANIMAL_COUNT } from '../shared/animals';
 import {
   NICKNAME_MAX_LENGTH, MAX_LOBBY_PLAYERS, MAX_PLAYERS, STAGE_2_MAX_GROUP_SIZE,
 } from '../shared/roomConfig';
+import { RECONNECT_GRACE_MS } from '../shared/roundConfig';
 import Room from './Room';
 
 // A crash from one bad message (or an edge case this file didn't
@@ -62,11 +63,30 @@ app.get('/api/health', function(request, response) {
 });
 
 // Add static file middleware (to serve static files).
-app.use('/public', Express.static(Path.join(__dirname, '../public')));
+// The webpack bundle ships under a fixed name (bundle.js, no content hash),
+// so it can't be cached immutably — a deploy reuses the same URL for new
+// bytes. Use a short max-age plus must-revalidate: browsers may reuse it
+// within the window but always revalidate against the server afterward
+// (a 304 when unchanged is nearly free), so a returning player — including
+// the reconnect flow's own page reload — doesn't re-download ~1.2MB every
+// time, while a fresh deploy still reaches everyone within the window
+// rather than being pinned behind a stale immutable cache.
+app.use('/public', Express.static(Path.join(__dirname, '../public'), {
+  maxAge: '5m',
+  setHeaders: (response, filePath) => {
+    if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+      response.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    }
+  },
+}));
 
 // Request router.
 app.get('/', function(request, response) {
-   response.sendFile(Path.join(__dirname, '../public/index.html'));
+  // Never let a stale index.html get cached: it's the entry point that
+  // references the bundle, and it's tiny, so it should always be
+  // revalidated so a new deploy is picked up immediately.
+  response.setHeader('Cache-Control', 'no-cache');
+  response.sendFile(Path.join(__dirname, '../public/index.html'));
 })
 
 // Tell server to start listening for connections.
@@ -160,18 +180,17 @@ function broadcastDashboard() {
       console.error(`Room ${room.id} summary failed:`, error);
     }
   });
-  adminSockets.forEach((adminId) => {
-    const adminSocket = io.sockets.sockets[adminId];
-    if (adminSocket) {
-      adminSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: true });
-    }
-  });
-  spectatorSockets.forEach((spectatorId) => {
-    const spectatorSocket = io.sockets.sockets[spectatorId];
-    if (spectatorSocket) {
-      spectatorSocket.emit('dashboardUpdate', { stage: currentStage, rooms: summaries, isAdmin: false });
-    }
-  });
+  // Fan out through the shared DASHBOARD_ROOM rather than a per-socket emit
+  // loop. This runs every second and each payload embeds every room's full
+  // tileMap (~300 tiles x N rooms), so with the old loop socket.io
+  // re-serialized that entire ~3KB+ blob once per admin/spectator; through a
+  // room it serializes once and fans out natively. isAdmin was dropped from
+  // the payload deliberately: DashboardScene only ever reads isAdmin from
+  // its scene-entry data (dashboardStarting/gameStarting), never from these
+  // per-tick dashboardUpdate messages, so it was a dead field here — and
+  // dropping it is exactly what lets every recipient share one identical
+  // payload. Admin-vs-spectator capability is already fixed at scene entry.
+  io.to(DASHBOARD_ROOM).emit('dashboardUpdate', { stage: currentStage, rooms: summaries });
 }
 
 // Seats a real player cut from the bracket into the dashboard the room's
@@ -192,6 +211,7 @@ function seatSpectator(socketId) {
     return;
   }
   spectatorSockets.add(socketId);
+  socket.join(DASHBOARD_ROOM);
   socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: false });
 }
 
@@ -285,6 +305,45 @@ let finalRankings = [];
 // disconnected player's slot silently resurrect as an unpiloted "ghost" who
 // can never be eliminated and would wrongly ride along to the next round.
 const disconnectedSockets = new Set();
+
+// Reconnect support. sessionToken (a stable per-browser id the client sends
+// with join and reconnectAttempt) is the thing we match a returning player
+// against, since their socket.id changes on every reconnect. tokenToSocket
+// maps a live token to the socket.id currently holding it; graceTimers holds
+// the RECONNECT_GRACE_MS countdown for a token whose socket just dropped
+// mid-round — during that window the player's avatar is bot-proxied inside
+// its Room (Room.beginProxyControl) rather than eliminated, and a
+// reconnectAttempt with the same token reclaims it. If the timer fires first,
+// the reclaim window is over and the normal disconnect elimination runs.
+const tokenToSocket = new Map();
+const socketToToken = new Map();
+const graceTimers = new Map();
+
+// A single socket.io room that every admin and cut-player spectator joins,
+// so broadcastDashboard() can fan its (large, every-second) payload out
+// with one serialization instead of a per-socket emit loop.
+const DASHBOARD_ROOM = 'dashboard-viewers';
+
+function clearGraceTimer(token) {
+  const timer = graceTimers.get(token);
+  if (timer) {
+    clearTimeout(timer);
+    graceTimers.delete(token);
+  }
+}
+
+// Tears down all reconnect-tracking state at once. Called when a tournament
+// ends or the server is reset — without this, any grace timer still counting
+// down would fire ~20s later against an already-torn-down tournament, and
+// (more importantly) the token<->socket maps would accumulate an entry per
+// player across every tournament for as long as the instance stays up, the
+// same unbounded-growth class of leak as the disconnectedSockets one.
+function clearReconnectState() {
+  graceTimers.forEach((timer) => clearTimeout(timer));
+  graceTimers.clear();
+  tokenToSocket.clear();
+  socketToToken.clear();
+}
 
 function sanitizeNickname(raw) {
   if (typeof raw !== 'string') {
@@ -535,8 +594,14 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
             return;
           }
           if (stage <= 2) {
+            observerSocket.join(DASHBOARD_ROOM);
             observerSocket.emit('dashboardStarting', { stage, roomCount: active.length, isAdmin });
           } else {
+            // Stage 3+ is watched as a full in-room spectator, not via the
+            // dashboard — leave the dashboard room so a lingering membership
+            // from an earlier stage doesn't keep delivering dashboard fan-out
+            // to a client now rendering a single live board.
+            observerSocket.leave(DASHBOARD_ROOM);
             observerSocket.join(roomId);
             observerSocket.emit('gameStarting', { ...room.getSnapshot(), isSpectator: true, isAdmin });
           }
@@ -722,6 +787,7 @@ function endTournament() {
   finalRankings = [];
   disconnectedSockets.clear();
   spectatorSockets.clear();
+  clearReconnectState();
   broadcastLobby();
 
   return { rankings };
@@ -767,6 +833,7 @@ function resetServerState() {
   finalRankings = [];
   disconnectedSockets.clear();
   spectatorSockets.clear();
+  clearReconnectState();
   broadcastLobby();
 
   // An admin currently parked on DashboardScene or a spectated GameScene
@@ -795,6 +862,45 @@ function resetServerState() {
 function setServerHandlers() {
   io.on('connection', (socket) => {
     console.log('Socket connected: ' + socket.id);
+
+    // A reconnecting client offers its stable session token. If that token
+    // has a seat still inside its RECONNECT_GRACE_MS window (bot-proxied
+    // since the drop — see the disconnect handler), move that seat from the
+    // old socket.id onto this new one, stop the bot proxy, cancel the grace
+    // timeout, and resume the player right where their avatar is now, at its
+    // current score. Anything else (no such token, window already elapsed,
+    // seat already gone) is a clean rejection the client turns into a normal
+    // reload back to the login screen.
+    socket.on('reconnectAttempt', (payload) => {
+      const token = payload && typeof payload.token === 'string' ? payload.token : null;
+      if (!token || !graceTimers.has(token)) {
+        socket.emit('reconnectRejected', {});
+        return;
+      }
+      const oldSocketId = tokenToSocket.get(token);
+      const roomId = oldSocketId && socketRoomMap.get(oldSocketId);
+      const room = roomId && rooms.get(roomId);
+      if (!oldSocketId || !room || !room.players[oldSocketId] || room.finished) {
+        clearGraceTimer(token);
+        socket.emit('reconnectRejected', {});
+        return;
+      }
+
+      clearGraceTimer(token);
+      // Re-key everything that was tracking the old socket.id onto the new
+      // one, then hand the avatar back to human control.
+      room.reassignPlayerSocket(oldSocketId, socket.id);
+      socketRoomMap.delete(oldSocketId);
+      socketRoomMap.set(socket.id, roomId);
+      socketToToken.delete(oldSocketId);
+      socketToToken.set(socket.id, token);
+      tokenToSocket.set(token, socket.id);
+      socket.join(roomId);
+      room.endProxyControl(socket.id, true);
+
+      socket.emit('reconnectAccepted', {});
+      socket.emit('gameStarting', room.getSnapshot());
+    });
 
     socket.on('join', (payload) => {
       const nickname = sanitizeNickname(payload && payload.nickname);
@@ -838,6 +944,18 @@ function setServerHandlers() {
       }
 
       lobbyPlayers[socket.id] = { nickname, animalIndex: Math.floor(Math.random() * ANIMAL_COUNT) };
+
+      // Remember which browser (stable token) this socket belongs to, so a
+      // later reconnectAttempt with the same token can be matched back to
+      // whatever room seat this socket ends up in. Only regular players are
+      // tracked for reclaim — an admin reconnect already has its own
+      // re-auth path and never occupies a room seat.
+      const token = payload && typeof payload.token === 'string' ? payload.token : null;
+      if (token && !isAdminAttempt) {
+        socketToToken.set(socket.id, token);
+        tokenToSocket.set(token, socket.id);
+      }
+
       broadcastLobby();
     });
 
@@ -999,6 +1117,10 @@ function setServerHandlers() {
       if (!room) {
         return;
       }
+      // Leaving the dashboard fan-out room while watching one full board,
+      // so a stale membership doesn't keep pushing every-room dashboard
+      // payloads to a client now rendering a single live game.
+      socket.leave(DASHBOARD_ROOM);
       socket.join(roomId);
       socket.emit('gameStarting', {
         ...room.getSnapshot(), isSpectator: true, fromDashboard: true, isAdmin: true,
@@ -1021,6 +1143,7 @@ function setServerHandlers() {
       if (currentStage === 0 || currentStage > 2) {
         return;
       }
+      socket.join(DASHBOARD_ROOM);
       socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
     });
 
@@ -1037,14 +1160,64 @@ function setServerHandlers() {
 
       const roomId = socketRoomMap.get(socket.id);
       if (roomId) {
-        disconnectedSockets.add(socket.id);
         const room = rooms.get(roomId);
+        const token = socketToToken.get(socket.id);
+
+        // Mid-round drop of a real player who has a session token and isn't
+        // already out: don't eliminate yet. Hand their avatar to the bot AI
+        // (Room.beginProxyControl) and start a RECONNECT_GRACE_MS countdown.
+        // A reconnectAttempt with the same token before it fires reclaims
+        // the seat in place; if it fires first, the reclaim window is over
+        // and we run the normal disconnect elimination.
+        const player = room && room.players[socket.id];
+        const canReclaim = room && token && player && !player.eliminated && !room.finished;
+
+        if (canReclaim) {
+          room.beginProxyControl(socket.id);
+          // socketRoomMap still points token's old socket.id at this room so
+          // the grace timer and a reclaim can both find it; cleaned up
+          // either on reclaim (moved to the new socket.id) or on timeout.
+          const timer = setTimeout(() => {
+            graceTimers.delete(token);
+            const liveRoom = rooms.get(roomId);
+            if (liveRoom) {
+              liveRoom.endProxyControl(socket.id);
+              liveRoom.handleDisconnect(socket.id);
+            }
+            socketRoomMap.delete(socket.id);
+            tokenToSocket.delete(token);
+            socketToToken.delete(socket.id);
+          }, RECONNECT_GRACE_MS);
+          graceTimers.set(token, timer);
+          // Deliberately DON'T record into disconnectedSockets yet — that's
+          // for players truly gone from the bracket; a reclaimable seat is
+          // still in play. The timeout path above (via handleDisconnect)
+          // covers the genuinely-gone case.
+          return;
+        }
+
+        if (globalPhase === 'TOURNAMENT') {
+          disconnectedSockets.add(socket.id);
+        }
         if (room) {
           room.handleDisconnect(socket.id);
         }
         socketRoomMap.delete(socket.id);
-      } else {
+        if (token) {
+          tokenToSocket.delete(token);
+          socketToToken.delete(socket.id);
+        }
+        return;
+      }
+
+      // Not in a room. Same bracket-tracking note as before.
+      if (globalPhase === 'TOURNAMENT') {
         disconnectedSockets.add(socket.id);
+      }
+      const lingeringToken = socketToToken.get(socket.id);
+      if (lingeringToken) {
+        tokenToSocket.delete(lingeringToken);
+        socketToToken.delete(socket.id);
       }
     });
   });

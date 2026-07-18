@@ -1,6 +1,7 @@
 import SocketIO from 'socket.io-client';
 import { FONT_BODY } from '../theme/Theme';
 import { showToast } from '../utilities/Toast';
+import { getSessionToken } from './sessionToken';
 
 let socket = null;
 let statusEl = null;
@@ -73,14 +74,48 @@ export function getSocket() {
     socket.on('connect', () => {
       el.style.transform = 'translateY(-100%)';
 
-      // A reconnect gets a brand new socket.id — the server no longer
-      // recognizes it as the player it was mid-game, so whichever scene
-      // was active is now stuck talking to a room/lobby entry that's gone.
-      // Reload for a clean slate instead of leaving that scene silently
-      // dead with the banner hidden (which would look like everything's
-      // fine).
+      // A reconnect gets a brand new socket.id, so the server can no longer
+      // match this connection to the player it was mid-game by id alone.
+      // Before falling back to a full page reload (clean slate, back to the
+      // login screen), offer the server our stable session token: if we
+      // were piloting a live avatar that's still within its reconnect grace
+      // window (server-side, bot-proxied — see RECONNECT_GRACE_MS), the
+      // server can hand that exact avatar back at its current position and
+      // score. The server answers with either 'reconnectAccepted' (a scene
+      // will resume the game) or 'reconnectRejected' (nothing to reclaim —
+      // then we reload as before).
       if (hadDisconnected) {
-        window.location.reload();
+        let settled = false;
+        const fallbackReload = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          window.location.reload();
+        };
+        socket.once('reconnectRejected', fallbackReload);
+        socket.once('reconnectAccepted', () => {
+          settled = true;
+          // The server follows this with a 'gameStarting' snapshot for the
+          // reclaimed avatar. Whatever scene is active post-reload (normally
+          // LoginScene) has no gameStarting listener, so drive the jump into
+          // GameScene here, from the one place guaranteed to be listening.
+          socket.once('gameStarting', (payload) => {
+            const game = window.__game;
+            if (game && game.scene) {
+              game.scene.stop('LoginScene');
+              game.scene.stop('LobbyScene');
+              game.scene.start('GameScene', payload);
+            } else {
+              // No game instance somehow — safest fallback is a clean reload.
+              window.location.reload();
+            }
+          });
+        });
+        // If the server never answers (old build, race), don't hang on a
+        // frozen screen — reload after a short grace.
+        setTimeout(fallbackReload, 2000);
+        socket.emit('reconnectAttempt', { token: getSessionToken() });
       }
     });
 
@@ -91,11 +126,16 @@ export function getSocket() {
     // time. Without this, picking the phone back up just showed whatever
     // scene was frozen on screen when it went to sleep, with no indication
     // anything was wrong, and the only fix was manually pulling to refresh.
-    // Reloading the instant the tab comes back to the foreground and finds
-    // itself disconnected does that automatically.
+    // When the tab returns to the foreground disconnected, kick socket.io's
+    // reconnect rather than reloading outright: if it reconnects within the
+    // grace window the 'connect' handler above reclaims the avatar via the
+    // session token (no reload, game resumes in place); only if that never
+    // succeeds does the eventual fallback reload fire. socket.connect() is a
+    // no-op if a reconnect attempt is already in flight.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && !socket.connected) {
-        window.location.reload();
+        el.style.transform = 'translateY(0)';
+        socket.connect();
       }
     });
 

@@ -122,6 +122,11 @@ function refreshTextFonts(game) {
 
 function startGame() {
   const game = new Phaser.Game(config);
+  // Exposed so the reconnect flow (net/socket.js) can jump straight into
+  // GameScene with a reclaimed snapshot from whatever scene happens to be
+  // active after the post-reconnect page reload (usually LoginScene), which
+  // otherwise has no gameStarting listener of its own.
+  window.__game = game;
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => refreshTextFonts(game));
   }

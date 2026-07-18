@@ -197,3 +197,24 @@ export const BOMB_TILES_PER_PLAYERS = 6;
 export const BOMB_FUSE_MS = 2000;
 // 1 ring = a 3x3 area centered on the bomb tile.
 export const BOMB_BLAST_RADIUS = 1;
+
+// When a real player's socket drops mid-round, they aren't eliminated
+// immediately — their avatar is handed to the bot AI as a "proxy" for this
+// long, giving them a window to reconnect (a backgrounded phone, a brief
+// wifi drop at a busy venue) and reclaim it exactly where it is, at its
+// current score, instead of losing the round to a momentary blip. If the
+// window elapses with no reconnect, the proxy is dropped and the normal
+// disconnect elimination proceeds. Deliberately long enough to cover a real
+// reconnect (page reload + re-join round-trip) but not so long that a genuinely
+// gone player leaves a bot-piloted seat lingering for the rest of a round.
+export const RECONNECT_GRACE_MS = 20000;
+
+// The moment a reconnecting player reclaims their avatar, the bot proxy
+// hands control back — but there's a real beat before the human's eyes and
+// fingers re-engage, during which the tile the bot last parked them on may
+// already be counting down to collapse. Give just that one tile (the
+// avatar's current hex, not an area) a brief immunity so a returning player
+// doesn't lose the round in the first second back before they can even
+// react. Scoped tight and short on purpose: it's a re-entry cushion, not a
+// safe-haven.
+export const RECONNECT_RESPAWN_GRACE_MS = 3000;

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { setNickname } from '../net/session';
+import { getSessionToken } from '../net/sessionToken';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
 import { generateBackgroundTexture, generateParticleTextures } from '../utilities/EffectTextures';
 import { createAmbientEmbers } from '../utilities/SceneFx';
@@ -284,6 +285,7 @@ export default class LoginScene extends Phaser.Scene {
     this.socket.once('lobbyUpdate', onLobby);
 
     const password = this.passwordInput_.value;
-    this.socket.emit('join', password ? { nickname, password } : { nickname });
+    const token = getSessionToken();
+    this.socket.emit('join', password ? { nickname, password, token } : { nickname, token });
   }
 }

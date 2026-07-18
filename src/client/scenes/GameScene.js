@@ -1312,6 +1312,19 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
+      // A player dropped mid-round and their avatar is now bot-proxied
+      // during their reconnect grace window (or just reclaimed it). Dim
+      // other players' avatars while proxied so it's visible they're on
+      // autopilot, matching the ghost/spectator dimming cue. Never fires
+      // for this client's own avatar in a way it needs to react to — a
+      // proxied local player is disconnected and not looking at the screen.
+      playerProxyControl: ({ playerId, proxied }) => {
+        const avatar = this.otherPlayers[playerId];
+        if (avatar) {
+          avatar.setAlpha(proxied ? 0.5 : 1);
+        }
+      },
+
       // Covers the case where the spectator's own watched room already
       // wrapped its round (no rankings yet) while a *different* room ends
       // up being the one that finishes the tournament.

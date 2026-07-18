@@ -27,6 +27,7 @@ import {
   SOLO_BOT_SCORE_GAP_MIN,
   SOLO_BOT_SCORE_GAP_MAX,
   REGEN_GRACE_MS,
+  RECONNECT_RESPAWN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
   GHOST_RESPAWN_STILLNESS_MS,
@@ -786,18 +787,23 @@ export default class Room {
       this.randomizeBotResults();
     }
 
-    // 개인전's own last-survivor case: only reachable with a *human* as the
-    // sole remaining player now -- soloAllHumansEliminated above already
-    // ends the round the instant the last human dies, so a bot can never
-    // again be the one left standing alone by the time this check runs.
-    // Still worth ending early (rather than idling out the rest of the
-    // round with no bots left to threaten them) and topping the winner's
-    // score up — see SOLO_LAST_SURVIVOR_BONUS_SCORE's own comment.
+    // 개인전's own last-survivor case. soloAllHumansEliminated above already
+    // ends the round the instant the last *human* dies, so whenever this
+    // room has any human in it the sole survivor here is necessarily one of
+    // them. An all-bot room (admin testing with 봇 추가 and nobody joining)
+    // has hasHumans false, which makes soloAllHumansEliminated permanently
+    // false — so this branch was reachable there with a *bot* as the lone
+    // survivor, handing SOLO_LAST_SURVIVOR_BONUS_SCORE to a bot. Harmless
+    // in practice (nobody is watching a bots-only room, and its scores go
+    // nowhere), but it made the bonus a lie about what it rewards, so
+    // resolve the survivor first and gate the bonus on them actually being
+    // a real player. The round still ends early either way, rather than
+    // idling out the clock with nothing left to threaten whoever's left.
     const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated
       && !soloAllHumansEliminated && aliveCount === 1;
     if (soloLastSurvivorStanding) {
       const winner = Object.values(this.players).find((p) => !p.eliminated);
-      if (winner) {
+      if (winner && !winner.isBot) {
         winner.score = (winner.score || 0) + SOLO_LAST_SURVIVOR_BONUS_SCORE;
       }
     }
@@ -1441,7 +1447,11 @@ export default class Room {
 
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
-      if (!player.isBot) {
+      // proxyControlled: a real player who dropped mid-round and is inside
+      // their reconnect grace window (see beginProxyControl) — the bot AI
+      // keeps their seat alive and playing exactly as it does for a real
+      // bot, so they can reclaim a still-live avatar rather than a corpse.
+      if (!player.isBot && !player.proxyControlled) {
         return;
       }
 
@@ -1790,6 +1800,80 @@ export default class Room {
       score: this.score,
       rankings: (tournamentResult && tournamentResult.rankings) || null,
     });
+  }
+
+  // Reconnect support: a real player's socket dropped mid-round. Rather
+  // than eliminate them, mark the avatar proxy-controlled so the bot AI
+  // steers it (moveBotsRandomly treats proxyControlled the same as isBot —
+  // it keeps the seat alive and playing during the RECONNECT_GRACE_MS
+  // window). Nothing else about the player changes: same score, same
+  // eliminated state, same nickname/animal, so a reclaim resumes exactly
+  // where the avatar is now. A no-op if the player's already gone/eliminated.
+  beginProxyControl(socketId) {
+    const player = this.players[socketId];
+    if (!player || player.eliminated) {
+      return;
+    }
+    player.proxyControlled = true;
+    // Let everyone see the avatar is now on autopilot (client dims it, same
+    // cue a spectator/ghost gets) rather than looking like a normal player.
+    this.emit('playerProxyControl', { playerId: socketId, proxied: true });
+  }
+
+  // Reconnect landed in time (reclaimed=true, called from the reclaim path)
+  // or the grace window elapsed and the caller is about to eliminate them
+  // anyway (reclaimed=false) — return the avatar to human control. On a
+  // genuine reclaim, give the tile the avatar is standing on a brief
+  // immunity (RECONNECT_RESPAWN_GRACE_MS) so the bot's last parking spot
+  // doesn't collapse out from under the returning player in the beat before
+  // they re-engage — see that constant's own comment.
+  endProxyControl(socketId, reclaimed = false) {
+    const player = this.players[socketId];
+    if (!player) {
+      return;
+    }
+    player.proxyControlled = false;
+    if (reclaimed && !player.eliminated) {
+      const { row, col } = this.getTileCoords(player.x, player.y);
+      if (this.tileMap[row][col] === TILE_STATE.SOLID) {
+        this.regenGraceUntil.set(`${row}_${col}`, Date.now() + RECONNECT_RESPAWN_GRACE_MS);
+      }
+    }
+    this.emit('playerProxyControl', { playerId: socketId, proxied: false });
+  }
+
+  // Moves a player's entire seat from one socket.id key to another (a
+  // reconnect gets a brand new socket.id). Everything about the player
+  // object itself is preserved; only the key it lives under changes, plus
+  // the per-socket side maps that key off it. Called by server.js's
+  // reconnectAttempt handler before it re-adds the new socket to the room's
+  // broadcast channel.
+  reassignPlayerSocket(oldId, newId) {
+    const player = this.players[oldId];
+    if (!player || oldId === newId) {
+      return;
+    }
+    player.playerId = newId;
+    this.players[newId] = player;
+    delete this.players[oldId];
+
+    // The per-socket bookkeeping maps are all keyed by socket.id too.
+    if (this.reviveCooldowns.has(oldId)) {
+      this.reviveCooldowns.set(newId, this.reviveCooldowns.get(oldId));
+      this.reviveCooldowns.delete(oldId);
+    }
+    const moveState = this.moveBroadcast.get(oldId);
+    if (moveState) {
+      if (moveState.timer) {
+        clearTimeout(moveState.timer);
+        moveState.timer = null;
+      }
+      this.moveBroadcast.delete(oldId);
+    }
+    if (this.botHeadings && this.botHeadings.has(oldId)) {
+      this.botHeadings.set(newId, this.botHeadings.get(oldId));
+      this.botHeadings.delete(oldId);
+    }
   }
 
   handleDisconnect(socketId) {
