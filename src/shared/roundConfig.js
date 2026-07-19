@@ -3,11 +3,11 @@
 export const SURVIVAL_ROUND_DURATION_MS = 120000; // 2 minutes
 // Stage 3's solo final: rapid shrink to a fixed 6x6 window, then that
 // window roams the map (see Room.js's FINAL-mode boundary logic) until
-// time runs out or one player is left. Same length as stage 1's SURVIVAL
-// round -- long enough for several roam steps (FINAL_ROAM_STEP_MS below)
-// after the shrink phase, without dragging the finale out past what the
-// rest of the bracket's pacing already establishes.
-export const FINAL_ROUND_DURATION_MS = 120000;
+// time runs out or one player is left. Shorter than stage 1/2's SURVIVAL
+// round on purpose -- the finale is meant to read as a fast, decisive
+// showdown rather than dragging on at the same pace as the earlier team
+// rounds now that the field is down to one solo group.
+export const FINAL_ROUND_DURATION_MS = 90000;
 // Once the rapid shrink phase reaches the fixed 6x6 window, it moves one
 // cell at a time on this interval instead of shrinking further -- the
 // operator's own example was "15초마다 1칸씩" (one cell every 15s).
@@ -54,6 +54,20 @@ export const BOUNDARY_SHRINK_INTERVAL_MS = 10000;
 // and BOUNDARY_SHRINK_EARLY_STEPS were solved against together.
 export const BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 6000;
 export const BOUNDARY_SHRINK_EARLY_STEPS = 3;
+// FINAL mode's own early-ring cadence during its rapid-shrink-to-window
+// phase (see Room.js's boundaryShrinkStepInterval(), mode-aware for exactly
+// this) -- deliberately slower than SURVIVAL's BOUNDARY_SHRINK_INTERVAL_EARLY_MS
+// so the finale's opening moments don't feel rushed on top of
+// FINAL_ROUND_DURATION_MS already being shorter than a SURVIVAL round.
+// Reuses BOUNDARY_SHRINK_EARLY_STEPS (3) for how many rings count as
+// "early" -- only the per-ring wait during those rings changes. Needs 6
+// total rings (both column edges inset once per step) to reach the fixed
+// FINAL_ROAM_WINDOW_SIZE window, so at this pace the shrink phase alone
+// takes 3*8s + 3*10s = 54s; combined with BOUNDARY_SHRINK_GRACE_MS (20s,
+// shared with SURVIVAL) that leaves comfortably under half of
+// FINAL_ROUND_DURATION_MS (90s) for the roam phase after -- slow this down
+// much further and the roam phase starts getting squeezed out entirely.
+export const FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 8000;
 export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this window, not all at once
 // SURVIVAL rounds have no other scoring mechanic, so a teammate's score
 // contribution is how long they personally stayed alive (in whole

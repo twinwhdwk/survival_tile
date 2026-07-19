@@ -17,6 +17,7 @@ import {
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
   BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
+  FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
   BOUNDARY_SHRINK_EARLY_STEPS,
   BOUNDARY_WAVE_MS,
   AUTO_REGEN_BASE_BURST,
@@ -72,13 +73,6 @@ const MAX_ROW_INSET_TOP = Math.floor((MAP_ROWS - SAFE_ZONE_MIN_ROWS) / 2);
 const MAX_ROW_INSET_BOTTOM = Math.ceil((MAP_ROWS - SAFE_ZONE_MIN_ROWS) / 2);
 const MAX_COL_INSET_LEFT = Math.floor((MAP_COLS - SAFE_ZONE_MIN_COLS) / 2);
 const MAX_COL_INSET_RIGHT = Math.ceil((MAP_COLS - SAFE_ZONE_MIN_COLS) / 2);
-
-// The interval before the Nth boundary-shrink step (1-indexed) — see
-// BOUNDARY_SHRINK_INTERVAL_EARLY_MS's own comment in roundConfig.js for why
-// the first few rings close faster than the rest.
-function boundaryShrinkStepInterval(stepNumber) {
-  return stepNumber <= BOUNDARY_SHRINK_EARLY_STEPS ? BOUNDARY_SHRINK_INTERVAL_EARLY_MS : BOUNDARY_SHRINK_INTERVAL_MS;
-}
 
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
 // up and falling back to simple immediate-neighbor avoidance. Deep enough to
@@ -248,7 +242,7 @@ export default class Room {
     // due — advanced by boundaryShrinkStepInterval() each time a step fires
     // (see checkRoundState()), rather than recomputed from a flat interval,
     // so the front-loaded early cadence can differ step to step.
-    this.nextBoundaryShrinkAt = BOUNDARY_SHRINK_GRACE_MS + boundaryShrinkStepInterval(1);
+    this.nextBoundaryShrinkAt = BOUNDARY_SHRINK_GRACE_MS + this.boundaryShrinkStepInterval(1);
     this.lastRegenAt = 0;
     // FINAL mode only (stage 3's solo finale): once the rapid shrink phase
     // reaches a fixed FINAL_ROAM_WINDOW_SIZE-square window, finalRoamActive
@@ -1581,6 +1575,20 @@ export default class Room {
     }
   }
 
+  // The interval before the Nth boundary-shrink step (1-indexed) — mode-
+  // aware so FINAL's own rapid-shrink phase (see shrinkTowardFinalWindow())
+  // can run its early rings on a slower cadence than SURVIVAL's, without
+  // touching SURVIVAL's own tuning (see FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS's
+  // own comment in roundConfig.js for why). Both modes share the same
+  // BOUNDARY_SHRINK_EARLY_STEPS count and the same steady-state
+  // BOUNDARY_SHRINK_INTERVAL_MS once past it.
+  boundaryShrinkStepInterval(stepNumber) {
+    if (stepNumber > BOUNDARY_SHRINK_EARLY_STEPS) {
+      return BOUNDARY_SHRINK_INTERVAL_MS;
+    }
+    return this.mode === 'FINAL' ? FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS : BOUNDARY_SHRINK_INTERVAL_EARLY_MS;
+  }
+
   // FINAL mode's own rapid-shrink phase (see checkRoundState) closes the
   // column edges exactly the same way shrinkBoundary() does, but stops once
   // they reach whatever value leaves exactly FINAL_ROAM_WINDOW_SIZE (6)
@@ -2060,7 +2068,7 @@ export default class Room {
       while (elapsed >= this.nextBoundaryShrinkAt) {
         const isFirstStep = this.boundaryShrinkStepsDone === 0;
         this.boundaryShrinkStepsDone += 1;
-        this.nextBoundaryShrinkAt += boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
+        this.nextBoundaryShrinkAt += this.boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
 
         this.shrinkBoundary();
 
@@ -2082,7 +2090,7 @@ export default class Room {
       while (elapsed >= this.nextBoundaryShrinkAt) {
         const isFirstStep = this.boundaryShrinkStepsDone === 0;
         this.boundaryShrinkStepsDone += 1;
-        this.nextBoundaryShrinkAt += boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
+        this.nextBoundaryShrinkAt += this.boundaryShrinkStepInterval(this.boundaryShrinkStepsDone + 1);
 
         const reachedTarget = this.shrinkTowardFinalWindow();
 
