@@ -80,6 +80,45 @@ export function generateTileTextures(scene) {
   generateParticleTextures(scene);
 }
 
+// A tapered pillar of light -- wide at the base, narrowing toward the top,
+// faded out via a real canvas gradient (unlike a Phaser Graphics fill,
+// which has no gradient-fill primitive of its own) rather than a flat
+// tint. Anchored at its own bottom-center (see GameScene.createLightBeam's
+// setOrigin(0.5, 1)) so a single shared texture can be scaled taller/
+// shorter per use without needing separate textures for every size.
+export function generateShieldLightBeamTexture(scene, key) {
+  if (scene.textures.exists(key)) {
+    return;
+  }
+  const width = 28;
+  const height = 96;
+  const canvasTexture = scene.textures.createCanvas(key, width, height);
+  const ctx = canvasTexture.getContext();
+
+  const baseHalfWidth = width / 2;
+  const tipHalfWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(width / 2 - baseHalfWidth, height);
+  ctx.lineTo(width / 2 - tipHalfWidth, 0);
+  ctx.lineTo(width / 2 + tipHalfWidth, 0);
+  ctx.lineTo(width / 2 + baseHalfWidth, height);
+  ctx.closePath();
+
+  // Bright, near-white-gold at the base fading to fully transparent at the
+  // tip -- the beam's own alpha tween (createLightBeam) handles the
+  // overall rise-and-fade motion; this gradient is what makes the shaft
+  // itself look like it's dissipating into the air rather than ending in
+  // a hard-edged cutoff.
+  const gradient = ctx.createLinearGradient(0, height, 0, 0);
+  gradient.addColorStop(0, 'rgba(255,246,200,0.95)');
+  gradient.addColorStop(0.45, 'rgba(255,215,0,0.55)');
+  gradient.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  canvasTexture.refresh();
+}
+
 export function generateBackgroundTexture(scene, key, width, height) {
   if (scene.textures.exists(key)) {
     return;

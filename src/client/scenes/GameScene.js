@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 
 import { getSocket } from '../net/socket';
 import { ensureAnimalTexture } from '../utilities/AnimalTextures';
-import { generateTileTextures, generateBackgroundTexture } from '../utilities/EffectTextures';
+import { generateTileTextures, generateBackgroundTexture, generateShieldLightBeamTexture } from '../utilities/EffectTextures';
 import {
   playClick,
   playWarning,
@@ -153,6 +153,7 @@ export default class GameScene extends Phaser.Scene {
   create(data) {
     generateTileTextures(this);
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
+    generateShieldLightBeamTexture(this, 'shield_light_beam');
 
     this.socket = getSocket();
     this.player = null;
@@ -893,7 +894,23 @@ export default class GameScene extends Phaser.Scene {
   // real protection is the server's regenGraceUntil window; the tween
   // duration only needs to roughly track SHIELD_GRACE_MS so the glow fades
   // out around when the protection actually lapses.
-  playShieldGlow(tile) {
+  playShieldGlow(tile, isCenter = false) {
+    // A pillar of light shooting straight up out of the ground -- makes
+    // the activation read as a genuine magic effect (grounded, radiant)
+    // rather than just a particle burst with no sense of *where* the power
+    // is coming from. The stepped-on tile (isCenter) gets a noticeably
+    // taller/brighter beam than its 6 neighbors, so the whole 7-tile
+    // activation composes as one hero pillar with shorter supporting ones
+    // around it instead of 7 identical flashes.
+    this.createLightBeam(tile.baseX, tile.baseY, isCenter ? 1.6 : 1);
+    if (isCenter) {
+      // A second, slightly delayed beam right on top of the first widens
+      // the base and lingers a touch longer -- reads as the light
+      // "swelling" rather than a single flat pulse, reserved for the
+      // center tile so it doesn't compete with the supporting ones.
+      this.time.delayedCall(120, () => this.createLightBeam(tile.baseX, tile.baseY, 1.3));
+    }
+
     // Bigger, more frequent bursts than before (was 8/4/4 at 3 fixed
     // points) -- spread across the now-longer SHIELD_GRACE_MS window so a
     // longer-lasting shield still reads as continuously twinkling rather
@@ -939,6 +956,32 @@ export default class GameScene extends Phaser.Scene {
         tile.clearTint();
         tile.graceTintTween = null;
       },
+    });
+  }
+
+  // A single shared texture (generateShieldLightBeamTexture, drawn once
+  // with a real canvas gradient rather than a flat tint) anchored at its
+  // own bottom-center and scaled per call, so one beam can stand taller
+  // than another without needing a separate texture for every size. Starts
+  // short and dim, shoots upward while widening slightly, then fades --
+  // additive blending so overlapping beams (the 7-tile shield burst) pile
+  // up into a brighter glow instead of just stacking flat sprites.
+  createLightBeam(x, y, scale = 1) {
+    const beam = this.add.image(x, y, 'shield_light_beam')
+      .setOrigin(0.5, 1)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(11)
+      .setScale(scale * 0.8, scale * 0.35)
+      .setAlpha(0.9);
+
+    this.tweens.add({
+      targets: beam,
+      scaleY: scale * 1.15,
+      scaleX: scale * 0.95,
+      alpha: 0,
+      duration: 650,
+      ease: 'Cubic.easeOut',
+      onComplete: () => beam.destroy(),
     });
   }
 
@@ -1484,7 +1527,13 @@ export default class GameScene extends Phaser.Scene {
             return;
           }
           this.stopTileTween(tile);
-          this.time.delayedCall(i * 60, () => this.playShieldGlow(tile));
+          // getTilesWithinHexRadius() always returns the center tile itself
+          // first (see hexGrid.js), before BFS-expanding out to its
+          // neighbors -- i === 0 is exactly the stepped-on tile, which gets
+          // the tallest light beam (see playShieldGlow) so the 7-tile
+          // effect reads as one hero pillar with 6 shorter supporting ones
+          // around it, not 7 identical flashes.
+          this.time.delayedCall(i * 60, () => this.playShieldGlow(tile, i === 0));
         });
       },
 
