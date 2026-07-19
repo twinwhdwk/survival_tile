@@ -8,6 +8,44 @@ import { WORLD_WIDTH, WORLD_HEIGHT } from '../shared/hexGrid';
 import {
   FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT, FONT_BODY_FAMILY, FONT_BODY_SAMPLE_TEXT,
 } from './theme/Theme';
+import { showToast } from './utilities/Toast';
+
+// The server already guards every socket handler against a single bad
+// message/edge case taking the whole process down (see server.js's
+// uncaughtException/unhandledRejection handlers) -- the client had no
+// equivalent. An uncaught exception anywhere in a scene's create()/update()
+// (e.g. an admin double-clicking into an already-well-progressed room on
+// the dashboard, rendering a lot more accumulated state -- eliminations,
+// bombs, a shrunk boundary -- than a fresh round ever exercises) just halts
+// that scene's own execution silently: whatever was already added to the
+// display list stays frozen on screen forever, with no visible error and no
+// way forward except knowing to manually refresh -- exactly what a
+// stuck-mid-event admin can't be expected to figure out on their own.
+// Matches this app's own established "when in doubt, reload" philosophy
+// (net/socket.js's reconnect-ambiguity fallback) rather than introducing a
+// new recovery pattern. Bounded against a reload loop (a genuinely
+// unfixable, deterministic crash reloading forever) via a sessionStorage
+// timestamp -- survives the reload itself, unlike an in-memory flag.
+function handleFatalClientError(source, detail) {
+  // eslint-disable-next-line no-console
+  console.error(`[fatal-client-error:${source}]`, detail);
+  const now = Date.now();
+  const lastAutoReloadAt = Number(sessionStorage.getItem('lastAutoReloadAt')) || 0;
+  if (now - lastAutoReloadAt < 8000) {
+    showToast('오류가 발생했습니다. 새로고침해주세요.');
+    return;
+  }
+  sessionStorage.setItem('lastAutoReloadAt', String(now));
+  showToast('오류가 발생했습니다. 자동으로 새로고침합니다...');
+  setTimeout(() => window.location.reload(), 1200);
+}
+
+window.addEventListener('error', (event) => {
+  handleFatalClientError('error', (event && event.error) || (event && event.message));
+});
+window.addEventListener('unhandledrejection', (event) => {
+  handleFatalClientError('unhandledrejection', event && event.reason);
+});
 
 const config = {
   title:    '타일 서바이벌',
