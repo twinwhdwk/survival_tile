@@ -130,18 +130,17 @@ function drawMouth(g, mouthShape) {
 // fur roots would be hidden under the skull. An earlier version drew this as
 // a ring of sharp triangular spikes (a sunburst), which at this avatar's
 // small size read as spiky/menacing rather than fluffy -- round puffs with
-// no pointed tips anywhere read as fur regardless of scale.
+// no pointed tips anywhere read as fur regardless of scale. A later version
+// alternated each puff's reach/radius for a "less mechanical" look, but at
+// this size that read as lumpy/uneven rather than natural -- every puff is
+// now the same size on the same ring, evenly spaced.
 function drawMane(g, color) {
   const tuftCount = 14;
+  const reach = 16;
+  const radius = 4.5;
   g.fillStyle(color, 1);
   for (let i = 0; i < tuftCount; i++) {
     const angle = (Math.PI * 2 * i) / tuftCount;
-    // Alternating reach/radius keeps the fringe from reading as a perfectly
-    // uniform ring of identical puffs, closer to how a real mane's tufts
-    // vary a little in length -- deterministic (not Math.random()), so the
-    // same lion always regenerates the exact same texture.
-    const reach = i % 2 === 0 ? 17 : 14.5;
-    const radius = i % 2 === 0 ? 4.5 : 4;
     const x = CENTER + Math.cos(angle) * reach;
     const y = CENTER + Math.sin(angle) * reach;
     g.fillCircle(x, y, radius);
