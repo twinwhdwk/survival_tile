@@ -209,6 +209,22 @@ export default class Room {
     // time they spent literally unable to do anything yet, showing up as
     // score that had already ticked up the instant the round appeared.
     this.scoringStartTime = this.roundStartTime + START_COUNTDOWN_MS;
+    // Same reasoning as scoringStartTime just above, applied to the round's
+    // own displayed/scored duration instead of per-player scoring: the
+    // round-end check in checkRoundState() used to fire at roundStartTime +
+    // roundDurationMs, which folded the START_COUNTDOWN_MS freeze into the
+    // "playable" window -- a 120s round only ever gave ~110s anyone could
+    // actually move in. roundEndTime pushes the real end back by exactly
+    // the countdown, so roundDurationMs is now always genuinely-playable
+    // time; the client mirrors this same formula for its own displayed
+    // timer (see GameScene.js's updateTimerText()) rather than the server
+    // sending a separate field, since it already has roundStartTime,
+    // roundDuration, and its own imported START_COUNTDOWN_MS. FINAL mode's
+    // own shrink/roam boundary timings intentionally still measure straight
+    // off the raw roundStartTime (see BOUNDARY_SHRINK_GRACE_MS's own
+    // comment on that being a separate, already-acknowledged quirk) -- only
+    // the round's own scored/displayed duration moves here.
+    this.roundEndTime = this.scoringStartTime + this.roundDurationMs;
     this.finished = false;
     this.reviveCooldowns = new Map();
     // One shared, room-wide revival gauge that every ghost's successful
@@ -450,8 +466,15 @@ export default class Room {
   getSummary() {
     const players = Object.values(this.players);
     const alivePlayers = players.filter((p) => !p.eliminated);
-    const elapsed = Date.now() - this.roundStartTime;
-    const remainingMs = Math.max(0, this.roundDurationMs - elapsed);
+    // Same clamped-at-0 shape as GameScene.js's own updateTimerText() --
+    // shows the full duration, frozen, through the whole START_COUNTDOWN_MS
+    // freeze rather than ticking down underneath it, then counts down
+    // normally once the countdown actually ends. (this.roundEndTime is
+    // still the correct *trigger* timestamp for actually ending the round,
+    // used in checkRoundState() -- this is just how the admin dashboard
+    // displays the remaining time from it.)
+    const elapsedSincePlayable = Math.max(0, Date.now() - this.roundStartTime - START_COUNTDOWN_MS);
+    const remainingMs = Math.max(0, this.roundDurationMs - elapsedSincePlayable);
     return {
       roomId: this.id,
       mode: this.mode,
@@ -997,7 +1020,7 @@ export default class Room {
   // (it's a shrink-then-roam mode, not a fixed countdown to score by), but
   // never reaches here anyway -- angel tiles are TEAM-only.
   angelTileIntervalMs() {
-    const remainingMs = (this.roundStartTime + this.roundDurationMs) - Date.now();
+    const remainingMs = this.roundEndTime - Date.now();
     return remainingMs <= ANGEL_TILE_FINAL_STRETCH_MS ? ANGEL_TILE_FINAL_INTERVAL_MS : ANGEL_TILE_INTERVAL_MS;
   }
 
@@ -2157,7 +2180,7 @@ export default class Room {
       }
     }
 
-    if (elapsed >= this.roundDurationMs) {
+    if (Date.now() >= this.roundEndTime) {
       this.finishRoom('rescue');
     }
   }
@@ -2211,7 +2234,7 @@ export default class Room {
     // already means -- nobody else in this room ever could have caught up
     // to threaten them regardless of how much clock was left.
     if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
-      const endTime = reason === 'last-survivor' ? this.roundStartTime + this.roundDurationMs : Date.now();
+      const endTime = reason === 'last-survivor' ? this.roundEndTime : Date.now();
       Object.values(this.players).forEach((player) => {
         if (!player.eliminated) {
           this.addSurvivalScore(player, endTime);
