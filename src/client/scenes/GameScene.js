@@ -400,9 +400,9 @@ export default class GameScene extends Phaser.Scene {
         return;
       }
       if (this.mode === 'FINAL') {
-        this.showBanner('최종 개인전!\n마지막까지 살아남으세요!', '#ffcc55');
+        this.showBanner('최종 개인전! 마지막까지 살아남으세요!', '#ffcc55');
       } else {
-        this.showBanner('생존하라!\n타일이 무너지기 전에 버티세요', '#88ccff');
+        this.showBanner('생존하라! 타일이 무너지기 전에 버티세요', '#88ccff');
       }
     });
   }
@@ -519,7 +519,7 @@ export default class GameScene extends Phaser.Scene {
     // HUD label strokes are deliberately thinner (proportionally) than the
     // display-tier titles/banners elsewhere -- a 3-4px stroke on this small
     // a font was a much heavier relative outline than the same stroke on a
-    // 26-72px title (see BANNER_BOTTOM_MARGIN-area comment / showStartCountdown's own
+    // 24-72px title (see BANNER_BOTTOM_MARGIN-area comment / showStartCountdown's own
     // 72px/8px pairing), reading as thick "clip art" edges on quick-glance
     // HUD text rather than the clean, modern look every other panel now has.
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
@@ -540,9 +540,15 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
 
+    // Every banner message is forced onto a single line now (see the various
+    // showBanner() call sites) rather than the two-line phrasing some of them
+    // used to have -- that halves the backdrop's height, so this also drops
+    // a couple points in size (26 -> 24) as a safety margin against the
+    // longest one-line messages running wide enough to push past
+    // WORLD_WIDTH's edges now that there's no second line to wrap into.
     this.bannerText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - BANNER_BOTTOM_MARGIN, '', {
       fontFamily: FONT_DISPLAY,
-      fontSize: '26px',
+      fontSize: '24px',
       color: COLORS.textPrimary,
       stroke: TEXT_STROKE,
       strokeThickness: 5,
@@ -1459,7 +1465,7 @@ export default class GameScene extends Phaser.Scene {
           fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
           return;
         }
-        this.showBanner('⚡ 라스트 스탠드!\n유령들이 훨씬 빠르게 타일을 복구합니다', '#ffd700');
+        this.showBanner('⚡ 라스트 스탠드! 유령 복구 속도 대폭 상승', '#ffd700');
         this.roomTransitionHoldUntil = this.time.now + LAST_STAND_BANNER_MS;
         if (this.eliminated) {
           this.ghostHintText.setText('지금 미친듯이 화면을 터치하세요! 게이지 채워 동료를 부활시키세요!');
@@ -1471,7 +1477,7 @@ export default class GameScene extends Phaser.Scene {
         // The team gauge filling is the only way anyone comes back (see
         // Room.respawnRandomGhost, respawnGhost's sole caller), so this
         // moment doubles as the "gauge full" announcement for the room.
-        this.showBanner(`💫 부활 게이지 가득!\n${nickname || '유령'} 부활!`, '#88ff99');
+        this.showBanner(`💫 부활 게이지 가득! ${nickname || '유령'} 부활!`, '#88ff99');
         if (playerId === this.socket.id) {
           this.handleOwnRevival(x, y, score, graceMs);
           return;
@@ -1491,7 +1497,7 @@ export default class GameScene extends Phaser.Scene {
       massCollapseStarted: ({ safeBounds }) => {
         this.cameras.main.shake(400, 0.008);
         this.cameras.main.flash(250, 255, 60, 60);
-        this.showBanner('경계가 불타오릅니다!\n중앙으로 대피하세요!', '#ff5555');
+        this.showBanner('경계가 불타오릅니다! 중앙으로 대피하세요!', '#ff5555');
         this.updateBoundaryOutline(safeBounds);
         playBoundaryAlarm();
         vibrateWarning();
