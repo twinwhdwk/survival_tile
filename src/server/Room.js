@@ -969,6 +969,23 @@ export default class Room {
 
     const until = Date.now() + SHIELD_GRACE_MS;
     getTilesWithinHexRadius(shield.row, shield.col, SHIELD_RADIUS).forEach(({ row, col }) => {
+      // Any already-collapsed ground in the radius comes back immediately
+      // too, not just whatever's still standing -- a shield stepped on
+      // right at the edge of a hole used to only protect the SOLID tiles
+      // around it, leaving any already-GONE neighbor still an actual gap
+      // inside an otherwise "safe" area for the same 5s. Revived the same
+      // way reviveTile()'s ghost-tap path does (SOLID + 'tileRevived' so
+      // the client plays its usual revive-glow animation), before the
+      // shared regenGraceUntil write below covers it for the rest of the
+      // grace window exactly like every other tile in the radius. Skips
+      // anything outside the current safe zone, same reasoning as
+      // autoRegenerateTiles()'s own getSafeZoneTiles() restriction -- ground
+      // outside the shrinking boundary is meant to stay gone; reviving it
+      // would defeat the point of the boundary.
+      if (this.tileMap[row][col] === TILE_STATE.GONE && this.isSafeTile(row, col)) {
+        this.tileMap[row][col] = TILE_STATE.SOLID;
+        this.emit('tileRevived', { row, col });
+      }
       this.regenGraceUntil.set(`${row}_${col}`, until);
       // Same anti-camping re-check every other grace-granting path already
       // schedules (see scheduleRegenStillnessCheck()): the tile the player
