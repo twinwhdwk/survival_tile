@@ -1463,13 +1463,13 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
-      playerRevived: ({ playerId, nickname, score, x, y }) => {
+      playerRevived: ({ playerId, nickname, score, x, y, graceMs }) => {
         // The team gauge filling is the only way anyone comes back (see
         // Room.respawnRandomGhost, respawnGhost's sole caller), so this
         // moment doubles as the "gauge full" announcement for the room.
         this.showBanner(`💫 부활 게이지 가득!\n${nickname || '유령'} 부활!`, '#88ff99');
         if (playerId === this.socket.id) {
-          this.handleOwnRevival(x, y, score);
+          this.handleOwnRevival(x, y, score, graceMs);
           return;
         }
         const avatar = this.otherPlayers[playerId];
@@ -1479,6 +1479,7 @@ export default class GameScene extends Phaser.Scene {
           avatar.setPosition(x, y);
           this.showFloatingLabel(x, y, '부활!', '#88ff99');
           this.tweens.add({ targets: avatar, alpha: 1, scale: 1, duration: 300, ease: 'Back.easeOut' });
+          this.playReviveProtectionGlow(avatar, x, y, graceMs);
         }
         this.updatePlayerCount();
       },
@@ -1549,6 +1550,27 @@ export default class GameScene extends Phaser.Scene {
         this.shatterEmitter.explode(24, x, y);
         playBombExplode();
         vibrateBombExplode();
+      },
+
+      // Room.explodeBombTile() sends this instead of 'playerEliminated' for
+      // anyone standing on a currently-golden shield tile, or on their own
+      // just-respawned landing tile, when the blast hits -- the explosion
+      // itself already played above via 'bombExploded', so this just adds
+      // a deflect cue right at the spared player's own position, otherwise
+      // surviving a bomb going off in their own tile would look like
+      // nothing happened at all. `cause` (from Room.js's own two separate
+      // protection maps) picks gold for a shield vs the same green the
+      // rest of the revive flow already uses, so the cue actually matches
+      // whichever protection is the reason they're still alive.
+      bombBlocked: ({ playerId, x, y, cause }) => {
+        const isRevive = cause === 'revive';
+        this.showFloatingLabel(x, y, '무효화!', isRevive ? '#88ff99' : '#ffd700');
+        this.spawnImpactRing(x, y, {
+          color: isRevive ? 0x88ff99 : SHIELD_COLOR, startRadius: 4, endScale: 4.5, duration: 380, strokeWidth: 3,
+        });
+        if (playerId === this.socket.id) {
+          this.cameras.main.flash(160, 255, 215, 120);
+        }
       },
 
       // Room.armShieldTile() sends this both when a shield is stepped on
@@ -1994,7 +2016,7 @@ export default class GameScene extends Phaser.Scene {
   // Server-authoritative respawn (Room.respawnGhost) landed on this exact
   // client — reverses everything handleOwnElimination did, rather than
   // re-running the create()/applySnapshot() setup from scratch.
-  handleOwnRevival(x, y, score) {
+  handleOwnRevival(x, y, score, graceMs) {
     this.eliminated = false;
 
     // Re-anchor 개인전's live "내 점수" ticker to this exact moment (see
@@ -2011,6 +2033,7 @@ export default class GameScene extends Phaser.Scene {
       this.player.setPosition(x, y);
       this.tweens.add({ targets: this.player, alpha: 1, scale: 1, duration: 300, ease: 'Back.easeOut' });
       this.showFloatingLabel(x, y, '부활!', '#88ff99');
+      this.playReviveProtectionGlow(this.player, x, y, graceMs);
     }
 
     if (this.ghostAuraEmitter) {
@@ -2519,6 +2542,76 @@ export default class GameScene extends Phaser.Scene {
         tile.clearTint();
         tile.graceTintTween = null;
       },
+    });
+  }
+
+  // Room.respawnGhost() grants a graceMs window where the landing tile
+  // can't collapse and the player can't be caught by a bomb blast (see
+  // 'bombBlocked') -- without an ongoing visual, a revived player only saw
+  // one 300ms flash, then nothing telling them how long they could safely
+  // get their bearings for (operator: "부활하고 2초간 무적한다던가... 더
+  // 빛나게 한다던가 해야 원활하게 진행할수있을듯"). Pulses both the landing
+  // tile and the avatar itself for the server's own graceMs, so "I'm safe
+  // right now" stays visibly true for the whole window, not just its first
+  // instant. A distinct green (matching every other '부활!' cue) rather
+  // than the shield's gold, so the two protections read as different
+  // things even though explodeBombTile() treats them the same way.
+  playReviveProtectionGlow(avatar, x, y, graceMs) {
+    const { row, col } = pixelToHex(x, y);
+    const tile = this.tileSprites[`${row}_${col}`];
+    if (tile) {
+      this.stopTileTween(tile);
+      const fromColor = Phaser.Display.Color.ValueToColor(0x88ff99);
+      const toColor = Phaser.Display.Color.ValueToColor(0xffffff);
+      tile.setTint(0x88ff99);
+      tile.graceTintTween = this.tweens.addCounter({
+        from: 0,
+        to: 100,
+        duration: graceMs,
+        ease: 'Linear',
+        onUpdate: (tween) => {
+          const cyclePos = (tween.getValue() / 100) * 2;
+          const t = cyclePos - Math.floor(cyclePos);
+          const step = Math.floor(cyclePos) % 2 === 0
+            ? Phaser.Display.Color.Interpolate.ColorWithColor(fromColor, toColor, 100, t * 100)
+            : Phaser.Display.Color.Interpolate.ColorWithColor(toColor, fromColor, 100, t * 100);
+          tile.setTint(Phaser.Display.Color.GetColor(step.r, step.g, step.b));
+        },
+        onComplete: () => {
+          tile.clearTint();
+          tile.graceTintTween = null;
+        },
+      });
+      this.sparkEmitter.setTint(0x88ff99);
+      this.sparkEmitter.explode(10, x, y);
+    }
+
+    if (!avatar) {
+      return;
+    }
+    // Started 300ms late, matching the existing materialize tween's own
+    // duration (alpha 0.35 -> 1, added right alongside this call) -- both
+    // tweening the same avatar's alpha at once would otherwise fight over
+    // the same property every frame.
+    this.time.delayedCall(300, () => {
+      if (avatar.reviveGraceTween) {
+        avatar.reviveGraceTween.stop();
+      }
+      avatar.reviveGraceTween = this.tweens.add({
+        targets: avatar,
+        alpha: 0.55,
+        duration: 220,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.time.delayedCall(Math.max(0, graceMs - 300), () => {
+        if (avatar.reviveGraceTween) {
+          avatar.reviveGraceTween.stop();
+          avatar.reviveGraceTween = null;
+        }
+        avatar.setAlpha(1);
+      });
     });
   }
 
