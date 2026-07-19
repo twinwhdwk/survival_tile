@@ -124,25 +124,27 @@ function drawMouth(g, mouthShape) {
   }
 }
 
-// A lion's mane radiates out from behind the head as a ring of triangular
-// tufts -- drawn before the head fill so the head circle (radius 15) covers
-// the inner ~15px of each spike and only the outer points show, the same
-// way real fur roots would be hidden under the skull.
+// A lion's mane radiates out from behind the head as a ring of soft, round
+// puffs -- drawn before the head fill so the head circle (radius 15) covers
+// each puff's inner half and only its outer curve shows, the same way real
+// fur roots would be hidden under the skull. An earlier version drew this as
+// a ring of sharp triangular spikes (a sunburst), which at this avatar's
+// small size read as spiky/menacing rather than fluffy -- round puffs with
+// no pointed tips anywhere read as fur regardless of scale.
 function drawMane(g, color) {
-  const spikeCount = 14;
-  const innerR = 12;
-  const outerR = 20;
+  const tuftCount = 14;
   g.fillStyle(color, 1);
-  for (let i = 0; i < spikeCount; i++) {
-    const angle = (Math.PI * 2 * i) / spikeCount;
-    const spread = 0.16;
-    const x1 = CENTER + Math.cos(angle) * innerR;
-    const y1 = CENTER + Math.sin(angle) * innerR;
-    const x2 = CENTER + Math.cos(angle - spread) * outerR;
-    const y2 = CENTER + Math.sin(angle - spread) * outerR;
-    const x3 = CENTER + Math.cos(angle + spread) * outerR;
-    const y3 = CENTER + Math.sin(angle + spread) * outerR;
-    g.fillTriangle(x1, y1, x2, y2, x3, y3);
+  for (let i = 0; i < tuftCount; i++) {
+    const angle = (Math.PI * 2 * i) / tuftCount;
+    // Alternating reach/radius keeps the fringe from reading as a perfectly
+    // uniform ring of identical puffs, closer to how a real mane's tufts
+    // vary a little in length -- deterministic (not Math.random()), so the
+    // same lion always regenerates the exact same texture.
+    const reach = i % 2 === 0 ? 17 : 14.5;
+    const radius = i % 2 === 0 ? 4.5 : 4;
+    const x = CENTER + Math.cos(angle) * reach;
+    const y = CENTER + Math.sin(angle) * reach;
+    g.fillCircle(x, y, radius);
   }
 }
 
