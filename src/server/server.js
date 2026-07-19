@@ -247,6 +247,9 @@ const rooms = new Map(); // roomId -> Room
 const socketRoomMap = new Map(); // socketId -> roomId
 
 let roomCounter = 0;
+// Reset to 0 by both clearLobby and resetServerState -- otherwise bot
+// nicknames (봇1, 봇2, ...) kept climbing across resets instead of starting
+// fresh, since neither reset previously touched this counter at all.
 let botCounter = 0;
 
 // Admin mode: entering this password on the login screen (checked
@@ -920,6 +923,7 @@ function resetServerState() {
   });
 
   lobbyPlayers = {};
+  botCounter = 0;
   globalPhase = 'LOBBY';
   currentStage = 0;
   stagePending = 0;
@@ -1159,6 +1163,7 @@ function setServerHandlers() {
         }
         delete lobbyPlayers[id];
       });
+      botCounter = 0;
       broadcastLobby();
     });
 
