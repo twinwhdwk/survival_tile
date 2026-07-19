@@ -835,7 +835,7 @@ export default class GameScene extends Phaser.Scene {
   // emblem read better), so this stays with straight panel edges.
   createShieldTileMarker(tile) {
     const { x, y } = hexToPixel(tile.row, tile.col);
-    const marker = this.add.graphics({ x, y }).setDepth(12);
+    const marker = this.add.graphics();
 
     const outer = [
       { x: -9, y: -11 }, { x: 9, y: -11 }, { x: 9, y: 3 }, { x: 0, y: 12 }, { x: -9, y: 3 },
@@ -865,13 +865,23 @@ export default class GameScene extends Phaser.Scene {
     marker.closePath();
     marker.fillPath();
 
-    marker.fillStyle(0x8a6a10, 1);
-    marker.fillPoints([
+    // The small gold diamond emblem is its own Graphics object (not drawn
+    // onto the shield body above) specifically so it can bob up and down
+    // independently -- everything drawn on one Graphics object moves as a
+    // single rigid shape, so animating just this piece needed splitting it
+    // out. Container groups it back with the shield body so both still
+    // move/scale together for the existing pulse tween below, with the
+    // emblem's own little float layered on top of that shared motion.
+    const emblem = this.add.graphics();
+    emblem.fillStyle(0x8a6a10, 1);
+    emblem.fillPoints([
       { x: 0, y: -3 }, { x: 3, y: 0 }, { x: 0, y: 3 }, { x: -3, y: 0 },
     ], true);
 
+    const container = this.add.container(x, y, [marker, emblem]).setDepth(12);
+
     this.tweens.add({
-      targets: marker,
+      targets: container,
       scale: 1.18,
       duration: 480,
       yoyo: true,
@@ -879,7 +889,20 @@ export default class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    return marker;
+    // A small, gentle bob -- independent of (and a different period than)
+    // the whole shield's own scale pulse above, so the emblem doesn't just
+    // look like it's growing/shrinking along with everything else, it
+    // genuinely floats in place on top of the shield.
+    this.tweens.add({
+      targets: emblem,
+      y: -2,
+      duration: 620,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return container;
   }
 
   // Shimmering gold pulse across the hex area a shield tile just protected
