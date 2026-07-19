@@ -2237,7 +2237,16 @@ export default class GameScene extends Phaser.Scene {
     if (!this.roundStartTime) {
       return;
     }
-    const elapsed = Date.now() - this.roundStartTime;
+    // Clamped at 0 for the first START_COUNTDOWN_MS -- the countdown freeze
+    // used to count against this same timer (a 120s round only ever showed
+    // ~110s of real, playable time, ticking down underneath the "10, 9,
+    // 8..." countdown overlay at the same time, which read as two
+    // conflicting countdowns running at once). This one now stays pinned at
+    // the full duration through the whole countdown overlay and only starts
+    // actually ticking down once it ends -- mirrors Room.js's own
+    // roundEndTime exactly (no separate field needed; both sides already
+    // have roundStartTime/roundDuration/START_COUNTDOWN_MS).
+    const elapsed = Math.max(0, Date.now() - this.roundStartTime - START_COUNTDOWN_MS);
     const remaining = Math.max(0, Math.ceil((this.roundDuration - elapsed) / 1000));
 
     // The mm:ss readout only actually changes once per second, but update()
