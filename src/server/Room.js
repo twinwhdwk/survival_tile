@@ -100,6 +100,18 @@ const BOT_MOVE_INTERVAL_MAX_MS = 600;
 // turn never leaves a bot committed to a stale plan.
 const BOT_HESITATION_CHANCE = 0.2;
 
+// Every BOT_MISTAKE_INTERVAL_MS, a bot has a BOT_MISTAKE_CHANCE probability
+// of its otherwise-optimal findStepTowardSafety() step getting overridden by
+// a genuinely random hex neighbor instead -- perfect pathfinding on every
+// single move reads as obviously inhuman once a room's been watched for more
+// than a few seconds; a real person occasionally reads the board wrong or
+// panics into the nearest gap instead of the safest one. Slower cadence than
+// BOT_HESITATION_CHANCE (checked every turn) on purpose -- this is meant to
+// read as an occasional lapse in judgment, not a constant coin-flip on every
+// step.
+const BOT_MISTAKE_INTERVAL_MS = 30000;
+const BOT_MISTAKE_CHANCE = 0.5;
+
 // Minimum spacing (ms) between 'playerMoved' broadcasts for a single player.
 // A real client emits 'playerMovement' every animation frame a direction key
 // is held (~60/sec, uncapped), and each one otherwise fans out to every other
@@ -227,6 +239,10 @@ export default class Room {
     // is per-bot rather than one shared interval.
     this.botMoveIntervalMs = new Map();
     this.botNextMoveAt = new Map();
+    // Next timestamp each bot's BOT_MISTAKE_CHANCE roll is due -- see that
+    // constant's own comment. Lazily seeded on a bot's first turn, same as
+    // botNextMoveAt above.
+    this.botNextMistakeCheckAt = new Map();
     // Tracked as four independent edge values (not one shared inset per
     // axis) so an axis's two sides can cap out at different rings (needed to
     // land on SAFE_ZONE_MIN_ROWS/COLS exactly on an even-sized map) and so
@@ -1937,6 +1953,29 @@ export default class Room {
       }
 
       const preferredDir = this.botHeadings.has(id) ? this.botHeadings.get(id) : null;
+
+      // BOT_MISTAKE_CHANCE roll -- see its own comment. Checked on its own
+      // slower cadence (BOT_MISTAKE_INTERVAL_MS), and short-circuits
+      // straight to a genuinely random neighbor when it fires, skipping
+      // findStepTowardSafety()'s pathfinding and the safe-neighbor fallback
+      // below entirely -- the whole point is an occasional real lapse in
+      // judgment, not just a slightly-worse-but-still-deliberate choice.
+      if (!this.botNextMistakeCheckAt.has(id)) {
+        this.botNextMistakeCheckAt.set(id, now + BOT_MISTAKE_INTERVAL_MS);
+      }
+      if (now >= this.botNextMistakeCheckAt.get(id)) {
+        this.botNextMistakeCheckAt.set(id, now + BOT_MISTAKE_INTERVAL_MS);
+        if (Math.random() < BOT_MISTAKE_CHANCE) {
+          const neighbors = hexNeighbors(currentRow, currentCol);
+          if (neighbors.length > 0) {
+            const wrong = neighbors[Math.floor(Math.random() * neighbors.length)];
+            const { x, y } = hexToPixel(wrong.row, wrong.col);
+            this.botHeadings.set(id, wrong.dir);
+            this.movePlayerTo(id, x, y);
+            return;
+          }
+        }
+      }
 
       const step = this.findStepTowardSafety(currentRow, currentCol, preferredDir);
       if (step) {
