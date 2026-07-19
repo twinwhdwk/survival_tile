@@ -834,7 +834,7 @@ export default class Room {
   // still handles anyone who steps into the radius *after* this instant,
   // while it's still collapsing) -- this just adds the immediate-blast
   // case on top, which that path alone can't cover since it isn't reached
-  // until WARNING_DELAY_MS + COLLAPSE_DELAY_MS (1320ms) later.
+  // until WARNING_DELAY_MS + COLLAPSE_DELAY_MS (1500ms) later.
   explodeBombTile(centerRow, centerCol) {
     this.emit('bombExploded', { row: centerRow, col: centerCol });
 
