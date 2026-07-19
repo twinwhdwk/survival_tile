@@ -830,27 +830,17 @@ export default class GameScene extends Phaser.Scene {
   // rim for a raised/embossed look) rather than the 🛡️ emoji -- an emoji
   // glyph's own colors are fixed and mostly blue/steel on every platform's
   // emoji font, so it can't actually be made to read as "golden" the way
-  // this shape can. A first version used dead-straight edges (a plain
-  // pentagon); real heraldic shield icons almost always curve the top and
-  // both sides instead, which is what curvedOutlinePoints()'s sampled
-  // quadratic segments give here -- a gently domed top and sides that
-  // bulge slightly before tapering to the bottom point, rather than flat
-  // panel edges.
+  // this shape can. A later curved-edge/ridge-and-boss variant was tried
+  // and rejected (user feedback: the plain-edged pentagon with a diamond
+  // emblem read better), so this stays with straight panel edges.
   createShieldTileMarker(tile) {
     const { x, y } = hexToPixel(tile.row, tile.col);
     const marker = this.add.graphics({ x, y }).setDepth(12);
 
-    const outer = this.curvedOutlinePoints(-9, -9, [
-      [9, -9, 0, -13],
-      [9, 2, 12, -4],
-      [0, 13, 10, 9],
-      [-9, 2, -10, 9],
-      [-9, -9, -12, -4],
-    ]);
-    // A rim, not a small inset badge -- scaled down just enough (0.74) to
-    // read as the shield's own gold face inside a bronze border, rather
-    // than a separate little panel floating in the middle of it.
-    const inner = outer.map((p) => ({ x: p.x * 0.74, y: p.y * 0.74 - 1 }));
+    const outer = [
+      { x: -9, y: -11 }, { x: 9, y: -11 }, { x: 9, y: 3 }, { x: 0, y: 12 }, { x: -9, y: 3 },
+    ];
+    const inner = outer.map((p) => ({ x: p.x * 0.6, y: p.y * 0.6 - 1 }));
 
     // Same offset-dark-silhouette drop shadow every panel in the app already
     // uses (see RoundedPanel.js's drawRoundedRect) -- gives the shield a
@@ -866,16 +856,19 @@ export default class GameScene extends Phaser.Scene {
     marker.fillStyle(0xffd700, 1);
     marker.fillPoints(inner, true);
 
-    // A thin raised center ridge, like a real shield's embossed spine,
-    // plus a small round boss where the ridge meets its own highlight --
-    // classic heraldic shield icons almost always carry one of these two
-    // details, rather than a flat gold face with nothing on it.
-    marker.lineStyle(1.2, 0xfff6c8, 0.8);
-    marker.lineBetween(0, -6, 0, 8);
-    marker.fillStyle(0xfff6c8, 0.7);
-    marker.fillCircle(0, -3, 2.2);
+    marker.fillStyle(0xfff6c8, 0.65);
+    marker.beginPath();
+    marker.moveTo(-4, -5);
+    marker.lineTo(-1, -5);
+    marker.lineTo(-3, 4);
+    marker.lineTo(-6, 4);
+    marker.closePath();
+    marker.fillPath();
+
     marker.fillStyle(0x8a6a10, 1);
-    marker.fillCircle(0, -3, 1.1);
+    marker.fillPoints([
+      { x: 0, y: -3 }, { x: 3, y: 0 }, { x: 0, y: 3 }, { x: -3, y: 0 },
+    ], true);
 
     this.tweens.add({
       targets: marker,
@@ -1006,71 +999,53 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // One feathered wing -- a real drawn shape reads far better at this size
-  // than any stock emoji glyph, whose fixed art/colors can't be tuned to
-  // match the rest of the game's warm, hand-drawn look. createAngelTileMarker()
-  // draws two of these facing the same way rather than mirroring one, so
-  // this has no orientation parameter of its own.
-  // Phaser's Graphics GameObject has no quadraticCurveTo() the way a native
-  // Canvas 2D context does (this crashed every time an angel tile spawned or
-  // was already on the board when a spectator's snapshot arrived -- "i.
-  // quadraticCurveTo is not a function" -- since createWingGraphic() called
-  // it unconditionally). Phaser.Curves.Path *does* support quadratic curves
-  // (quadraticBezierTo, though its argument order is destination-then-
-  // control, the reverse of Canvas 2D's control-then-destination), so this
-  // samples the same curve shape into a plain point list and feeds that to
-  // fillPoints()/strokePoints() -- the same approach createShieldTileMarker()
-  // already uses for its own straight-edged shape, just with curved segments
-  // sampled into points first.
-  curvedOutlinePoints(startX, startY, segments) {
-    const path = new Phaser.Curves.Path(startX, startY);
-    segments.forEach(([endX, endY, controlX, controlY]) => {
-      path.quadraticBezierTo(endX, endY, controlX, controlY);
-    });
-    return path.getPoints(32);
+  // Two earlier shapes were both tried and rejected: a single smooth closed
+  // outline read as a fish fin (a fin's whole silhouette is one plain curve
+  // with no texture at all), and a row of overlapping round lobes along a
+  // spine read as a chain of bubbles rather than a wing. What an actual
+  // wing icon needs is a handful of individually-distinct pointed flight
+  // feathers fanning out from one base point -- not a single outline and
+  // not a blurred string of circles -- so this draws several separate
+  // narrow feather shapes (each its own elongated, pointed leaf silhouette,
+  // widest a third of the way along its length) at different angles and
+  // lengths around a shared origin, longest at the leading/forward edge and
+  // shortest at the trailing edge, the way real primary feathers fan out.
+  createFeatherShape(length, angleDeg) {
+    const feather = this.add.graphics({ x: 0, y: 0 });
+    feather.setAngle(angleDeg);
+    const points = [
+      { x: 0, y: -1.6 },
+      { x: length * 0.35, y: -3.8 },
+      { x: length, y: 0 },
+      { x: length * 0.35, y: 3.2 },
+      { x: 0, y: 1.6 },
+    ];
+    // Same offset-dark-silhouette drop shadow every other panel/marker in
+    // the app already uses (see RoundedPanel.js's drawRoundedRect).
+    feather.fillStyle(0x000000, 0.2);
+    feather.fillPoints(points.map((p) => ({ x: p.x + 1, y: p.y + 1.3 })), true);
+
+    feather.fillStyle(0xfff6e8, 1);
+    feather.fillPoints(points, true);
+    feather.lineStyle(1, 0xd9b466, 0.85);
+    feather.strokePoints(points, true);
+
+    return feather;
   }
 
-  // A single smooth closed outline (the first version of this shape) read
-  // as a fish fin, not a wing -- a fin's whole silhouette is one plain
-  // curve with no texture at all, which is exactly what that outline was.
-  // A real wing's tell is its trailing edge broken up into individual
-  // feathers, so this instead lays a row of overlapping round feather
-  // lobes -- shrinking from the body out to the tip -- along the underside
-  // of a smooth leading-edge spine, and strokes that spine on top for a
-  // clean upper border. The lobes' own overlap is what keeps the row
-  // reading as one continuous scalloped edge instead of a string of
-  // separate dots.
   createWingGraphic() {
-    const g = this.add.graphics({ x: 0, y: 0 });
-    const spine = this.curvedOutlinePoints(0, 2, [[19, -15, 9, -13]]);
+    // Drawn back-to-front (trailing feather first) so each subsequent,
+    // longer feather overlaps slightly on top of the last one, the way a
+    // real wing's feathers layer -- rather than the trailing ones sitting
+    // on top and looking pasted over the leading ones.
+    const feathers = [
+      { length: 12, angle: 14 },
+      { length: 16, angle: -6 },
+      { length: 19, angle: -26 },
+      { length: 21, angle: -48 },
+    ].map(({ length, angle }) => this.createFeatherShape(length, angle));
 
-    // Same offset-dark-silhouette drop shadow every other panel/marker in
-    // the app already uses (see RoundedPanel.js's drawRoundedRect), applied
-    // to the same lobe row below it.
-    for (let i = spine.length - 1; i >= 0; i -= 3) {
-      const t = i / (spine.length - 1);
-      const { x, y } = spine[i];
-      const radius = 3 + (1 - t) * 4.5;
-      g.fillStyle(0x000000, 0.22);
-      g.fillCircle(x + radius * 0.4 + 1, y + radius * 0.4 + 1.5, radius);
-    }
-
-    for (let i = spine.length - 1; i >= 0; i -= 3) {
-      const t = i / (spine.length - 1);
-      const { x, y } = spine[i];
-      const radius = 3 + (1 - t) * 4.5;
-      const lobeX = x + radius * 0.4;
-      const lobeY = y + radius * 0.4;
-      g.fillStyle(0xfff6e8, 1);
-      g.fillCircle(lobeX, lobeY, radius);
-      g.lineStyle(1, 0xd9b466, 0.85);
-      g.strokeCircle(lobeX, lobeY, radius);
-    }
-
-    g.lineStyle(1.5, 0xd9b466, 0.9);
-    g.strokePoints(spine, false);
-
-    return g;
+    return this.add.container(0, 0, feathers);
   }
 
   // A pair of wings facing the same direction, layered with a small offset,
