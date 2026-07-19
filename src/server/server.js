@@ -404,6 +404,26 @@ function countNonAdminLobbyPlayers() {
   return Object.keys(lobbyPlayers).filter((id) => !adminSockets.has(id)).length;
 }
 
+// Admins never occupy a roster slot (see countNonAdminLobbyPlayers() above),
+// but until now their own nickname still leaked into the lobbyUpdate payload
+// itself -- unlike every other admin-aware count in this file, the raw
+// lobbyPlayers object was sent to clients unfiltered, so an admin who typed
+// a real nickname alongside the password showed up in every waiting
+// player's roster grid like an ordinary participant, and inflated the
+// displayed "N명 참가 중" count by one (operator: "대기화면에 관리자
+// 아이디가 보일 필요가 없어"). lobbyPlayers itself is left untouched --
+// other logic (e.g. clearLobby's own per-entry admin skip) still needs the
+// admin's real entry to exist there.
+function visibleLobbyPlayers() {
+  const visible = {};
+  Object.keys(lobbyPlayers).forEach((id) => {
+    if (!adminSockets.has(id)) {
+      visible[id] = lobbyPlayers[id];
+    }
+  });
+  return visible;
+}
+
 function broadcastLobby() {
   // players/phase are identical for every recipient -- only isAdmin
   // varies. A previous version personalized the *entire* payload per
@@ -424,13 +444,14 @@ function broadcastLobby() {
   // LobbyScene itself never re-reads isAdmin from a later broadcast (only
   // at scene creation), so the general broadcast reaching admins a moment
   // after their real one is a harmless no-op for them.
+  const players = visibleLobbyPlayers();
   adminSockets.forEach((socketId) => {
     const socket = io.sockets.sockets[socketId];
     if (socket) {
-      socket.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: true });
+      socket.emit('lobbyUpdate', { players, phase: globalPhase, isAdmin: true });
     }
   });
-  io.emit('lobbyUpdate', { players: lobbyPlayers, phase: globalPhase, isAdmin: false });
+  io.emit('lobbyUpdate', { players, phase: globalPhase, isAdmin: false });
 }
 
 // Round 1: groups are capped at MAX_PLAYERS (5), full stop — an earlier
