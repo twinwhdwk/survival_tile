@@ -30,6 +30,7 @@ import {
   GHOST_REVIVE_GAUGE_PER_TAP,
   GHOST_REVIVE_GAUGE_MAX,
   GHOST_RESPAWN_STILLNESS_MS,
+  GHOST_REVIVE_GRACE_MS,
   ROUND_START_STILLNESS_MS,
   GHOST_REVIVE_COOLDOWN_MS,
   GHOST_REVIVE_LAST_STAND_COOLDOWN_MS,
@@ -236,6 +237,21 @@ export default class Room {
     // comes back via autoRegenerateTiles() or a ghost's reviveTile(), so a
     // freshly-restored tile isn't instantly walked on and popped again.
     this.regenGraceUntil = new Map();
+    // Tile key -> timestamp until which that tile is under an active
+    // shield's protection specifically (a subset of regenGraceUntil's keys,
+    // written alongside it by armShieldTile() with the exact same expiry)
+    // -- kept separate from regenGraceUntil so explodeBombTile() can grant
+    // blast immunity specifically to a player standing on a currently-
+    // golden shield tile, not to every regenGraceUntil source (plain
+    // auto-regen, a reconnect grace) which are much shorter and unrelated
+    // to "being shielded" as a player-facing concept.
+    this.shieldProtectedUntil = new Map();
+    // Same idea, for a ghost's own revive-landing tile (respawnGhost()) --
+    // a separate map from shieldProtectedUntil above since the two want
+    // different client-facing cues (gold vs a revive-themed glow) even
+    // though explodeBombTile() treats both the same way for nullifying a
+    // blast.
+    this.reviveProtectedUntil = new Map();
     // Per-player movement-broadcast throttle state (socketId -> { last, timer }),
     // kept off the player object itself so the Node Timeout it holds never ends
     // up in a serialized getSnapshot() payload. See broadcastPlayerMoved().
@@ -905,9 +921,31 @@ export default class Room {
         return;
       }
       const { row, col } = this.getTileCoords(player.x, player.y);
-      if (blastKeys.has(`${row}_${col}`)) {
-        this.eliminatePlayer(id);
+      if (!blastKeys.has(`${row}_${col}`)) {
+        return;
       }
+      const key = `${row}_${col}`;
+      const now = Date.now();
+      const shieldedUntil = this.shieldProtectedUntil.get(key);
+      const revivedUntil = this.reviveProtectedUntil.get(key);
+      if ((shieldedUntil && now < shieldedUntil) || (revivedUntil && now < revivedUntil)) {
+        // Standing on a currently-golden shield tile, or on the tile they
+        // just respawned onto (respawnGhost()'s own brief grace), when the
+        // blast hits -- the ground already survives via
+        // triggerTileCollapse()'s own grace check below, but until now the
+        // player themselves still died instantly regardless, which read as
+        // the protection covering the floor but not the person standing on
+        // it (operator, re: the shield case: "황금 타일 상황에서 옆에서
+        // 폭탄 터지면 무효화"; re: the revive case: "부활하고 2초간 무적").
+        // 'bombBlocked' lets the client show a deflect cue in place of the
+        // usual elimination effects, so surviving doesn't look like the
+        // bomb simply failed to notice them -- `cause` picks which cue.
+        this.emit('bombBlocked', {
+          playerId: id, x: player.x, y: player.y, cause: (revivedUntil && now < revivedUntil) ? 'revive' : 'shield',
+        });
+        return;
+      }
+      this.eliminatePlayer(id);
     });
 
     blastTiles.forEach(({ row, col }) => {
@@ -1019,6 +1057,15 @@ export default class Room {
         this.emit('tileRevived', { row, col, viaShield: true });
       }
       this.regenGraceUntil.set(`${row}_${col}`, until);
+      // Same expiry, separate map -- explodeBombTile() reads this one
+      // specifically to decide whether a player standing here is currently
+      // "on a golden shield tile" and should have the blast nullified
+      // outright (operator: "황금 타일 상황에서 옆에서 폭탄 터지면 무효화"),
+      // rather than keying off regenGraceUntil directly, which also covers
+      // much shorter/unrelated grace windows (plain auto-regen, a ghost's
+      // revive landing, a reconnect grace) that were never meant to grant
+      // blast immunity.
+      this.shieldProtectedUntil.set(key, until);
       // Same anti-camping re-check every other grace-granting path already
       // schedules (see scheduleRegenStillnessCheck()): the tile the player
       // stepped onto to trigger this shield had its own normal collapse
@@ -1534,7 +1581,23 @@ export default class Room {
     // between as if they'd been alive and scoring the whole time.
     player.lastScoreCreditAt = respawnTime;
     this.reviveCooldowns.delete(id);
-    this.emit('playerRevived', { playerId: id, nickname: player.nickname, score: player.score || 0, x, y });
+
+    // Landing tile is briefly untouchable -- both the ground itself (via
+    // the same regenGraceUntil map every other "briefly immune" tile uses)
+    // and the player standing on it (reviveProtectedUntil, checked by
+    // explodeBombTile() the same way shieldProtectedUntil already is) --
+    // so a ghost coming back doesn't immediately fall through again or get
+    // caught by a bomb going off right where they just landed, before they
+    // even have a chance to register they're back in the round (operator:
+    // "부활하고 2초간 무적한다던가, 타일이 안깨지게 2초간 한다던가").
+    const graceKey = `${tile.row}_${tile.col}`;
+    const graceUntil = respawnTime + GHOST_REVIVE_GRACE_MS;
+    this.regenGraceUntil.set(graceKey, graceUntil);
+    this.reviveProtectedUntil.set(graceKey, graceUntil);
+
+    this.emit('playerRevived', {
+      playerId: id, nickname: player.nickname, score: player.score || 0, x, y, graceMs: GHOST_REVIVE_GRACE_MS,
+    });
 
     // A revived player who just stands there has effectively taken
     // themselves back out of the round without the tile pressure everyone

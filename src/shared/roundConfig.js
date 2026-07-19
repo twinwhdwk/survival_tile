@@ -159,6 +159,19 @@ export const GHOST_REVIVE_GAUGE_MAX = 100;
 // round.
 export const GHOST_RESPAWN_STILLNESS_MS = 3000;
 
+// A ghost coming back mid-round used to be dropped straight onto a live
+// tile with zero protection at all -- if that exact tile (or the player
+// themselves, via a bomb blast landing on them) got caught by anything
+// else already in flight, they could be eliminated again within an
+// instant of returning, often before the player even registered they were
+// back (operator: "부활하고 2초간 무적한다던가, 타일이 안깨지게 2초간
+// 한다던가... 해야 원활하게 진행할수있을듯"). Deliberately shorter than
+// GHOST_RESPAWN_STILLNESS_MS above -- that's the anti-camping check that
+// eventually collapses their landing tile if they never move off it, and
+// needs to fire strictly *after* this window lapses, or it would just
+// silently no-op against this same grace and never get a chance to retry.
+export const GHOST_REVIVE_GRACE_MS = 2000;
+
 // A player's own spawn tile is the one tile triggerTileCollapse() never
 // reaches through the normal path — every other tile gets triggered the
 // instant a player's movement lands them on it (see Room.movePlayerTo()),
