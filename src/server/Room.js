@@ -1119,6 +1119,40 @@ export default class Room {
     player.lastScoreCreditAt = endTime;
   }
 
+  // A parking spot for a freshly-dead ghost, just outside the current safe
+  // zone -- tries the right edge first (matching the original design), then
+  // left, then bottom, then top, using whichever actually has a
+  // still-on-map column/row outside the safe rectangle. A single-edge-only
+  // attempt (the original design) has no room whenever *that* edge happens
+  // to already be flush with the map edge -- common during the pre-shrink
+  // grace period, when colEnd/colStart/rowEnd/rowStart all still equal the
+  // map's own edges on every axis at once -- and clamping into the safe
+  // zone in that case (an earlier fix) just parks the ghost *inside* it
+  // instead. Returns null only once none of the 4 edges have any room,
+  // meaning the safe zone genuinely is the whole map right now; the caller
+  // leaves the ghost at its actual death position in that case.
+  parkGhostPosition(deathX, deathY) {
+    const bounds = this.getSafeBounds();
+    const { row: deathRow, col: deathCol } = this.getTileCoords(deathX, deathY);
+    if (bounds.colEnd < MAP_COLS - 1) {
+      const row = Math.min(Math.max(deathRow, bounds.rowStart), bounds.rowEnd);
+      return hexToPixel(row, bounds.colEnd + 1);
+    }
+    if (bounds.colStart > 0) {
+      const row = Math.min(Math.max(deathRow, bounds.rowStart), bounds.rowEnd);
+      return hexToPixel(row, bounds.colStart - 1);
+    }
+    if (bounds.rowEnd < MAP_ROWS - 1) {
+      const col = Math.min(Math.max(deathCol, bounds.colStart), bounds.colEnd);
+      return hexToPixel(bounds.rowEnd + 1, col);
+    }
+    if (bounds.rowStart > 0) {
+      const col = Math.min(Math.max(deathCol, bounds.colStart), bounds.colEnd);
+      return hexToPixel(bounds.rowStart - 1, col);
+    }
+    return null;
+  }
+
   eliminatePlayer(id) {
     const player = this.players[id];
     if (!player || player.eliminated || this.finished) {
@@ -1138,27 +1172,21 @@ export default class Room {
     // movePlayerTo(), and respawnGhost() overwrites x/y outright once it
     // actually comes back. Left where they died, that parked sprite sits
     // right in among the still-living players inside the safe zone and
-    // gets in the way of reading the board. Shove it just outside the
-    // safe zone's right edge instead -- still visible (drawn dimmed, like
-    // the rest of the danger zone), but out of the actively-playable area.
-    // Unconditional now (an earlier version skipped this whenever
-    // safeBounds.colEnd was still MAP_COLS - 1 -- the pre-shrink grace
-    // period, or the tail end of a round where the right edge already IS
-    // the map edge -- which in practice left the large share of
-    // eliminations that happen before the boundary starts shrinking
-    // exactly where they died after all). Clamping the target column to
-    // MAP_COLS - 1 covers that same "no real outside yet" case instead of
-    // skipping it: pre-shrink, this just walks the ghost to the map's own
-    // right edge -- not truly outside a boundary that doesn't exist yet,
-    // but still off to the side and out of the center where the actual
-    // fight is happening.
-    const parkBounds = this.getSafeBounds();
-    const { row: deathRow } = this.getTileCoords(player.x, player.y);
-    const parkRow = Math.min(Math.max(deathRow, parkBounds.rowStart), parkBounds.rowEnd);
-    const parkCol = Math.min(parkBounds.colEnd + 1, MAP_COLS - 1);
-    const parked = hexToPixel(parkRow, parkCol);
-    player.x = parked.x;
-    player.y = parked.y;
+    // gets in the way of reading the board. Parks it just outside whichever
+    // edge of the safe zone actually has room (see parkGhostPosition()) --
+    // an earlier version only ever tried the right edge, clamped into the
+    // safe zone itself (still col MAP_COLS-1, which the pre-shrink grace
+    // period's colEnd already equals) whenever that specific edge had no
+    // room, which in practice parked ghosts *inside* the safe zone for the
+    // entire pre-shrink window (operator: "유령봇이 가끔 안전지대 안쪽에
+    // 생성되네"). Trying all 4 edges before giving up finds real outside
+    // room far more often; only truly falls back to the death position
+    // itself once the safe zone is genuinely the whole map.
+    const parked = this.parkGhostPosition(player.x, player.y);
+    if (parked) {
+      player.x = parked.x;
+      player.y = parked.y;
+    }
     // FINAL (stage 3's solo finale) scores the same way SURVIVAL does --
     // its own eventual ranking is by elimination order, not this score
     // (see the FINAL branch of handleRoomFinished's SOLO case), but the
@@ -1734,11 +1762,33 @@ export default class Room {
       }
       const delay = Math.random() * BOUNDARY_WAVE_MS;
       setTimeout(() => {
-        if (!this.finished) {
-          this.triggerTileCollapse(row, col);
-        }
+        this.collapseIfOutsideSafeZone(row, col);
       }, delay);
     });
+  }
+
+  // triggerTileCollapse() silently no-ops while an active regenGraceUntil
+  // immunity holds a tile (a shield, a ghost revive, a reconnect-tile
+  // grace, ...) -- collapseTilesLeavingSafeZone() above only ever gives a
+  // tile *one* such attempt, so a tile whose grace happened to still be
+  // active at that exact moment (operator report: "안전지대 밖인데 타일이
+  // 계속 살아있는 경우도 있음") was stranded SOLID outside the boundary
+  // forever, with nothing left to ever retry it -- unlike a regenerated
+  // tile's own camping check (scheduleRegenStillnessCheck()), which only
+  // re-fires if a player is still standing on it, not unconditionally.
+  // Reschedules itself for exactly when the blocking grace lapses instead
+  // of giving up, so this always eventually either collapses the tile or
+  // finds it's already gone/safe again by the time it actually runs.
+  collapseIfOutsideSafeZone(row, col) {
+    if (this.finished || this.isSafeTile(row, col) || this.tileMap[row][col] !== TILE_STATE.SOLID) {
+      return;
+    }
+    const graceUntil = this.regenGraceUntil.get(`${row}_${col}`);
+    if (graceUntil && Date.now() < graceUntil) {
+      setTimeout(() => this.collapseIfOutsideSafeZone(row, col), graceUntil - Date.now() + 10);
+      return;
+    }
+    this.triggerTileCollapse(row, col);
   }
 
   // Breadth-first search outward from (startRow, startCol) — traversing
