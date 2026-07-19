@@ -958,13 +958,11 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // One feathered wing, drawn as a curved cream-white panel with a few
-  // stroked "feather" lines fanning out from the body toward the tip -- a
-  // real drawn shape reads far better at this size than any stock emoji
-  // glyph, whose fixed art/colors can't be tuned to match the rest of the
-  // game's warm, hand-drawn look. createAngelTileMarker() draws two of
-  // these facing the same way rather than mirroring one, so this has no
-  // orientation parameter of its own.
+  // One feathered wing -- a real drawn shape reads far better at this size
+  // than any stock emoji glyph, whose fixed art/colors can't be tuned to
+  // match the rest of the game's warm, hand-drawn look. createAngelTileMarker()
+  // draws two of these facing the same way rather than mirroring one, so
+  // this has no orientation parameter of its own.
   // Phaser's Graphics GameObject has no quadraticCurveTo() the way a native
   // Canvas 2D context does (this crashed every time an angel tile spawned or
   // was already on the board when a spectator's snapshot arrived -- "i.
@@ -984,30 +982,45 @@ export default class GameScene extends Phaser.Scene {
     return path.getPoints(32);
   }
 
+  // A single smooth closed outline (the first version of this shape) read
+  // as a fish fin, not a wing -- a fin's whole silhouette is one plain
+  // curve with no texture at all, which is exactly what that outline was.
+  // A real wing's tell is its trailing edge broken up into individual
+  // feathers, so this instead lays a row of overlapping round feather
+  // lobes -- shrinking from the body out to the tip -- along the underside
+  // of a smooth leading-edge spine, and strokes that spine on top for a
+  // clean upper border. The lobes' own overlap is what keeps the row
+  // reading as one continuous scalloped edge instead of a string of
+  // separate dots.
   createWingGraphic() {
     const g = this.add.graphics({ x: 0, y: 0 });
+    const spine = this.curvedOutlinePoints(0, 2, [[19, -15, 9, -13]]);
 
-    g.fillStyle(0x000000, 0.25);
-    g.fillPoints(this.curvedOutlinePoints(1.5, 4, [
-      [17.5, -12, 6.5, -8],
-      [14.5, 7, 13.5, -1],
-      [1.5, 4, 6.5, 8],
-    ]), true);
+    // Same offset-dark-silhouette drop shadow every other panel/marker in
+    // the app already uses (see RoundedPanel.js's drawRoundedRect), applied
+    // to the same lobe row below it.
+    for (let i = spine.length - 1; i >= 0; i -= 3) {
+      const t = i / (spine.length - 1);
+      const { x, y } = spine[i];
+      const radius = 3 + (1 - t) * 4.5;
+      g.fillStyle(0x000000, 0.22);
+      g.fillCircle(x + radius * 0.4 + 1, y + radius * 0.4 + 1.5, radius);
+    }
 
-    g.fillStyle(0xfff6e8, 1);
-    g.lineStyle(1.2, 0xd9b466, 0.9);
-    const wingOutline = this.curvedOutlinePoints(0, 3, [
-      [16, -13, 5, -9],
-      [13, 6, 12, -2],
-      [0, 3, 5, 7],
-    ]);
-    g.fillPoints(wingOutline, true);
-    g.strokePoints(wingOutline, true);
+    for (let i = spine.length - 1; i >= 0; i -= 3) {
+      const t = i / (spine.length - 1);
+      const { x, y } = spine[i];
+      const radius = 3 + (1 - t) * 4.5;
+      const lobeX = x + radius * 0.4;
+      const lobeY = y + radius * 0.4;
+      g.fillStyle(0xfff6e8, 1);
+      g.fillCircle(lobeX, lobeY, radius);
+      g.lineStyle(1, 0xd9b466, 0.85);
+      g.strokeCircle(lobeX, lobeY, radius);
+    }
 
-    g.lineStyle(1, 0xd9b466, 0.6);
-    g.lineBetween(2, 1, 12.5, -7.5);
-    g.lineBetween(3, 3.2, 11.5, -1.5);
-    g.lineBetween(4, 5, 10, 3.5);
+    g.lineStyle(1.5, 0xd9b466, 0.9);
+    g.strokePoints(spine, false);
 
     return g;
   }
