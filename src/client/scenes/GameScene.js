@@ -825,19 +825,31 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // Drawn as a real shield silhouette (outer bronze-gold body + a smaller
-  // inset bright-gold panel for a raised/embossed look) rather than the 🛡️
-  // emoji -- an emoji glyph's own colors are fixed and mostly blue/steel on
-  // every platform's emoji font, so it can't actually be made to read as
-  // "golden" the way this shape can.
+  // Drawn as a real shield silhouette (bronze-gold body + a smaller gold
+  // rim for a raised/embossed look) rather than the 🛡️ emoji -- an emoji
+  // glyph's own colors are fixed and mostly blue/steel on every platform's
+  // emoji font, so it can't actually be made to read as "golden" the way
+  // this shape can. A first version used dead-straight edges (a plain
+  // pentagon); real heraldic shield icons almost always curve the top and
+  // both sides instead, which is what curvedOutlinePoints()'s sampled
+  // quadratic segments give here -- a gently domed top and sides that
+  // bulge slightly before tapering to the bottom point, rather than flat
+  // panel edges.
   createShieldTileMarker(tile) {
     const { x, y } = hexToPixel(tile.row, tile.col);
     const marker = this.add.graphics({ x, y }).setDepth(12);
 
-    const outer = [
-      { x: -9, y: -11 }, { x: 9, y: -11 }, { x: 9, y: 3 }, { x: 0, y: 12 }, { x: -9, y: 3 },
-    ];
-    const inner = outer.map((p) => ({ x: p.x * 0.6, y: p.y * 0.6 - 1 }));
+    const outer = this.curvedOutlinePoints(-9, -9, [
+      [9, -9, 0, -13],
+      [9, 2, 12, -4],
+      [0, 13, 10, 9],
+      [-9, 2, -10, 9],
+      [-9, -9, -12, -4],
+    ]);
+    // A rim, not a small inset badge -- scaled down just enough (0.74) to
+    // read as the shield's own gold face inside a bronze border, rather
+    // than a separate little panel floating in the middle of it.
+    const inner = outer.map((p) => ({ x: p.x * 0.74, y: p.y * 0.74 - 1 }));
 
     // Same offset-dark-silhouette drop shadow every panel in the app already
     // uses (see RoundedPanel.js's drawRoundedRect) -- gives the shield a
@@ -853,23 +865,16 @@ export default class GameScene extends Phaser.Scene {
     marker.fillStyle(0xffd700, 1);
     marker.fillPoints(inner, true);
 
-    // A bright diagonal streak, like polished metal catching the light, plus
-    // a small bronze diamond emblem centered on the panel -- both purely
-    // decorative detail so the shield reads as a crafted object rather than
-    // a flat gold shape.
-    marker.fillStyle(0xfff6c8, 0.65);
-    marker.beginPath();
-    marker.moveTo(-4, -5);
-    marker.lineTo(-1, -5);
-    marker.lineTo(-3, 4);
-    marker.lineTo(-6, 4);
-    marker.closePath();
-    marker.fillPath();
-
+    // A thin raised center ridge, like a real shield's embossed spine,
+    // plus a small round boss where the ridge meets its own highlight --
+    // classic heraldic shield icons almost always carry one of these two
+    // details, rather than a flat gold face with nothing on it.
+    marker.lineStyle(1.2, 0xfff6c8, 0.8);
+    marker.lineBetween(0, -6, 0, 8);
+    marker.fillStyle(0xfff6c8, 0.7);
+    marker.fillCircle(0, -3, 2.2);
     marker.fillStyle(0x8a6a10, 1);
-    marker.fillPoints([
-      { x: 0, y: -3 }, { x: 3, y: 0 }, { x: 0, y: 3 }, { x: -3, y: 0 },
-    ], true);
+    marker.fillCircle(0, -3, 1.1);
 
     this.tweens.add({
       targets: marker,
