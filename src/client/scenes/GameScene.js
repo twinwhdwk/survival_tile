@@ -131,8 +131,12 @@ const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 // gold (not the board's own lighter bronze tile tint, nor the app's
 // brighter textGold accent) so the shielded area still reads as distinct
 // from ordinary ground while staying in the same warm palette as everything
-// else -- purple was tried first and didn't fit that palette.
-const SHIELD_COLOR = 0xd4af37;
+// else -- purple was tried first and didn't fit that palette. Darkened once
+// more from an initial 0xd4af37 per feedback that it still didn't read as
+// "deep" enough -- also now the single source for the marker's own face
+// color (createShieldTileMarker) instead of a separate hardcoded fill, so
+// the standing marker and the stepped-on tile glow always match.
+const SHIELD_COLOR = 0xb8860b;
 
 // tile_solid's own border color (see EffectTextures.js's generateTileTextures)
 // -- shared so playShieldGlow's aurora cycle and tileTintForTexture's debris
@@ -851,11 +855,11 @@ export default class GameScene extends Phaser.Scene {
     marker.fillStyle(0x000000, 0.3);
     marker.fillPoints(shadow, true);
 
-    marker.fillStyle(0x8a6a10, 1);
+    marker.fillStyle(0x6b4e0a, 1);
     marker.fillPoints(outer, true);
     marker.lineStyle(1.5, 0xfff2b0, 0.9);
     marker.strokePoints(outer, true);
-    marker.fillStyle(0xffd700, 1);
+    marker.fillStyle(SHIELD_COLOR, 1);
     marker.fillPoints(inner, true);
 
     marker.fillStyle(0xfff6c8, 0.65);
@@ -875,7 +879,7 @@ export default class GameScene extends Phaser.Scene {
     // move/scale together for the existing pulse tween below, with the
     // emblem's own little float layered on top of that shared motion.
     const emblem = this.add.graphics();
-    emblem.fillStyle(0x8a6a10, 1);
+    emblem.fillStyle(0x6b4e0a, 1);
     emblem.fillPoints([
       { x: 0, y: -3 }, { x: 3, y: 0 }, { x: 0, y: 3 }, { x: -3, y: 0 },
     ], true);
