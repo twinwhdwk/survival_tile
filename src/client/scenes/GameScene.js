@@ -61,28 +61,24 @@ const JOYSTICK_SENSITIVITY = 0.6;
 const MOVEMENT_EMIT_MIN_INTERVAL_MS = 50;
 
 // The generic mid-round announcement banner (round start, last stand, ...)
-// was pinned at WORLD_HEIGHT/2 - 60. That's harmless on a tall canvas, but
-// WORLD_HEIGHT is derived from MAP_COLS/MAP_ROWS (mapConfig.js), which have
-// been re-tuned for gameplay-tile-size reasons down to as little as ~270px
-// -- at that size WORLD_HEIGHT/2 - 60 lands close enough to the top HUD
-// panels to visibly overlap them. A fixed offset from the top (like
-// LoginScene/ResultScene/LobbyScene's own fixes for the same root cause)
-// keeps the banner clear of them regardless of how short WORLD_HEIGHT gets,
-// at the cost of no longer being truly centered on a much taller canvas.
-//
-// At that same ~270px WORLD_HEIGHT, the gap this sits in is only ~70px
-// tall (top HUD panels' bottom edge down to the ghost hint panel's top
-// edge at ~152, see BANNER_BACKDROP_HEIGHT_PADDING below) -- a 2-line
-// banner (last stand, revive) at the original 24px padding needed ~86px
-// and visibly overlapped the ghost hint panel underneath it. 117 is the
-// vertical midpoint of that 70px gap, not an arbitrary number -- if
-// BANNER_BACKDROP_HEIGHT_PADDING or the ghost hint panel's own position
-// ever move, recheck this still centers between them.
-const BANNER_Y = 117;
-// Only the backdrop's *height* padding needs trimming to fit that gap --
-// its width padding (see the drawRoundedRect call below) is unrelated to
-// this collision and stays as it was.
+// used to sit at a fixed mid-screen height (117, roughly centered in the
+// gap between the top HUD panels and the ghost hint panel) -- but that gap
+// still sits directly over the tile board, so the banner covered exactly
+// the area a player is most likely watching while actually playing. Anchored
+// to the *bottom* of the canvas instead (a fixed margin up from
+// WORLD_HEIGHT, computed fresh each time in showBanner() from the message's
+// own measured height so a 1-line and a 2-line banner both keep their
+// bottom edge in the same place rather than growing downward off-canvas).
+const BANNER_BOTTOM_MARGIN = 10;
+// Only the backdrop's *height* padding needs trimming to fit the available
+// space -- its width padding (see the drawRoundedRect call below) is
+// unrelated to this and stays as it was.
 const BANNER_BACKDROP_HEIGHT_PADDING = 10;
+// Knocked down from a fully-opaque backdrop/text so the board underneath
+// stays dimly readable through the banner instead of being fully hidden --
+// this was the other half of the same "stop blocking gameplay" fix.
+const BANNER_BACKDROP_ALPHA = 0.28;
+const BANNER_TEXT_ALPHA = 0.88;
 
 // Room.js's eliminatePlayer() emits 'playerEliminated' and, if this was the
 // last player standing, calls finishRoom('all-eliminated') immediately
@@ -513,7 +509,7 @@ export default class GameScene extends Phaser.Scene {
     // HUD label strokes are deliberately thinner (proportionally) than the
     // display-tier titles/banners elsewhere -- a 3-4px stroke on this small
     // a font was a much heavier relative outline than the same stroke on a
-    // 26-72px title (see BANNER_Y-area comment / showStartCountdown's own
+    // 26-72px title (see BANNER_BOTTOM_MARGIN-area comment / showStartCountdown's own
     // 72px/8px pairing), reading as thick "clip art" edges on quick-glance
     // HUD text rather than the clean, modern look every other panel now has.
     this.timerText = this.add.text(WORLD_WIDTH / 2, 14, '', {
@@ -534,7 +530,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(30);
 
-    this.bannerText = this.add.text(WORLD_WIDTH / 2, BANNER_Y, '', {
+    this.bannerText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT - BANNER_BOTTOM_MARGIN, '', {
       fontFamily: FONT_DISPLAY,
       fontSize: '26px',
       color: COLORS.textPrimary,
@@ -2088,17 +2084,23 @@ export default class GameScene extends Phaser.Scene {
     this.bannerText.setScale(1);
 
     const bounds = this.bannerText.getBounds();
+    // Bottom-anchored: keep the banner's own bottom edge a fixed margin up
+    // from WORLD_HEIGHT regardless of message length, rather than a fixed
+    // center point a 2-line message would grow downward from (and risk
+    // clipping off the bottom of a short canvas).
+    const bannerY = WORLD_HEIGHT - BANNER_BOTTOM_MARGIN - bounds.height / 2;
+    this.bannerText.setY(bannerY);
     // Same rounded-Graphics treatment as every other panel in the app now
     // — redraws outright to the new size rather than resizing a persistent
     // shape, so there's no display-origin caching to fight with the way a
     // Rectangle would have needed.
-    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, BANNER_Y, bounds.width + 40, bounds.height + BANNER_BACKDROP_HEIGHT_PADDING, {
-      fillColor: 0x000000, fillAlpha: 0.45, radius: 10,
+    drawRoundedRect(this.bannerBackdrop, WORLD_WIDTH / 2, bannerY, bounds.width + 40, bounds.height + BANNER_BACKDROP_HEIGHT_PADDING, {
+      fillColor: 0x000000, fillAlpha: BANNER_BACKDROP_ALPHA, radius: 10,
     });
     this.bannerBackdrop.setVisible(true).setAlpha(1);
 
     this.bannerText.setScale(0.6);
-    this.bannerText.setAlpha(1);
+    this.bannerText.setAlpha(BANNER_TEXT_ALPHA);
 
     if (this.bannerTimer) {
       this.bannerTimer.remove();
