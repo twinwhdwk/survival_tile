@@ -131,3 +131,36 @@ export function hexNeighbors(row, col) {
   });
   return result;
 }
+
+// Every tile within `radius` hex-rings of (centerRow, centerCol), the center
+// itself included -- radius 1 is the center plus its (up to 6) neighbors, 7
+// tiles, not the 9 a square row/col loop would naively visit. Bomb/shield
+// area-of-effect code used to loop `row` and `col` independently by +-radius,
+// which only happens to line up with true hex adjacency for some of those 8
+// surrounding cells on this odd-q offset grid (see this file's own top
+// comment) -- the other cells it touched were the *wrong* tiles for this
+// hex's actual neighbors, and it silently missed genuine neighbors on the
+// opposite side, reading as the effect's shape being skewed off to one side
+// instead of a clean ring. BFS outward through hexNeighbors() instead, so
+// this is correct by construction for any radius, not just 1.
+export function getTilesWithinHexRadius(centerRow, centerCol, radius) {
+  const result = [{ row: centerRow, col: centerCol }];
+  const seen = new Set([`${centerRow}_${centerCol}`]);
+  let frontier = result;
+  for (let step = 0; step < radius; step++) {
+    const next = [];
+    frontier.forEach(({ row, col }) => {
+      hexNeighbors(row, col).forEach(({ row: nRow, col: nCol }) => {
+        const key = `${nRow}_${nCol}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const tile = { row: nRow, col: nCol };
+          result.push(tile);
+          next.push(tile);
+        }
+      });
+    });
+    frontier = next;
+  }
+  return result;
+}

@@ -18,7 +18,9 @@ import {
 } from '../utilities/SoundFx';
 import { vibrateWarning, vibrateEliminate, vibrateVictory, vibrateTap, vibrateBombExplode } from '../utilities/Haptics';
 import { MAP_COLS, MAP_ROWS, TILE_STATE } from '../../shared/mapConfig';
-import { hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT } from '../../shared/hexGrid';
+import {
+  hexToPixel, pixelToHex, WORLD_WIDTH, WORLD_HEIGHT, HEX_WIDTH, HEX_HEIGHT, getTilesWithinHexRadius,
+} from '../../shared/hexGrid';
 import { FONT_DISPLAY, FONT_BODY, COLORS, TEXT_STROKE } from '../theme/Theme';
 import {
   START_COUNTDOWN_MS, REGEN_GRACE_MS, SURVIVAL_SCORE_PER_SECOND, BOMB_FUSE_MS, SHIELD_GRACE_MS, SHIELD_RADIUS,
@@ -121,8 +123,8 @@ const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치하세�
 // pointermove pixel.
 const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 
-// The "from" color of the temporary deep-gold glow the protected 3x3 area
-// pulses through once a shield tile's actually stepped on (playShieldGlow())
+// The base tone of the temporary shimmering gold glow the protected hex
+// area pulses through once a shield tile's actually stepped on (playShieldGlow())
 // -- an armed-but-unstepped shield tile itself is marked with its own golden
 // shield shape instead (createShieldTileMarker()), not a tile tint. Deep
 // gold (not the board's own lighter bronze tile tint, nor the app's
@@ -876,17 +878,35 @@ export default class GameScene extends Phaser.Scene {
     return marker;
   }
 
-  // Deep-gold pulse across the 3x3 area a shield tile just protected (see
-  // Room.armShieldTile()) -- reuses the same tile.graceTintTween/
+  // Shimmering gold pulse across the hex area a shield tile just protected
+  // (see Room.armShieldTile()) -- reuses the same tile.graceTintTween/
   // stopTileTween() interplay playReviveGraceGlow() already established,
   // just without that one's alpha-from-zero fade-in (these tiles are
-  // already fully visible, nothing to materialize in). Purely cosmetic --
-  // the real protection is the server's regenGraceUntil window; this only
-  // needs to roughly track SHIELD_GRACE_MS so the glow fades out around
-  // when the protection actually lapses.
+  // already fully visible, nothing to materialize in) and cycling between
+  // three gold-family tones instead of a single one-way fade, for an
+  // "aurora" flicker rather than a flat color wash. Paired with an
+  // immediate spark burst and a couple of smaller follow-ups so the tile
+  // keeps twinkling rather than only flashing once. Purely cosmetic -- the
+  // real protection is the server's regenGraceUntil window; the tween
+  // duration only needs to roughly track SHIELD_GRACE_MS so the glow fades
+  // out around when the protection actually lapses.
   playShieldGlow(tile) {
-    const fromColor = Phaser.Display.Color.ValueToColor(SHIELD_COLOR);
-    const toColor = Phaser.Display.Color.ValueToColor(0xffffff);
+    this.sparkEmitter.setTint(SHIELD_COLOR);
+    this.sparkEmitter.explode(8, tile.baseX, tile.baseY);
+    this.time.delayedCall(SHIELD_GRACE_MS * 0.4, () => {
+      this.sparkEmitter.setTint(SHIELD_COLOR);
+      this.sparkEmitter.explode(4, tile.baseX, tile.baseY);
+    });
+    this.time.delayedCall(SHIELD_GRACE_MS * 0.75, () => {
+      this.sparkEmitter.setTint(SHIELD_COLOR);
+      this.sparkEmitter.explode(4, tile.baseX, tile.baseY);
+    });
+
+    const auroraTones = [
+      Phaser.Display.Color.ValueToColor(SHIELD_COLOR),
+      Phaser.Display.Color.ValueToColor(0xfff6c8),
+      Phaser.Display.Color.ValueToColor(0xd8ffb0),
+    ];
     tile.setTint(SHIELD_COLOR);
 
     tile.graceTintTween = this.tweens.addCounter({
@@ -895,7 +915,15 @@ export default class GameScene extends Phaser.Scene {
       duration: SHIELD_GRACE_MS,
       ease: 'Linear',
       onUpdate: (tween) => {
-        const step = Phaser.Display.Color.Interpolate.ColorWithColor(fromColor, toColor, 100, tween.getValue());
+        // Cycles through the 3 tones twice across the whole window (4
+        // half-segments) rather than fading straight from one color to
+        // another once -- onComplete below settles it back to neutral.
+        const cyclePos = (tween.getValue() / 100) * 4;
+        const segment = Math.floor(cyclePos) % auroraTones.length;
+        const t = cyclePos - Math.floor(cyclePos);
+        const from = auroraTones[segment];
+        const to = auroraTones[(segment + 1) % auroraTones.length];
+        const step = Phaser.Display.Color.Interpolate.ColorWithColor(from, to, 100, t * 100);
         tile.setTint(Phaser.Display.Color.GetColor(step.r, step.g, step.b));
       },
       onComplete: () => {
@@ -1391,23 +1419,31 @@ export default class GameScene extends Phaser.Scene {
         this.initShieldTiles(shieldTiles);
       },
 
-      // The 3x3 area Room.armShieldTile() just protected -- pulses every
-      // tile in it deep gold for roughly SHIELD_GRACE_MS (see
-      // playShieldGlow()). The stepped-on tile itself already lost its own
-      // 🛡️ marker via shieldTilesUpdate just above, so this is the only
-      // cue for it (and the only cue at all for its 8 neighbors).
+      // The hex area Room.armShieldTile() just protected -- pulses every
+      // tile in it through playShieldGlow()'s own aurora-cycling tint plus
+      // its spark bursts. getTilesWithinHexRadius() (hexGrid.js, shared with
+      // Room.js's own identical protected-area computation) gives the tile
+      // itself plus its true (up to 6) hex neighbors, 7 tiles for
+      // SHIELD_RADIUS=1 -- a square dr/dc loop was tried here first and
+      // visibly didn't line up with the hex tiles actually protected on
+      // this odd-q offset grid. The stepped-on tile itself already lost its
+      // own 🛡️ marker via shieldTilesUpdate just above, so this is the
+      // only cue for it (and the only cue at all for its neighbors).
+      // playShieldGlow() itself is staggered a beat apart per tile (BFS
+      // order already radiates outward from the center tile, see
+      // getTilesWithinHexRadius()) so the whole area lights up as a ripple
+      // rather than every tile popping in the same frame.
       shieldActivated: ({ row, col }) => {
         playClick();
         vibrateTap();
-        for (let dr = -SHIELD_RADIUS; dr <= SHIELD_RADIUS; dr++) {
-          for (let dc = -SHIELD_RADIUS; dc <= SHIELD_RADIUS; dc++) {
-            const tile = this.tileSprites[`${row + dr}_${col + dc}`];
-            if (tile) {
-              this.stopTileTween(tile);
-              this.playShieldGlow(tile);
-            }
+        getTilesWithinHexRadius(row, col, SHIELD_RADIUS).forEach(({ row: tRow, col: tCol }, i) => {
+          const tile = this.tileSprites[`${tRow}_${tCol}`];
+          if (!tile) {
+            return;
           }
-        }
+          this.stopTileTween(tile);
+          this.time.delayedCall(i * 60, () => this.playShieldGlow(tile));
+        });
       },
 
       // Room.maintainAngelTile()/armAngelTile() both send this -- a fresh

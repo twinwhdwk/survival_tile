@@ -200,7 +200,9 @@ export const GHOST_REVIVE_LAST_STAND_COOLDOWN_MS = 400;
 // reasoning as the removed attack-tile mechanic's own scaling.
 export const BOMB_TILES_PER_PLAYERS = 6;
 export const BOMB_FUSE_MS = 2000;
-// 1 ring = a 3x3 area centered on the bomb tile.
+// 1 ring = the bomb tile itself plus its 6 hex neighbors (see hexGrid.js's
+// getTilesWithinHexRadius()), 7 tiles total -- not a square grid's 9-tile
+// "3x3", which doesn't correspond to true adjacency on this hex map.
 export const BOMB_BLAST_RADIUS = 1;
 
 // Shield tiles: the same generation rule as bomb tiles (environmental
@@ -215,7 +217,8 @@ export const BOMB_BLAST_RADIUS = 1;
 // burst, ghost respawn, reconnect immunity).
 export const SHIELD_TILES_PER_PLAYERS = 6;
 export const SHIELD_GRACE_MS = 3000;
-// 1 ring = a 3x3 area centered on the shield tile.
+// 1 ring = the shield tile itself plus its 6 hex neighbors, 7 tiles total --
+// see BOMB_BLAST_RADIUS's own comment on why this isn't a square "3x3".
 export const SHIELD_RADIUS = 1;
 
 // Angel tile: a rescue mechanic, not a hazard whose pressure should scale

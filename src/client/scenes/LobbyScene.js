@@ -146,6 +146,26 @@ export default class LobbyScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(0.5);
 
+    // An admin whose socket dropped mid-tournament and reconnected lands
+    // back here with no pending room seat to auto-resume into (unlike a
+    // real player -- see renderLobby()'s TOURNAMENT-phase branch), so
+    // without this they'd be stuck reading that phase's status message with
+    // every other control disabled for the rest of the event. Shown/hidden
+    // per render rather than built fresh each time, same as the button bar
+    // below.
+    const resumeSpectateHtml = `
+      <button id="resume-spectate-button" type="button"
+        style="padding:6px 16px;font-size:12px;border-radius:7px;border:none;background:${BUTTON.primaryBg};color:${BUTTON.primaryText};cursor:pointer;font-family:${FONT_BODY};font-weight:600;">
+        관전하기
+      </button>
+    `;
+    this.resumeSpectateNode = this.add.dom(WORLD_WIDTH / 2, WORLD_HEIGHT - 45).createFromHTML(resumeSpectateHtml).setVisible(false);
+    this.resumeSpectateButton = this.resumeSpectateNode.getChildByID('resume-spectate-button');
+    applyButtonFx(this.resumeSpectateButton);
+    this.resumeSpectateButton.addEventListener('click', () => {
+      this.socket.emit('adminResumeSpectating');
+    });
+
     // Everything that used to be two stacked rows (action buttons above,
     // mode toggle below) is now one single row pinned to the very bottom
     // edge of the screen -- freeing up the vertical space the second row
@@ -402,7 +422,18 @@ export default class LobbyScene extends Phaser.Scene {
     });
 
     if (phase === 'TOURNAMENT') {
-      this.statusText.setText('토너먼트 진행 중입니다. 곧 다음 게임에 자동 참여합니다.');
+      // An admin never occupies a room seat (see server.js's 'join' handler),
+      // so unlike a real player there's no pending seat to auto-resume into
+      // here -- the "다음 게임에 자동 참여" copy below would be a flat-out
+      // lie for them. 관전하기 asks the server where the live view is right
+      // now (see server.js's adminResumeSpectating) and jumps straight there.
+      if (this.isAdmin) {
+        this.statusText.setText('토너먼트가 이미 진행 중입니다.');
+        this.resumeSpectateNode.setVisible(true);
+      } else {
+        this.statusText.setText('토너먼트 진행 중입니다. 곧 다음 게임에 자동 참여합니다.');
+        this.resumeSpectateNode.setVisible(false);
+      }
       this.startButton.disabled = true;
       this.addBotButton.disabled = true;
       this.clearLobbyButton.disabled = true;
@@ -411,6 +442,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.stopStatusPulse();
     } else if (this.isAdmin) {
       this.statusText.setText('');
+      this.resumeSpectateNode.setVisible(false);
       this.startButton.disabled = false;
       this.addBotButton.disabled = false;
       this.clearLobbyButton.disabled = false;
@@ -419,6 +451,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.stopStatusPulse();
     } else {
       this.statusText.setText('관리자가 게임을 시작하기를 기다리는 중...');
+      this.resumeSpectateNode.setVisible(false);
       this.startStatusPulse();
     }
   }

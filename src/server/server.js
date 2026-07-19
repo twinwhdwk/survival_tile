@@ -1291,6 +1291,33 @@ function setServerHandlers() {
       socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
     });
 
+    // An admin whose socket dropped mid-tournament and reconnected has no
+    // pending room seat to auto-resume into -- admins never occupy one (see
+    // the 'join' handler's own comment) -- so LobbyScene's TOURNAMENT-phase
+    // message ("다음 게임에 자동 참여합니다"), written for a real player's
+    // pending seat, doesn't apply to them: they'd otherwise be stuck reading
+    // it with every lobby control disabled for the rest of the event, with
+    // no way back into the dashboard/spectate view they had before dropping.
+    // Mirrors startStage()'s own seatObserver() exactly (dashboard fan-out
+    // for stage 1/2, a single spectated room by stage 3+), just reachable on
+    // demand instead of only at the moment a stage starts.
+    socket.on('adminResumeSpectating', () => {
+      if (!adminSockets.has(socket.id) || globalPhase !== 'TOURNAMENT') {
+        return;
+      }
+      if (currentStage <= 2) {
+        socket.join(DASHBOARD_ROOM);
+        socket.emit('dashboardStarting', { stage: currentStage, roomCount: rooms.size, isAdmin: true });
+        return;
+      }
+      const firstRoom = rooms.values().next().value;
+      if (!firstRoom) {
+        return;
+      }
+      socket.join(firstRoom.id);
+      socket.emit('gameStarting', { ...firstRoom.getSnapshot(), isSpectator: true, isAdmin: true });
+    });
+
     // socket.io's own disconnect reason (e.g. 'transport close', 'ping
     // timeout', 'transport error', 'client namespace disconnect', 'server
     // namespace disconnect') was previously discarded entirely -- logged now

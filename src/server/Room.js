@@ -5,7 +5,9 @@ import {
   WARNING_DELAY_MS,
   COLLAPSE_DELAY_MS,
 } from '../shared/mapConfig';
-import { hexToPixel, pixelToHex, hexNeighbors, DIRECTION_COUNT } from '../shared/hexGrid';
+import {
+  hexToPixel, pixelToHex, hexNeighbors, DIRECTION_COUNT, getTilesWithinHexRadius,
+} from '../shared/hexGrid';
 import {
   SURVIVAL_ROUND_DURATION_MS,
   FINAL_ROUND_DURATION_MS,
@@ -821,8 +823,9 @@ export default class Room {
   // in time step off it first). Checked before the tile-collapse loop
   // below so being here right now can't be "outrun" by moving away during
   // the tiles' own warning window afterward. Every tile within
-  // BOMB_BLAST_RADIUS rings (1 = 3x3) of the bomb's own position still
-  // goes through the exact same triggerTileCollapse() path an ordinary
+  // BOMB_BLAST_RADIUS hex-rings (1 = the tile itself plus its 6 neighbors,
+  // 7 total) of the bomb's own position still goes through the exact same
+  // triggerTileCollapse() path an ordinary
   // footstep already uses (so the tiles themselves still get their normal
   // warning pulse before actually collapsing, and dropPlayersOnTile()
   // still handles anyone who steps into the radius *after* this instant,
@@ -832,27 +835,28 @@ export default class Room {
   explodeBombTile(centerRow, centerCol) {
     this.emit('bombExploded', { row: centerRow, col: centerCol });
 
+    // getTilesWithinHexRadius() (hexGrid.js -- shared with GameScene.js's own
+    // identical blast-radius rendering, so the two can't drift apart) gives
+    // the true hex ring: the tile itself plus its (up to 6) neighbors, 7
+    // tiles for BOMB_BLAST_RADIUS=1, not the 9 a square row/col loop would
+    // visit on this odd-q offset grid.
+    const blastTiles = getTilesWithinHexRadius(centerRow, centerCol, BOMB_BLAST_RADIUS);
+    const blastKeys = new Set(blastTiles.map(({ row, col }) => `${row}_${col}`));
+
     Object.keys(this.players).forEach((id) => {
       const player = this.players[id];
       if (player.eliminated) {
         return;
       }
       const { row, col } = this.getTileCoords(player.x, player.y);
-      if (Math.abs(row - centerRow) <= BOMB_BLAST_RADIUS && Math.abs(col - centerCol) <= BOMB_BLAST_RADIUS) {
+      if (blastKeys.has(`${row}_${col}`)) {
         this.eliminatePlayer(id);
       }
     });
 
-    for (let dr = -BOMB_BLAST_RADIUS; dr <= BOMB_BLAST_RADIUS; dr++) {
-      for (let dc = -BOMB_BLAST_RADIUS; dc <= BOMB_BLAST_RADIUS; dc++) {
-        const row = centerRow + dr;
-        const col = centerCol + dc;
-        if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) {
-          continue;
-        }
-        this.triggerTileCollapse(row, col);
-      }
-    }
+    blastTiles.forEach(({ row, col }) => {
+      this.triggerTileCollapse(row, col);
+    });
   }
 
   // Called once per checkRoundState() tick -- prunes any bomb tile the
@@ -923,24 +927,17 @@ export default class Room {
     this.emit('shieldActivated', { row: shield.row, col: shield.col });
 
     const until = Date.now() + SHIELD_GRACE_MS;
-    for (let dr = -SHIELD_RADIUS; dr <= SHIELD_RADIUS; dr++) {
-      for (let dc = -SHIELD_RADIUS; dc <= SHIELD_RADIUS; dc++) {
-        const row = shield.row + dr;
-        const col = shield.col + dc;
-        if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) {
-          continue;
-        }
-        this.regenGraceUntil.set(`${row}_${col}`, until);
-        // Same anti-camping re-check every other grace-granting path already
-        // schedules (see scheduleRegenStillnessCheck()): the tile the player
-        // stepped onto to trigger this shield had its own normal collapse
-        // suppressed by the grace just written above, and a tile's collapse
-        // only ever starts on a fresh movePlayerTo() arrival — so without
-        // this, standing still on a shielded tile is permanently safe once
-        // the immunity lapses, with nothing left to re-light its fuse.
-        this.scheduleRegenStillnessCheck(row, col, SHIELD_GRACE_MS);
-      }
-    }
+    getTilesWithinHexRadius(shield.row, shield.col, SHIELD_RADIUS).forEach(({ row, col }) => {
+      this.regenGraceUntil.set(`${row}_${col}`, until);
+      // Same anti-camping re-check every other grace-granting path already
+      // schedules (see scheduleRegenStillnessCheck()): the tile the player
+      // stepped onto to trigger this shield had its own normal collapse
+      // suppressed by the grace just written above, and a tile's collapse
+      // only ever starts on a fresh movePlayerTo() arrival — so without
+      // this, standing still on a shielded tile is permanently safe once
+      // the immunity lapses, with nothing left to re-light its fuse.
+      this.scheduleRegenStillnessCheck(row, col, SHIELD_GRACE_MS);
+    });
   }
 
   // Mirrors maintainBombTiles() exactly -- prunes any shield tile the
