@@ -79,14 +79,11 @@ export const SURVIVAL_SCORE_PER_SECOND = 1;
 // so once only one player is left alive nothing can change that outcome —
 // every other participant is already permanently eliminated. Room.js ends
 // the round immediately in that moment rather than idling out the rest of
-// SURVIVAL_ROUND_DURATION_MS with nobody left to threaten the winner. Doing
-// so does cut their own addSurvivalScore() time short, though, which would
-// otherwise unfairly under-score a decisive early win next to another
-// concurrent SOLO room's winner who happened to survive the round's full
-// duration purely by running out the clock — this flat bonus tops the last
-// survivor up so being the one who actually won is never worth less than
-// merely surviving to the buzzer.
-export const SOLO_LAST_SURVIVOR_BONUS_SCORE = 20;
+// SURVIVAL_ROUND_DURATION_MS with nobody left to threaten the winner (see
+// Room.finishRoom()'s reason==='last-survivor' branch, which credits them
+// up to the round's natural end time instead of the actual early-ending
+// moment, so a fast decisive win is never worth less than merely surviving
+// to the buzzer in another concurrent SOLO room).
 // Once every real player in a 개인전 room is eliminated, nothing further a
 // remaining bot does is worth simulating in real time for an empty room —
 // the human never even looks at bot scores. Room.randomizeBotResults()

@@ -25,7 +25,6 @@ import {
   AUTO_REGEN_SOLID_RATIO_THRESHOLD,
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
-  SOLO_LAST_SURVIVOR_BONUS_SCORE,
   SOLO_BOT_PLACEHOLDER_SCORE_MAX,
   SOLO_BOT_SCORE_GAP_MIN,
   SOLO_BOT_SCORE_GAP_MAX,
@@ -1177,26 +1176,22 @@ export default class Room {
       this.randomizeBotResults();
     }
 
-    // 개인전's own last-survivor case. soloAllHumansEliminated above already
-    // ends the round the instant the last *human* dies, so whenever this
-    // room has any human in it the sole survivor here is necessarily one of
-    // them. An all-bot room (admin testing with 봇 추가 and nobody joining)
-    // has hasHumans false, which makes soloAllHumansEliminated permanently
-    // false — so this branch was reachable there with a *bot* as the lone
-    // survivor, handing SOLO_LAST_SURVIVOR_BONUS_SCORE to a bot. Harmless
-    // in practice (nobody is watching a bots-only room, and its scores go
-    // nowhere), but it made the bonus a lie about what it rewards, so
-    // resolve the survivor first and gate the bonus on them actually being
-    // a real player. The round still ends early either way, rather than
-    // idling out the clock with nothing left to threaten whoever's left.
+    // 개인전's own last-survivor case: nothing left to threaten whoever's
+    // left, so the round ends here rather than idling out the clock with
+    // nobody watching change. soloAllHumansEliminated above already ends
+    // the round the instant the last *human* dies, so whenever this room
+    // has any human in it the sole survivor here is necessarily one of
+    // them. finishRoom() itself is what actually gives this player fair
+    // credit for ending early (see its own reason==='last-survivor' branch)
+    // -- an earlier version instead added a flat SOLO_LAST_SURVIVOR_BONUS_SCORE
+    // here, which under-scored a fast, decisive win against a concurrent
+    // SOLO room's winner who happened to run out the full clock (a real
+    // report: winning in under a minute locked in ~40 points while a
+    // slower room's winner passed 100+ just by still being alive when the
+    // buzzer hit) -- a flat top-up couldn't close a gap that scales with
+    // how much round time was actually left.
     const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated
       && !soloAllHumansEliminated && aliveCount === 1;
-    if (soloLastSurvivorStanding) {
-      const winner = Object.values(this.players).find((p) => !p.eliminated);
-      if (winner && !winner.isBot) {
-        winner.score = (winner.score || 0) + SOLO_LAST_SURVIVOR_BONUS_SCORE;
-      }
-    }
 
     if (allEliminated || allHumansGone || soloAllHumansEliminated || soloLastSurvivorStanding) {
       const reason = soloAllHumansEliminated ? 'solo-human-eliminated'
@@ -2205,8 +2200,18 @@ export default class Room {
     // Whoever wasn't already eliminated made it all the way to this moment —
     // credit them for the full time elapsed, same as an eliminated
     // teammate's addSurvivalScore() call got their own cutoff timestamp.
+    // 'last-survivor' is the one reason this room is ending *before*
+    // roundDurationMs actually elapsed (개인전's sole-survivor early-end,
+    // see checkRoundState()) -- crediting only up to the real Date.now()
+    // there would cut the winner's score off early purely because their
+    // own room happened to resolve fast, while another concurrent SOLO
+    // room's winner keeps earning every second until the real buzzer. Using
+    // the round's natural end time instead credits them as if they'd
+    // survived the whole way, which is exactly what "last one standing"
+    // already means -- nobody else in this room ever could have caught up
+    // to threaten them regardless of how much clock was left.
     if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
-      const endTime = Date.now();
+      const endTime = reason === 'last-survivor' ? this.roundStartTime + this.roundDurationMs : Date.now();
       Object.values(this.players).forEach((player) => {
         if (!player.eliminated) {
           this.addSurvivalScore(player, endTime);
