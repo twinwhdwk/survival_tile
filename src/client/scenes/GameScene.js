@@ -921,9 +921,15 @@ export default class GameScene extends Phaser.Scene {
   // immediate spark burst and a couple of smaller follow-ups so the tile
   // keeps twinkling rather than only flashing once. Purely cosmetic -- the
   // real protection is the server's regenGraceUntil window; the tween
-  // duration only needs to roughly track SHIELD_GRACE_MS so the glow fades
-  // out around when the protection actually lapses.
-  playShieldGlow(tile, isCenter = false) {
+  // duration only needs to roughly track how long that protection actually
+  // lasts, hence the durationMs parameter (defaults to SHIELD_GRACE_MS for
+  // a real shield activation, but playReviveProtectionGlow also reuses this
+  // exact same effect for a ghost's own revive-landing tile with its own,
+  // shorter GHOST_REVIVE_GRACE_MS instead -- operator: "부활하면 그자리가
+  // 황금방패 효과가 나는것이 좋겠다", since one shared "this ground is
+  // golden and safe right now" visual is simpler than maintaining two
+  // near-identical effects in two different colors).
+  playShieldGlow(tile, isCenter = false, durationMs = SHIELD_GRACE_MS) {
     // A pillar of light shooting straight up out of the ground -- makes
     // the activation read as a genuine magic effect (grounded, radiant)
     // rather than just a particle burst with no sense of *where* the power
@@ -941,14 +947,16 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // Bigger, more frequent bursts than before (was 8/4/4 at 3 fixed
-    // points) -- spread across the now-longer SHIELD_GRACE_MS window so a
-    // longer-lasting shield still reads as continuously twinkling rather
-    // than front-loaded and quiet for the second half.
+    // points) -- spread proportionally across durationMs so a longer-
+    // lasting shield still reads as continuously twinkling rather than
+    // front-loaded and quiet for the second half, while a much shorter
+    // revive-grace window compresses the same schedule instead of playing
+    // it at a fixed (too-slow-for-2s) pace.
     const burstSchedule = [
       [0, 14], [0.25, 7], [0.5, 10], [0.75, 7], [0.92, 12],
     ];
     burstSchedule.forEach(([atFraction, quantity]) => {
-      this.time.delayedCall(SHIELD_GRACE_MS * atFraction, () => {
+      this.time.delayedCall(durationMs * atFraction, () => {
         this.sparkEmitter.setTint(SHIELD_COLOR);
         this.sparkEmitter.explode(quantity, tile.baseX, tile.baseY);
       });
@@ -971,7 +979,7 @@ export default class GameScene extends Phaser.Scene {
     tile.graceTintTween = this.tweens.addCounter({
       from: 0,
       to: 100,
-      duration: SHIELD_GRACE_MS,
+      duration: durationMs,
       ease: 'Linear',
       onUpdate: (tween) => {
         // Cycles through the 3 tones 3 times across the whole window (6
@@ -1558,19 +1566,16 @@ export default class GameScene extends Phaser.Scene {
 
       // Room.explodeBombTile() sends this instead of 'playerEliminated' for
       // anyone standing on a currently-golden shield tile, or on their own
-      // just-respawned landing tile, when the blast hits -- the explosion
-      // itself already played above via 'bombExploded', so this just adds
-      // a deflect cue right at the spared player's own position, otherwise
-      // surviving a bomb going off in their own tile would look like
-      // nothing happened at all. `cause` (from Room.js's own two separate
-      // protection maps) picks gold for a shield vs the same green the
-      // rest of the revive flow already uses, so the cue actually matches
-      // whichever protection is the reason they're still alive.
-      bombBlocked: ({ playerId, x, y, cause }) => {
-        const isRevive = cause === 'revive';
-        this.showFloatingLabel(x, y, '무효화!', isRevive ? '#88ff99' : '#ffd700');
+      // just-respawned landing tile (rendered with that exact same golden
+      // shield glow -- see playReviveProtectionGlow), when the blast hits --
+      // the explosion itself already played above via 'bombExploded', so
+      // this just adds a deflect cue right at the spared player's own
+      // position, otherwise surviving a bomb going off in their own tile
+      // would look like nothing happened at all.
+      bombBlocked: ({ playerId, x, y }) => {
+        this.showFloatingLabel(x, y, '무효화!', '#ffd700');
         this.spawnImpactRing(x, y, {
-          color: isRevive ? 0x88ff99 : SHIELD_COLOR, startRadius: 4, endScale: 4.5, duration: 380, strokeWidth: 3,
+          color: SHIELD_COLOR, startRadius: 4, endScale: 4.5, duration: 380, strokeWidth: 3,
         });
         if (playerId === this.socket.id) {
           this.cameras.main.flash(160, 255, 215, 120);
@@ -2554,40 +2559,20 @@ export default class GameScene extends Phaser.Scene {
   // 'bombBlocked') -- without an ongoing visual, a revived player only saw
   // one 300ms flash, then nothing telling them how long they could safely
   // get their bearings for (operator: "부활하고 2초간 무적한다던가... 더
-  // 빛나게 한다던가 해야 원활하게 진행할수있을듯"). Pulses both the landing
-  // tile and the avatar itself for the server's own graceMs, so "I'm safe
-  // right now" stays visibly true for the whole window, not just its first
-  // instant. A distinct green (matching every other '부활!' cue) rather
-  // than the shield's gold, so the two protections read as different
-  // things even though explodeBombTile() treats them the same way.
+  // 빛나게 한다던가 해야 원활하게 진행할수있을듯"). The landing tile just
+  // reuses playShieldGlow() outright rather than a separate near-identical
+  // effect in its own color (operator: "부활하면 그자리가 황금방패 효과가
+  // 나는것이 좋겠다. 그게 구현이 더 깔끔하지 않아?") -- one shared "this
+  // ground is golden and briefly invincible" visual for both, sized to the
+  // server's own graceMs instead of SHIELD_GRACE_MS. The avatar pulse below
+  // is revive-specific (a shield never touches the player standing on it),
+  // so that part stays its own thing.
   playReviveProtectionGlow(avatar, x, y, graceMs) {
     const { row, col } = pixelToHex(x, y);
     const tile = this.tileSprites[`${row}_${col}`];
     if (tile) {
       this.stopTileTween(tile);
-      const fromColor = Phaser.Display.Color.ValueToColor(0x88ff99);
-      const toColor = Phaser.Display.Color.ValueToColor(0xffffff);
-      tile.setTint(0x88ff99);
-      tile.graceTintTween = this.tweens.addCounter({
-        from: 0,
-        to: 100,
-        duration: graceMs,
-        ease: 'Linear',
-        onUpdate: (tween) => {
-          const cyclePos = (tween.getValue() / 100) * 2;
-          const t = cyclePos - Math.floor(cyclePos);
-          const step = Math.floor(cyclePos) % 2 === 0
-            ? Phaser.Display.Color.Interpolate.ColorWithColor(fromColor, toColor, 100, t * 100)
-            : Phaser.Display.Color.Interpolate.ColorWithColor(toColor, fromColor, 100, t * 100);
-          tile.setTint(Phaser.Display.Color.GetColor(step.r, step.g, step.b));
-        },
-        onComplete: () => {
-          tile.clearTint();
-          tile.graceTintTween = null;
-        },
-      });
-      this.sparkEmitter.setTint(0x88ff99);
-      this.sparkEmitter.explode(10, x, y);
+      this.playShieldGlow(tile, true, graceMs);
     }
 
     if (!avatar) {
