@@ -30,9 +30,8 @@ export const TILE_STATE = {
 };
 
 // Total time from stepping on a SOLID tile to it actually being gone is
-// WARNING_DELAY_MS + COLLAPSE_DELAY_MS -- was 1200ms (600+600), bumped ~10%
-// to 1320ms (660+660) per an operator request phrased as "if it's 2s, make
-// it 2.2s" (it's actually 1.2s, not 2s -- applied that same ~10% ratio to
-// the real value rather than the guessed one).
-export const WARNING_DELAY_MS = 660;
-export const COLLAPSE_DELAY_MS = 660;
+// WARNING_DELAY_MS + COLLAPSE_DELAY_MS -- operator-set directly to 1500ms
+// (750+750), up from an original 1200ms (600+600) and a brief 1320ms
+// (660+660) stop in between.
+export const WARNING_DELAY_MS = 750;
+export const COLLAPSE_DELAY_MS = 750;

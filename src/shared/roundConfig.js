@@ -139,7 +139,7 @@ export const AUTO_REGEN_MIN_INTERVAL_MS = 1000; // rate-limits how often thresho
 // this, a tile could be walked on and start collapsing again the instant it
 // reappeared, which reads as "regen didn't actually help" even though it
 // technically fired. Deliberately shorter than a full footstep-to-gone
-// cycle (WARNING_DELAY_MS + COLLAPSE_DELAY_MS = 1320ms in mapConfig.js) so
+// cycle (WARNING_DELAY_MS + COLLAPSE_DELAY_MS = 1500ms in mapConfig.js) so
 // it reads as "freshly solid ground," not permanent invulnerability.
 export const REGEN_GRACE_MS = 2000;
 
