@@ -44,8 +44,13 @@ const JOYSTICK_DEADZONE_PX = 10;
 // deadzone already produced a large fraction of max speed -- halving it
 // here (applied only to joystick-driven movement, not the keyboard
 // cursors update() also handles) makes a given drag distance translate to
-// gentler, more controllable movement.
-const JOYSTICK_SENSITIVITY = 0.5;
+// gentler, more controllable movement. Nudged back up ~20% (0.5 -> 0.6,
+// "10 -> 12" per an operator request that full-deflection joystick movement
+// on Android/iPhone felt a bit slow) -- still well short of the original
+// unscaled 1.0, so the same "more controllable near the deadzone" intent
+// this was introduced for still holds, just with a faster ceiling at full
+// push.
+const JOYSTICK_SENSITIVITY = 0.6;
 
 // Mirrors Room.js's own MOVE_BROADCAST_MIN_INTERVAL_MS (50ms) -- the server
 // only ever broadcasts this player's position to everyone else at that
