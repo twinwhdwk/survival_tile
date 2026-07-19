@@ -1199,26 +1199,18 @@ export default class Room {
       this.randomizeBotResults();
     }
 
-    // 개인전's own last-survivor case: nothing left to threaten whoever's
-    // left, so the round ends here rather than idling out the clock with
-    // nobody watching change. soloAllHumansEliminated above already ends
-    // the round the instant the last *human* dies, so whenever this room
-    // has any human in it the sole survivor here is necessarily one of
-    // them. finishRoom() itself is what actually gives this player fair
-    // credit for ending early (see its own reason==='last-survivor' branch)
-    // -- an earlier version instead added a flat SOLO_LAST_SURVIVOR_BONUS_SCORE
-    // here, which under-scored a fast, decisive win against a concurrent
-    // SOLO room's winner who happened to run out the full clock (a real
-    // report: winning in under a minute locked in ~40 points while a
-    // slower room's winner passed 100+ just by still being alive when the
-    // buzzer hit) -- a flat top-up couldn't close a gap that scales with
-    // how much round time was actually left.
-    const soloLastSurvivorStanding = this.gameMode === 'SOLO' && !allEliminated
-      && !soloAllHumansEliminated && aliveCount === 1;
-
-    if (allEliminated || allHumansGone || soloAllHumansEliminated || soloLastSurvivorStanding) {
-      const reason = soloAllHumansEliminated ? 'solo-human-eliminated'
-        : (soloLastSurvivorStanding ? 'last-survivor' : 'all-eliminated');
+    // 개인전 deliberately does *not* end the room the instant only one
+    // player is left alive -- an earlier version did (nothing left to
+    // threaten the sole survivor, so why keep ticking), but that cut a
+    // decisive winner's own round short while every other still-running
+    // SOLO room kept playing to the real buzzer, which read as "I won and
+    // the game just... stopped" instead of getting to finish the round like
+    // everyone else. The lone survivor now just keeps playing (boundary
+    // shrink, hazards, and all) until the natural Date.now() >= roundEndTime
+    // timeout below, same as any other room -- aliveCount === 1 no longer
+    // needs special handling here at all.
+    if (allEliminated || allHumansGone || soloAllHumansEliminated) {
+      const reason = soloAllHumansEliminated ? 'solo-human-eliminated' : 'all-eliminated';
       this.finishRoom(reason);
     }
   }
@@ -2223,18 +2215,8 @@ export default class Room {
     // Whoever wasn't already eliminated made it all the way to this moment —
     // credit them for the full time elapsed, same as an eliminated
     // teammate's addSurvivalScore() call got their own cutoff timestamp.
-    // 'last-survivor' is the one reason this room is ending *before*
-    // roundDurationMs actually elapsed (개인전's sole-survivor early-end,
-    // see checkRoundState()) -- crediting only up to the real Date.now()
-    // there would cut the winner's score off early purely because their
-    // own room happened to resolve fast, while another concurrent SOLO
-    // room's winner keeps earning every second until the real buzzer. Using
-    // the round's natural end time instead credits them as if they'd
-    // survived the whole way, which is exactly what "last one standing"
-    // already means -- nobody else in this room ever could have caught up
-    // to threaten them regardless of how much clock was left.
     if (this.mode === 'SURVIVAL' || this.mode === 'FINAL') {
-      const endTime = reason === 'last-survivor' ? this.roundEndTime : Date.now();
+      const endTime = Date.now();
       Object.values(this.players).forEach((player) => {
         if (!player.eliminated) {
           this.addSurvivalScore(player, endTime);
