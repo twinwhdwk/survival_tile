@@ -953,6 +953,25 @@ export default class GameScene extends Phaser.Scene {
   // shape reads far better at this size than any stock emoji glyph, whose
   // fixed art/colors can't be tuned to match the rest of the game's warm,
   // hand-drawn look.
+  // Phaser's Graphics GameObject has no quadraticCurveTo() the way a native
+  // Canvas 2D context does (this crashed every time an angel tile spawned or
+  // was already on the board when a spectator's snapshot arrived -- "i.
+  // quadraticCurveTo is not a function" -- since createWingGraphic() called
+  // it unconditionally). Phaser.Curves.Path *does* support quadratic curves
+  // (quadraticBezierTo, though its argument order is destination-then-
+  // control, the reverse of Canvas 2D's control-then-destination), so this
+  // samples the same curve shape into a plain point list and feeds that to
+  // fillPoints()/strokePoints() -- the same approach createShieldTileMarker()
+  // already uses for its own straight-edged shape, just with curved segments
+  // sampled into points first.
+  curvedOutlinePoints(startX, startY, segments) {
+    const path = new Phaser.Curves.Path(startX, startY);
+    segments.forEach(([endX, endY, controlX, controlY]) => {
+      path.quadraticBezierTo(endX, endY, controlX, controlY);
+    });
+    return path.getPoints(32);
+  }
+
   createWingGraphic(x, mirrored) {
     const g = this.add.graphics({ x, y: 0 });
     if (mirrored) {
@@ -960,24 +979,21 @@ export default class GameScene extends Phaser.Scene {
     }
 
     g.fillStyle(0x000000, 0.25);
-    g.beginPath();
-    g.moveTo(1.5, 4);
-    g.quadraticCurveTo(6.5, -8, 17.5, -12);
-    g.quadraticCurveTo(13.5, -1, 14.5, 7);
-    g.quadraticCurveTo(6.5, 8, 1.5, 4);
-    g.closePath();
-    g.fillPath();
+    g.fillPoints(this.curvedOutlinePoints(1.5, 4, [
+      [17.5, -12, 6.5, -8],
+      [14.5, 7, 13.5, -1],
+      [1.5, 4, 6.5, 8],
+    ]), true);
 
     g.fillStyle(0xfff6e8, 1);
     g.lineStyle(1.2, 0xd9b466, 0.9);
-    g.beginPath();
-    g.moveTo(0, 3);
-    g.quadraticCurveTo(5, -9, 16, -13);
-    g.quadraticCurveTo(12, -2, 13, 6);
-    g.quadraticCurveTo(5, 7, 0, 3);
-    g.closePath();
-    g.fillPath();
-    g.strokePath();
+    const wingOutline = this.curvedOutlinePoints(0, 3, [
+      [16, -13, 5, -9],
+      [13, 6, 12, -2],
+      [0, 3, 5, 7],
+    ]);
+    g.fillPoints(wingOutline, true);
+    g.strokePoints(wingOutline, true);
 
     g.lineStyle(1, 0xd9b466, 0.6);
     g.lineBetween(2, 1, 12.5, -7.5);
