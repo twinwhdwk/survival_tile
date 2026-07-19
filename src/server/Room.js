@@ -290,15 +290,22 @@ export default class Room {
         disconnected: false,
         isBot: !!isBot,
         // Individual score, credited alongside the shared this.score by
-        // addSurvivalScore() below — TEAM mode doesn't rank by this for
-        // finalRankings, but each player's own carried-in value (their
-        // prior stage's total, seeded here from `score` on their members
-        // entry -- see formStage2Groups()/finishRoom()'s `advancing` list
-        // in server.js) is exactly how a stage-2+ room continues crediting
-        // someone's earlier-stage score instead of resetting it. SOLO
-        // mode's finalRankings are built entirely from each player's own
-        // value here (see Room.getPlayerResults()).
+        // addSurvivalScore() below -- used for SOLO's own per-player
+        // finalRankings (see Room.getPlayerResults()) and for the live
+        // in-round HUD. TEAM mode's carry-forward/finalRankings instead use
+        // baselineScore (below) plus this room's own this.score once it
+        // finishes -- a team's score is meant to be shared equally across
+        // every member regardless of whose individual survival time built
+        // it, not split by personal contribution.
         score: score || 0,
+        // What this player already had carried in before this room started
+        // (their prior stage's combined team total, or 0 at stage 1) --
+        // captured once here and never touched again, so finishRoom()'s
+        // advancing list and handleRoomFinished()'s finalRankings entries
+        // (server.js) can add this room's own this.score on top of it
+        // without needing to untangle it from `score`'s own per-tick
+        // individual increments above.
+        baselineScore: score || 0,
         // Start of the window addSurvivalScore() will next credit — see that
         // method for why this can't just always be roundStartTime once
         // ghost respawns are in play. scoringStartTime (not roundStartTime
@@ -2113,16 +2120,20 @@ export default class Room {
     }
   }
 
-  // Every member's own final standing — SOLO's only source of ranking data
+  // Every member's own final standing -- SOLO's only source of ranking data
   // (server.js's handleRoomFinished builds one finalRankings entry per
-  // player straight from this), and harmless extra detail for TEAM, which
-  // still ranks by the shared this.score/advancing list instead.
+  // player straight from `score` here), and for TEAM mode the source of
+  // each member's own baselineScore, which handleRoomFinished adds this
+  // room's this.score onto for both the advancing list and finalRankings
+  // (a wiped/cut player never reaches finishRoom()'s own advancing list
+  // below, so this is their only path to that carried baseline).
   getPlayerResults() {
     return Object.values(this.players).map((p) => ({
       socketId: p.playerId,
       nickname: p.nickname,
       animalIndex: p.animalIndex,
       score: p.score || 0,
+      baselineScore: p.baselineScore || 0,
       eliminated: p.eliminated,
       eliminatedAt: p.eliminatedAt || null,
     }));
@@ -2173,19 +2184,20 @@ export default class Room {
 
     const totalHumans = Object.keys(this.players).length;
 
-    // `score` here is each player's own individual carried total -- not
-    // just this.score, the room's shared pool -- so a stage-2+ room's
-    // constructor can seed it back into player.score, giving every survivor
-    // an additive running total across stages instead of resetting at each
-    // new room. See formStage2Groups()/formStage3Group() in server.js.
-    // player.score already IS each player's own individually-tracked total
-    // (addSurvivalScore credits it alongside this.score identically every
-    // time), so carrying it alone is correct here.
+    // `score` here is each survivor's carried baseline (whatever they
+    // walked into this room with, from their prior stage) plus this whole
+    // room's own this.score -- every teammate gets the same this.score
+    // added on top of their own baseline, since a team's score is meant to
+    // be shared equally regardless of whose individual survival time built
+    // it. A stage-2+ room's constructor seeds this straight back into both
+    // player.score and player.baselineScore, so it keeps compounding across
+    // stages instead of resetting. See formStage2Groups()/formStage3Group()
+    // in server.js.
     const advancing = survivorIds.map((id) => ({
       socketId: id,
       nickname: this.players[id].nickname,
       animalIndex: this.players[id].animalIndex,
-      score: this.players[id].score || 0,
+      score: (this.players[id].baselineScore || 0) + this.score,
       // Missing here, every bot advancing to the next stage silently became
       // a "human" in the new Room's constructor (isBot defaults falsy on an
       // absent field) -- moveBotsRandomly() only ever drives isBot (or

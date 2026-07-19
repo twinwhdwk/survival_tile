@@ -730,16 +730,14 @@ function handleRoomFinished(lineageIndex, roomId, advancing, finalScore, gameMod
   // One finalRankings entry per player, individually, same shape the SOLO
   // branch above already uses -- an earlier version grouped everyone cut
   // together (whole wipe, or the partial-cut subset below) into a single
-  // row with their scores summed together. That reads fine as long as
-  // every merged row happens to land on a different rank from every other
-  // row, but two or more players who each separately earned the very same
-  // individual score would get sorted onto the same rank while the row
-  // shown for it displayed their *combined* total -- looking like that
-  // rank's score had jumped for no reason, when it was actually just N
-  // people's equal scores added together. Individual rows sidestep that
-  // entirely: a tie in score is now a tie in rank between separate rows,
-  // each still showing its own real number.
-  const scoreById = new Map(playerResults.map((p) => [p.socketId, p.score || 0]));
+  // row with a combined score. Individual rows read better (a tie in score
+  // is now a tie in rank between separate rows, each still showing its own
+  // number) but the number itself is still each player's *team* total, not
+  // a personal one: baselineScore (whatever they'd already carried in) plus
+  // this whole room's finalScore, same finalScore added for every member
+  // regardless of whose individual survival time built it -- a team's score
+  // is shared equally, cut teammates included, not split by contribution.
+  const scoreById = new Map(playerResults.map((p) => [p.socketId, (p.baselineScore || 0) + finalScore]));
 
   if (advancing.length === 0) {
     allMembers.forEach((m) => {
