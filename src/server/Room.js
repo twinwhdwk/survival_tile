@@ -930,19 +930,20 @@ export default class Room {
       const revivedUntil = this.reviveProtectedUntil.get(key);
       if ((shieldedUntil && now < shieldedUntil) || (revivedUntil && now < revivedUntil)) {
         // Standing on a currently-golden shield tile, or on the tile they
-        // just respawned onto (respawnGhost()'s own brief grace), when the
-        // blast hits -- the ground already survives via
-        // triggerTileCollapse()'s own grace check below, but until now the
-        // player themselves still died instantly regardless, which read as
-        // the protection covering the floor but not the person standing on
-        // it (operator, re: the shield case: "황금 타일 상황에서 옆에서
-        // 폭탄 터지면 무효화"; re: the revive case: "부활하고 2초간 무적").
-        // 'bombBlocked' lets the client show a deflect cue in place of the
-        // usual elimination effects, so surviving doesn't look like the
-        // bomb simply failed to notice them -- `cause` picks which cue.
-        this.emit('bombBlocked', {
-          playerId: id, x: player.x, y: player.y, cause: (revivedUntil && now < revivedUntil) ? 'revive' : 'shield',
-        });
+        // just respawned onto (respawnGhost()'s own brief grace, rendered
+        // with that exact same golden shield glow client-side -- see
+        // playReviveProtectionGlow), when the blast hits -- the ground
+        // already survives via triggerTileCollapse()'s own grace check
+        // below, but until now the player themselves still died instantly
+        // regardless, which read as the protection covering the floor but
+        // not the person standing on it (operator, re: the shield case:
+        // "황금 타일 상황에서 옆에서 폭탄 터지면 무효화"; re: the revive
+        // case: "부활하고 2초간 무적"). 'bombBlocked' lets the client show a
+        // deflect cue in place of the usual elimination effects, so
+        // surviving doesn't look like the bomb simply failed to notice
+        // them -- both causes render identically client-side now, so
+        // there's nothing left for the payload to distinguish.
+        this.emit('bombBlocked', { playerId: id, x: player.x, y: player.y });
         return;
       }
       this.eliminatePlayer(id);
