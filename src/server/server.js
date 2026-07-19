@@ -1046,6 +1046,20 @@ function setServerHandlers() {
       socket.emit('reconnectRejected', {});
     });
 
+    // Purely diagnostic: client.js's global window 'error'/'unhandledrejection'
+    // handler reports here so an otherwise-invisible client-side crash (no
+    // devtools access on this deployment's operating side) actually shows up
+    // somewhere -- Cloud Run captures this console.error in its logs. Never
+    // trust payload shape here beyond typeof checks; this fires from a
+    // client already known to be in a broken state.
+    socket.on('clientError', (payload) => {
+      const message = payload && typeof payload.message === 'string' ? payload.message : 'unknown';
+      const stack = payload && typeof payload.stack === 'string' ? payload.stack : null;
+      const scenes = payload && typeof payload.scenes === 'string' ? payload.scenes : 'unknown';
+      const source = payload && typeof payload.source === 'string' ? payload.source : 'unknown';
+      console.error(`[client-error] socket=${socket.id} source=${source} scenes=${scenes} message=${message}${stack ? `\n${stack}` : ''}`);
+    });
+
     socket.on('join', (payload) => {
       const nickname = sanitizeNickname(payload && payload.nickname);
       if (!nickname) {

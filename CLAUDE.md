@@ -47,7 +47,7 @@ Beyond the four main scenes, `DashboardScene` gives a connected admin a multi-ro
 
 ### Socket protocol
 
-Client emits: `join`, `startTournament`, `addBot`, `clearLobby`, `resetServer`, `playerMovement`, `reviveTile`, `adminSpectateRoom`, `adminReturnToDashboard`.
+Client emits: `join`, `startTournament`, `addBot`, `clearLobby`, `resetServer`, `playerMovement`, `reviveTile`, `adminSpectateRoom`, `adminReturnToDashboard`, `clientError`.
 Server emits: `lobbyUpdate`, `joinRejected`, `resetServerDone`, `gameStarting`, `dashboardStarting`, `dashboardUpdate`, `tileWarning`, `tileCollapsed`, `tileRevived`, `reviveGaugeUpdate`, `lastStandActivated`, `playerRevived`, `massCollapseStarted`, `boundaryPulse`, `playerMoved`, `playerEliminated`, `bombArmed`, `bombTilesUpdate`, `bombExploded`, `roomResult`, `tournamentEnded`.
 Keep these two lists in 1:1 correspondence when adding features — an earlier cleanup removed client handlers (`newPlayer`, `playerDisconnected`) that the server never actually emitted.
 

@@ -9,6 +9,7 @@ import {
   FONT_DISPLAY_FAMILY, FONT_DISPLAY_SAMPLE_TEXT, FONT_BODY_FAMILY, FONT_BODY_SAMPLE_TEXT,
 } from './theme/Theme';
 import { showToast } from './utilities/Toast';
+import { getSocket } from './net/socket';
 
 // The server already guards every socket handler against a single bad
 // message/edge case taking the whole process down (see server.js's
@@ -29,6 +30,29 @@ import { showToast } from './utilities/Toast';
 function handleFatalClientError(source, detail) {
   // eslint-disable-next-line no-console
   console.error(`[fatal-client-error:${source}]`, detail);
+
+  // There's no browser devtools access on this deployment's operating side,
+  // so a client-side exception was otherwise a dead end to diagnose --
+  // wrapped in its own try/catch since the whole point of this handler is
+  // "something already went wrong," and a broken socket/game object here
+  // must not throw a second, unhandled error out of the handler meant to
+  // catch the first one.
+  try {
+    const activeScenes = window.__game && window.__game.scene
+      ? window.__game.scene.getScenes(true).map((s) => s.scene.key).join(',')
+      : 'unknown';
+    getSocket().emit('clientError', {
+      source,
+      message: detail && detail.message ? detail.message : String(detail),
+      stack: detail && detail.stack ? String(detail.stack) : null,
+      scenes: activeScenes,
+      url: window.location.href,
+    });
+  } catch (reportingError) {
+    // eslint-disable-next-line no-console
+    console.error('[fatal-client-error] failed to report to server', reportingError);
+  }
+
   const now = Date.now();
   const lastAutoReloadAt = Number(sessionStorage.getItem('lastAutoReloadAt')) || 0;
   if (now - lastAutoReloadAt < 8000) {
