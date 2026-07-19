@@ -25,9 +25,6 @@ import {
   AUTO_REGEN_SOLID_RATIO_THRESHOLD,
   AUTO_REGEN_MIN_INTERVAL_MS,
   SURVIVAL_SCORE_PER_SECOND,
-  SOLO_BOT_PLACEHOLDER_SCORE_MAX,
-  SOLO_BOT_SCORE_GAP_MIN,
-  SOLO_BOT_SCORE_GAP_MAX,
   REGEN_GRACE_MS,
   RECONNECT_RESPAWN_GRACE_MS,
   GHOST_REVIVE_GAUGE_PER_TAP,
@@ -765,11 +762,29 @@ export default class Room {
       if (this.finished) {
         return;
       }
+      // A shield (armShieldTile) can write a fresh regenGraceUntil for this
+      // exact tile any time after this collapse was scheduled above but
+      // before it actually starts blinking -- this tile was still plain
+      // SOLID the whole time (pendingTiles alone doesn't show anything to
+      // the player), so a live grace here means quietly standing down is
+      // enough; nothing was ever visible, so there's nothing to revive or
+      // announce.
+      const grace = this.regenGraceUntil.get(key);
+      if (grace && Date.now() < grace) {
+        this.pendingTiles.delete(key);
+        return;
+      }
       this.tileMap[row][col] = TILE_STATE.WARNING;
       this.emit('tileWarning', { row, col });
 
       setTimeout(() => {
-        if (this.finished) {
+        if (this.finished || !this.pendingTiles.has(key)) {
+          // armShieldTile() can force-revive an already-blinking WARNING
+          // tile immediately and clears pendingTiles the instant it does --
+          // that's this branch's cue that this tile's fate was already
+          // decided elsewhere (its own 'tileRevived' already fired), so
+          // just stand down instead of also emitting 'tileCollapsed' on
+          // top of that.
           return;
         }
         this.tileMap[row][col] = TILE_STATE.GONE;
@@ -969,22 +984,39 @@ export default class Room {
 
     const until = Date.now() + SHIELD_GRACE_MS;
     getTilesWithinHexRadius(shield.row, shield.col, SHIELD_RADIUS).forEach(({ row, col }) => {
-      // Any already-collapsed ground in the radius comes back immediately
-      // too, not just whatever's still standing -- a shield stepped on
-      // right at the edge of a hole used to only protect the SOLID tiles
-      // around it, leaving any already-GONE neighbor still an actual gap
-      // inside an otherwise "safe" area for the same 5s. Revived the same
-      // way reviveTile()'s ghost-tap path does (SOLID + 'tileRevived' so
-      // the client plays its usual revive-glow animation), before the
-      // shared regenGraceUntil write below covers it for the rest of the
-      // grace window exactly like every other tile in the radius. Skips
-      // anything outside the current safe zone, same reasoning as
-      // autoRegenerateTiles()'s own getSafeZoneTiles() restriction -- ground
-      // outside the shrinking boundary is meant to stay gone; reviving it
-      // would defeat the point of the boundary.
-      if (this.tileMap[row][col] === TILE_STATE.GONE && this.isSafeTile(row, col)) {
+      const key = `${row}_${col}`;
+      const state = this.tileMap[row][col];
+      // Any already-collapsed OR already-blinking (WARNING) ground in the
+      // radius comes back immediately too, not just whatever's still fully
+      // SOLID -- a shield stepped on right next to a hole, or right next to
+      // a tile someone else already lit the fuse on moments earlier, used
+      // to only protect tiles that hadn't started disappearing yet, leaving
+      // an active gap (or one about to become one on its already-running
+      // timer, see triggerTileCollapse()'s own grace re-checks below) inside
+      // an otherwise "safe" area for the whole grace window (operator: "없
+      // 어지는 타일 복구 및 없어질 타일까지도 바로 복구"). A WARNING tile is
+      // also pulled out of pendingTiles right here -- that's this branch's
+      // signal to triggerTileCollapse()'s own already-scheduled COLLAPSE_
+      // DELAY_MS timer (still in flight for this exact tile) that its
+      // outcome was already decided elsewhere, so it quietly stands down
+      // instead of also firing 'tileCollapsed' on top of this 'tileRevived'.
+      // Revived the same way reviveTile()'s ghost-tap path does (SOLID +
+      // 'tileRevived'), before the shared regenGraceUntil write below covers
+      // it for the rest of the grace window exactly like every other tile
+      // in the radius. Skips anything outside the current safe zone, same
+      // reasoning as autoRegenerateTiles()'s own getSafeZoneTiles()
+      // restriction -- ground outside the shrinking boundary is meant to
+      // stay gone; reviving it would defeat the point of the boundary. A
+      // tile that's SOLID but merely *pending* (already scheduled to start
+      // blinking soon, per triggerTileCollapse()'s own comment on that
+      // invisible state) needs no visual correction here at all -- it never
+      // became visibly WARNING, so the regenGraceUntil write below is
+      // already enough for triggerTileCollapse()'s own re-check to silently
+      // cancel it before it ever blinks.
+      if ((state === TILE_STATE.GONE || state === TILE_STATE.WARNING) && this.isSafeTile(row, col)) {
         this.tileMap[row][col] = TILE_STATE.SOLID;
-        this.emit('tileRevived', { row, col });
+        this.pendingTiles.delete(key);
+        this.emit('tileRevived', { row, col, viaShield: true });
       }
       this.regenGraceUntil.set(`${row}_${col}`, until);
       // Same anti-camping re-check every other grace-granting path already
@@ -1230,68 +1262,21 @@ export default class Room {
     const allHumansGone = this.gameMode !== 'SOLO' && this.hasHumans
       && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected);
 
-    // 개인전: once every real player in the room is gone, nobody is left who
-    // would ever see how the remaining bots' round actually plays out, so
-    // rather than keep ticking them forward in real time for no one to
-    // watch, the round ends right here and randomizeBotResults() replaces
-    // every bot's own final score/standing with a placeholder -- see its
-    // own comment for why that's preferable to just freezing them at
-    // whatever mid-round state they happened to be in.
-    const soloAllHumansEliminated = this.gameMode === 'SOLO' && !allEliminated
-      && this.hasHumans
-      && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.eliminated);
-    if (soloAllHumansEliminated) {
-      this.randomizeBotResults();
+    // 개인전 deliberately does *not* end the room the instant every real
+    // human is gone (only bots left) or only one player is left alive --
+    // an earlier version ended on both of those triggers (nothing left to
+    // threaten/watch, so why keep ticking), but that cut a solo tester's own
+    // spectating short: an eliminated SOLO player already just becomes a
+    // silent spectator client-side (see GameScene's handleOwnElimination),
+    // exactly so they can keep watching the rest of the round play out --
+    // ending the room out from under them the instant they died defeated
+    // that entirely (operator: "개인전에서 죽으니까 게임이 바로 끝나버리다").
+    // Same reasoning already applied to the decisive-winner case: every
+    // room now just keeps playing (boundary shrink, hazards, bots, all)
+    // until the natural Date.now() >= roundEndTime timeout below.
+    if (allEliminated || allHumansGone) {
+      this.finishRoom('all-eliminated');
     }
-
-    // 개인전 deliberately does *not* end the room the instant only one
-    // player is left alive -- an earlier version did (nothing left to
-    // threaten the sole survivor, so why keep ticking), but that cut a
-    // decisive winner's own round short while every other still-running
-    // SOLO room kept playing to the real buzzer, which read as "I won and
-    // the game just... stopped" instead of getting to finish the round like
-    // everyone else. The lone survivor now just keeps playing (boundary
-    // shrink, hazards, and all) until the natural Date.now() >= roundEndTime
-    // timeout below, same as any other room -- aliveCount === 1 no longer
-    // needs special handling here at all.
-    if (allEliminated || allHumansGone || soloAllHumansEliminated) {
-      const reason = soloAllHumansEliminated ? 'solo-human-eliminated' : 'all-eliminated';
-      this.finishRoom(reason);
-    }
-  }
-
-  // 개인전 only: once every real player is gone (see soloAllHumansEliminated,
-  // this method's sole caller), there is no one left in the room whose
-  // opinion of the bots' "accuracy" matters — the operator's own call here
-  // was that continuing to simulate them in real time for an empty audience
-  // isn't worth it, and the human never looks at bot scores anyway. Forcing
-  // every bot to `eliminated: true` (regardless of whether they technically
-  // still had a live avatar the instant the round ended) keeps
-  // getPlayerResults()' shape uniform — a real mid-round bot state mixed in
-  // among faked ones would look inconsistent for no benefit, since nothing
-  // downstream distinguishes "genuinely eliminated" from "round ended
-  // around them" for a bot anyway.
-  randomizeBotResults() {
-    const bots = Object.values(this.players).filter((p) => p.isBot);
-    // Shuffle first (Fisher-Yates) -- this shuffled order *is* the random
-    // ranking among the bots. Assigning each bot its own fully independent
-    // random score (the previous approach) could easily land two bots on
-    // the exact same value, which read on the results screen as a tie
-    // despite nothing about a "last survivor, everyone else already dead"
-    // outcome actually being tied. Walking the shuffled order and strictly
-    // decreasing the score every step guarantees a clean 1st/2nd/3rd/...
-    // ranking with no possible tie, while still keeping which bot lands
-    // where entirely random.
-    for (let i = bots.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [bots[i], bots[j]] = [bots[j], bots[i]];
-    }
-    let score = SOLO_BOT_PLACEHOLDER_SCORE_MAX;
-    bots.forEach((bot) => {
-      bot.eliminated = true;
-      bot.score = Math.max(0, score);
-      score -= SOLO_BOT_SCORE_GAP_MIN + Math.floor(Math.random() * (SOLO_BOT_SCORE_GAP_MAX - SOLO_BOT_SCORE_GAP_MIN + 1));
-    });
   }
 
   movePlayerTo(id, x, y) {
@@ -2442,10 +2427,10 @@ export default class Room {
     // (still connected, tappable for revival by a teammate) who then
     // disconnects entirely. Re-check here so a TEAM room still ends once
     // every human really is gone, instead of lingering with bots playing
-    // on for nobody. Not relevant to SOLO: a SOLO player disconnecting
-    // after elimination is already moot, since soloAllHumansEliminated
-    // (SOLO has no ghost/revival at all) already finished the room at the
-    // moment of elimination itself.
+    // on for nobody. Not relevant to SOLO: allHumansGone is unconditionally
+    // false there (see its own `this.gameMode !== 'SOLO'` guard) -- a 개인전
+    // player disconnecting after elimination changes nothing, the round
+    // just keeps playing to its natural end either way.
     if (player && !this.finished && this.gameMode !== 'SOLO' && this.hasHumans
       && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected)) {
       this.finishRoom('all-eliminated');

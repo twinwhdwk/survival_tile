@@ -138,6 +138,12 @@ const GHOST_TAP_EFFECT_INTERVAL_MS = 150;
 // else -- purple was tried first and didn't fit that palette.
 const SHIELD_COLOR = 0xd4af37;
 
+// tile_solid's own border color (see EffectTextures.js's generateTileTextures)
+// -- shared so playShieldGlow's aurora cycle and tileTintForTexture's debris
+// tint both anchor on the exact same gold rather than two independently
+// eyeballed near-matches.
+const TILE_BORDER_GOLD = 0xd9a95f;
+
 export default class GameScene extends Phaser.Scene {
 
   constructor() {
@@ -948,10 +954,17 @@ export default class GameScene extends Phaser.Scene {
       });
     });
 
+    // All three tones are deliberately gold-family only (an earlier version
+    // cycled through a pale green, 0xd8ffb0, which read as "off-gold" rather
+    // than a coherent golden glow -- operator: "황금빛 (현재 타일 테두리색
+    // 정도) 타일로 만들어"). TILE_BORDER_GOLD matches tile_solid's own border
+    // color exactly (see EffectTextures.js's generateTileTextures), so a
+    // shielded tile settles on the same gold its own edge is already drawn
+    // in, not an unrelated accent color.
     const auroraTones = [
       Phaser.Display.Color.ValueToColor(SHIELD_COLOR),
       Phaser.Display.Color.ValueToColor(0xfff6c8),
-      Phaser.Display.Color.ValueToColor(0xd8ffb0),
+      Phaser.Display.Color.ValueToColor(TILE_BORDER_GOLD),
     ];
     tile.setTint(SHIELD_COLOR);
 
@@ -1358,7 +1371,7 @@ export default class GameScene extends Phaser.Scene {
         playCollapse();
       },
 
-      tileRevived: ({ row, col, causedBy }) => {
+      tileRevived: ({ row, col, causedBy, viaShield }) => {
         // Auto-regen bursts (and other players'/bots' taps) also fire this
         // same event with no causedBy of their own — Room.reviveTile() only
         // sets it for a real ghost tap, so this is the only case that gets
@@ -1369,7 +1382,20 @@ export default class GameScene extends Phaser.Scene {
           this.showFloatingLabel(reviveX, reviveY, '복구!', '#88ccff');
           vibrateTap();
         }
-        this.setTileState(row, col, TILE_STATE.SOLID);
+        if (viaShield) {
+          // Room.armShieldTile() sends this for a tile it just force-revived
+          // (already GONE or mid-blink) -- the 'shieldActivated' handler
+          // just above this one already scheduled this same tile's own gold
+          // playShieldGlow(), so restore the sprite only (texture/visibility/
+          // scale) without setTileState()'s normal playReviveGraceGlow. That
+          // glow tints the tile blue for a flat REGEN_GRACE_MS (1s) — running
+          // it here would fight playShieldGlow's own gold tween over the
+          // same tile's tint every frame for the rest of the 5s shield
+          // window, and both would lose.
+          this.restoreShieldRevivedTile(row, col);
+        } else {
+          this.setTileState(row, col, TILE_STATE.SOLID);
+        }
         playRevive();
       },
 
@@ -2394,7 +2420,7 @@ export default class GameScene extends Phaser.Scene {
     if (key === 'tile_warning') {
       return 0xff7a52;
     }
-    return 0xd9a95f;
+    return TILE_BORDER_GOLD;
   }
 
   stopTileTween(tile) {
@@ -2547,6 +2573,32 @@ export default class GameScene extends Phaser.Scene {
         this.playReviveAnimation(tile);
         break;
     }
+  }
+
+  // A lighter version of playReviveAnimation for a shield-caused revive
+  // (see the 'tileRevived' handler's viaShield branch): resets exactly what
+  // needs fixing on a tile that was GONE/invisible or mid-WARNING-blink a
+  // moment ago (texture, position/angle, alpha, scale, visibility) but
+  // skips playReviveGraceGlow's own blue tint tween entirely, leaving the
+  // tile's tint alone for playShieldGlow (already scheduled by the
+  // 'shieldActivated' handler for this same tile) to take over cleanly.
+  restoreShieldRevivedTile(row, col) {
+    if (this.localTileMap) {
+      this.localTileMap[row][col] = TILE_STATE.SOLID;
+    }
+
+    const tile = this.tileSprites[`${row}_${col}`];
+    if (!tile) {
+      return;
+    }
+
+    this.stopTileTween(tile);
+    tile.setTexture(this.textureForState(TILE_STATE.SOLID, row, col));
+    tile.setPosition(tile.baseX, tile.baseY);
+    tile.setAngle(0);
+    tile.setAlpha(1);
+    tile.setScale(1);
+    tile.setVisible(true);
   }
 
   addPlayer(playerInfo) {
