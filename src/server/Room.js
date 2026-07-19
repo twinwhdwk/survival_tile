@@ -43,6 +43,8 @@ import {
   SHIELD_GRACE_MS,
   SHIELD_RADIUS,
   ANGEL_TILE_INTERVAL_MS,
+  ANGEL_TILE_FINAL_STRETCH_MS,
+  ANGEL_TILE_FINAL_INTERVAL_MS,
 } from '../shared/roundConfig';
 
 const CENTER_ROW = Math.floor(MAP_ROWS / 2);
@@ -382,7 +384,7 @@ export default class Room {
     // places one there.
     this.angelTileNextSpawnAt = this.gameMode === 'SOLO'
       ? Infinity
-      : this.roundStartTime + ANGEL_TILE_INTERVAL_MS;
+      : this.roundStartTime + this.angelTileIntervalMs();
   }
 
   getSnapshot() {
@@ -971,6 +973,18 @@ export default class Room {
     }
   }
 
+  // ANGEL_TILE_INTERVAL_MS normally, but ANGEL_TILE_FINAL_INTERVAL_MS once
+  // fewer than ANGEL_TILE_FINAL_STRETCH_MS remain in the round -- a late
+  // rush of revival chances instead of the same steady cadence all the way
+  // to the buzzer (see ANGEL_TILE_FINAL_STRETCH_MS's own comment). FINAL
+  // mode has no roundDurationMs concept of "time remaining" the same way
+  // (it's a shrink-then-roam mode, not a fixed countdown to score by), but
+  // never reaches here anyway -- angel tiles are TEAM-only.
+  angelTileIntervalMs() {
+    const remainingMs = (this.roundStartTime + this.roundDurationMs) - Date.now();
+    return remainingMs <= ANGEL_TILE_FINAL_STRETCH_MS ? ANGEL_TILE_FINAL_INTERVAL_MS : ANGEL_TILE_INTERVAL_MS;
+  }
+
   // Stepping on the angel tile immediately revives one random ghost from
   // this room's own roster -- picks its own random ghost rather than going
   // through respawnRandomGhost() so this stays independent of the tap-filled
@@ -982,7 +996,7 @@ export default class Room {
   armAngelTile() {
     this.angelTile = null;
     this.emit('angelTileUpdate', { angelTile: null });
-    this.angelTileNextSpawnAt = Date.now() + ANGEL_TILE_INTERVAL_MS;
+    this.angelTileNextSpawnAt = Date.now() + this.angelTileIntervalMs();
 
     const ghosts = Object.keys(this.players).filter((pid) => this.players[pid].eliminated);
     if (ghosts.length === 0) {

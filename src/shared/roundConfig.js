@@ -216,7 +216,7 @@ export const BOMB_BLAST_RADIUS = 1;
 // other "this tile is briefly immune" case already writes into (auto-regen
 // burst, ghost respawn, reconnect immunity).
 export const SHIELD_TILES_PER_PLAYERS = 6;
-export const SHIELD_GRACE_MS = 3000;
+export const SHIELD_GRACE_MS = 5000;
 // 1 ring = the shield tile itself plus its 6 hex neighbors, 7 tiles total --
 // see BOMB_BLAST_RADIUS's own comment on why this isn't a square "3x3".
 export const SHIELD_RADIUS = 1;
@@ -231,6 +231,16 @@ export const SHIELD_RADIUS = 1;
 // has no ghost/revival mechanic at all (Room.reviveTile()'s own SOLO guard),
 // so an angel tile there would have nothing to do.
 export const ANGEL_TILE_INTERVAL_MS = 30000;
+// Once fewer than this much time is left in the round, Room.armAngelTile()
+// reschedules the next spawn on ANGEL_TILE_FINAL_INTERVAL_MS instead of the
+// normal ANGEL_TILE_INTERVAL_MS -- a deliberate late-round rush of revival
+// chances rather than the same steady 30s cadence all the way to the buzzer.
+// Only takes effect at the moment a tile is actually picked up (or at the
+// very first scheduling, in the constructor) -- an already-placed, unpicked
+// tile just sits there regardless (there's ever only one on the map at a
+// time), so this doesn't spawn a second one on top of it.
+export const ANGEL_TILE_FINAL_STRETCH_MS = 30000;
+export const ANGEL_TILE_FINAL_INTERVAL_MS = 10000;
 
 // When a real player's socket drops mid-round, they aren't eliminated
 // immediately — their avatar is handed to the bot AI as a "proxy" for this
