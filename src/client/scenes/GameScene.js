@@ -948,11 +948,12 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // One feathered wing, drawn as a curved cream-white panel with a few
-  // stroked "feather" lines fanning out from the body toward the tip.
-  // mirrored (scaleX -1) for the left half of the pair -- a real drawn
-  // shape reads far better at this size than any stock emoji glyph, whose
-  // fixed art/colors can't be tuned to match the rest of the game's warm,
-  // hand-drawn look.
+  // stroked "feather" lines fanning out from the body toward the tip -- a
+  // real drawn shape reads far better at this size than any stock emoji
+  // glyph, whose fixed art/colors can't be tuned to match the rest of the
+  // game's warm, hand-drawn look. createAngelTileMarker() draws two of
+  // these facing the same way rather than mirroring one, so this has no
+  // orientation parameter of its own.
   // Phaser's Graphics GameObject has no quadraticCurveTo() the way a native
   // Canvas 2D context does (this crashed every time an angel tile spawned or
   // was already on the board when a spectator's snapshot arrived -- "i.
@@ -972,11 +973,8 @@ export default class GameScene extends Phaser.Scene {
     return path.getPoints(32);
   }
 
-  createWingGraphic(x, mirrored) {
-    const g = this.add.graphics({ x, y: 0 });
-    if (mirrored) {
-      g.scaleX = -1;
-    }
+  createWingGraphic() {
+    const g = this.add.graphics({ x: 0, y: 0 });
 
     g.fillStyle(0x000000, 0.25);
     g.fillPoints(this.curvedOutlinePoints(1.5, 4, [
@@ -1003,11 +1001,20 @@ export default class GameScene extends Phaser.Scene {
     return g;
   }
 
+  // A pair of wings facing the same direction, layered with a small offset,
+  // rather than mirrored into a left/right spread -- reads as one dynamic
+  // wing emblem (like a badge/insignia) instead of a symmetric angel-wing
+  // silhouette. The back copy sits behind and slightly down-left, dimmer and
+  // a touch smaller, so it reads as depth behind the front wing rather than
+  // a second, equally prominent wing competing with it.
   createAngelTileMarker(tile) {
     const { x, y } = hexToPixel(tile.row, tile.col);
-    const leftWing = this.createWingGraphic(-2, true);
-    const rightWing = this.createWingGraphic(2, false);
-    const marker = this.add.container(x, y, [leftWing, rightWing]).setDepth(12);
+    const backWing = this.createWingGraphic();
+    backWing.setPosition(-3, 3);
+    backWing.setScale(0.82);
+    backWing.setAlpha(0.5);
+    const frontWing = this.createWingGraphic();
+    const marker = this.add.container(x, y, [backWing, frontWing]).setDepth(12);
 
     this.tweens.add({
       targets: marker,
