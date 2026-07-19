@@ -1018,26 +1018,27 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // Two earlier shapes were both tried and rejected: a single smooth closed
-  // outline read as a fish fin (a fin's whole silhouette is one plain curve
-  // with no texture at all), and a row of overlapping round lobes along a
-  // spine read as a chain of bubbles rather than a wing. What an actual
-  // wing icon needs is a handful of individually-distinct pointed flight
-  // feathers fanning out from one base point -- not a single outline and
-  // not a blurred string of circles -- so this draws several separate
-  // narrow feather shapes (each its own elongated, pointed leaf silhouette,
-  // widest a third of the way along its length) at different angles and
-  // lengths around a shared origin, longest at the leading/forward edge and
-  // shortest at the trailing edge, the way real primary feathers fan out.
+  // Earlier shapes were tried and rejected across several rounds: a single
+  // smooth closed outline read as a fish fin, a row of overlapping round
+  // lobes read as a chain of bubbles, and even a plain flat-colored feather
+  // fan (this comment's previous version) still just read as an ordinary
+  // bird wing -- "not a real angel wing," per feedback, meaning nothing here
+  // was actually reading as ornate/radiant. What was missing wasn't the
+  // fan-of-feathers structure (that part stays) but any sense of gilding or
+  // light: each feather now gets a second, smaller gold overlay near its tip
+  // (faking the two-tone "light catching the point" look a flat single fill
+  // can't give) plus a tiny bright glint right at the very tip, and
+  // createWingGraphic() below adds a soft additive-blended glow behind the
+  // whole fan -- an ordinary bird wing has neither.
   createFeatherShape(length, angleDeg) {
     const feather = this.add.graphics({ x: 0, y: 0 });
     feather.setAngle(angleDeg);
     const points = [
-      { x: 0, y: -1.6 },
-      { x: length * 0.35, y: -3.8 },
+      { x: 0, y: -1.8 },
+      { x: length * 0.35, y: -4.2 },
       { x: length, y: 0 },
-      { x: length * 0.35, y: 3.2 },
-      { x: 0, y: 1.6 },
+      { x: length * 0.35, y: 3.6 },
+      { x: 0, y: 1.8 },
     ];
     // Same offset-dark-silhouette drop shadow every other panel/marker in
     // the app already uses (see RoundedPanel.js's drawRoundedRect).
@@ -1046,8 +1047,24 @@ export default class GameScene extends Phaser.Scene {
 
     feather.fillStyle(0xfff6e8, 1);
     feather.fillPoints(points, true);
-    feather.lineStyle(1, 0xd9b466, 0.85);
+
+    // The gilt overlay: a narrower copy of the same silhouette covering
+    // roughly the tip half, in a richer gold than the ivory base coat.
+    const giltPoints = [
+      { x: length * 0.4, y: -1.2 },
+      { x: length * 0.62, y: -2.7 },
+      { x: length, y: 0 },
+      { x: length * 0.62, y: 2.3 },
+      { x: length * 0.4, y: 1.2 },
+    ];
+    feather.fillStyle(0xffd76a, 0.9);
+    feather.fillPoints(giltPoints, true);
+
+    feather.lineStyle(1.1, 0xffe9a8, 0.95);
     feather.strokePoints(points, true);
+
+    feather.fillStyle(0xffffff, 0.95);
+    feather.fillCircle(length - 1, 0, 1.3);
 
     return feather;
   }
@@ -1056,15 +1073,23 @@ export default class GameScene extends Phaser.Scene {
     // Drawn back-to-front (trailing feather first) so each subsequent,
     // longer feather overlaps slightly on top of the last one, the way a
     // real wing's feathers layer -- rather than the trailing ones sitting
-    // on top and looking pasted over the leading ones.
+    // on top and looking pasted over the leading ones. A 5th, shorter
+    // covert feather tucked at the very top (steepest angle) gives the fan
+    // more visual depth than the previous 4-feather version.
     const feathers = [
-      { length: 12, angle: 14 },
-      { length: 16, angle: -6 },
-      { length: 19, angle: -26 },
-      { length: 21, angle: -48 },
+      { length: 13, angle: 20 },
+      { length: 18, angle: 0 },
+      { length: 22, angle: -20 },
+      { length: 25, angle: -40 },
+      { length: 21, angle: -58 },
     ].map(({ length, angle }) => this.createFeatherShape(length, angle));
 
-    return this.add.container(0, 0, feathers);
+    // A soft additive glow behind the fan -- without it, no amount of
+    // gilding on the feathers themselves reads as "radiant"; this is what
+    // actually separates an angel's wing from a plain bird's.
+    const halo = this.add.circle(6, 0, 17, 0xfff2c4, 0.32).setBlendMode(Phaser.BlendModes.ADD);
+
+    return this.add.container(0, 0, [halo, ...feathers]);
   }
 
   // A pair of wings facing the same direction, layered with a small offset,
@@ -2169,19 +2194,23 @@ export default class GameScene extends Phaser.Scene {
     }
 
     const speed = 3;
+    // Arrow-key movement only -- halved per user feedback that keyboard
+    // movement felt too fast. The joystick's own speed (below, still `speed
+    // * JOYSTICK_SENSITIVITY`) is untouched since that wasn't the complaint.
+    const keyboardSpeed = speed * 0.5;
     let dx = 0;
     let dy = 0;
 
     if (this.cursors.left.isDown) {
-      dx = -speed;
+      dx = -keyboardSpeed;
     } else if (this.cursors.right.isDown) {
-      dx = speed;
+      dx = keyboardSpeed;
     }
 
     if (this.cursors.up.isDown) {
-      dy = -speed;
+      dy = -keyboardSpeed;
     } else if (this.cursors.down.isDown) {
-      dy = speed;
+      dy = keyboardSpeed;
     }
 
     if (dx === 0 && dy === 0 && (this.joystickVector.x !== 0 || this.joystickVector.y !== 0)) {
