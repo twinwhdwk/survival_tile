@@ -891,15 +891,18 @@ export default class GameScene extends Phaser.Scene {
   // duration only needs to roughly track SHIELD_GRACE_MS so the glow fades
   // out around when the protection actually lapses.
   playShieldGlow(tile) {
-    this.sparkEmitter.setTint(SHIELD_COLOR);
-    this.sparkEmitter.explode(8, tile.baseX, tile.baseY);
-    this.time.delayedCall(SHIELD_GRACE_MS * 0.4, () => {
-      this.sparkEmitter.setTint(SHIELD_COLOR);
-      this.sparkEmitter.explode(4, tile.baseX, tile.baseY);
-    });
-    this.time.delayedCall(SHIELD_GRACE_MS * 0.75, () => {
-      this.sparkEmitter.setTint(SHIELD_COLOR);
-      this.sparkEmitter.explode(4, tile.baseX, tile.baseY);
+    // Bigger, more frequent bursts than before (was 8/4/4 at 3 fixed
+    // points) -- spread across the now-longer SHIELD_GRACE_MS window so a
+    // longer-lasting shield still reads as continuously twinkling rather
+    // than front-loaded and quiet for the second half.
+    const burstSchedule = [
+      [0, 14], [0.25, 7], [0.5, 10], [0.75, 7], [0.92, 12],
+    ];
+    burstSchedule.forEach(([atFraction, quantity]) => {
+      this.time.delayedCall(SHIELD_GRACE_MS * atFraction, () => {
+        this.sparkEmitter.setTint(SHIELD_COLOR);
+        this.sparkEmitter.explode(quantity, tile.baseX, tile.baseY);
+      });
     });
 
     const auroraTones = [
@@ -915,10 +918,13 @@ export default class GameScene extends Phaser.Scene {
       duration: SHIELD_GRACE_MS,
       ease: 'Linear',
       onUpdate: (tween) => {
-        // Cycles through the 3 tones twice across the whole window (4
-        // half-segments) rather than fading straight from one color to
-        // another once -- onComplete below settles it back to neutral.
-        const cyclePos = (tween.getValue() / 100) * 4;
+        // Cycles through the 3 tones 3 times across the whole window (6
+        // half-segments, up from the original 4/twice) -- SHIELD_GRACE_MS
+        // grew from 3s to 5s, and without more segments the same two full
+        // cycles would just stretch out slower instead of keeping the
+        // lively "twinkle" pace. onComplete below settles it back to
+        // neutral once the window ends.
+        const cyclePos = (tween.getValue() / 100) * 6;
         const segment = Math.floor(cyclePos) % auroraTones.length;
         const t = cyclePos - Math.floor(cyclePos);
         const from = auroraTones[segment];
@@ -1457,8 +1463,23 @@ export default class GameScene extends Phaser.Scene {
       // getTilesWithinHexRadius()) so the whole area lights up as a ripple
       // rather than every tile popping in the same frame.
       shieldActivated: ({ row, col }) => {
-        playClick();
+        // A warmer, more rewarding chime than a flat click -- same one
+        // ghost revival already uses, fitting for another "good news"
+        // moment rather than a plain UI-tap acknowledgement.
+        playRevive();
         vibrateTap();
+        const { x: centerX, y: centerY } = hexToPixel(row, col);
+        // One big flash + ring right at the stepped-on tile so the whole
+        // activation reads as a single, unmistakable "boom" moment, with
+        // the per-tile aurora glow below carrying the effect outward from
+        // there rather than being the only cue.
+        this.cameras.main.flash(220, 255, 215, 120);
+        this.spawnImpactRing(centerX, centerY, {
+          color: SHIELD_COLOR, startRadius: 6, endScale: 6, duration: 500, strokeWidth: 5,
+        });
+        this.spawnImpactRing(centerX, centerY, {
+          color: 0xfff6c8, startRadius: 4, endScale: 4.5, duration: 380, strokeWidth: 3,
+        });
         getTilesWithinHexRadius(row, col, SHIELD_RADIUS).forEach(({ row: tRow, col: tCol }, i) => {
           const tile = this.tileSprites[`${tRow}_${tCol}`];
           if (!tile) {
