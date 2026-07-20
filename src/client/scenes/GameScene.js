@@ -555,7 +555,20 @@ export default class GameScene extends Phaser.Scene {
         strokeThickness: 2,
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35);
 
-      const tipTexts = tips.map((tip) => this.add.text(centerX, 0, tip, {
+      // origin (0, 0) at a fixed left edge -- not (0.5, 0) centered on
+      // centerX -- for every tip, wrapped or not. A centered Text's width
+      // (and so its centering) comes from its own widest rendered line, so
+      // a short one-line tip and a tip that wraps to 2 lines end up as
+      // different-width boxes independently centered on the same point,
+      // landing their bullets at visibly different x positions -- and even
+      // within one wrapped tip, that same effect could misalign the
+      // wrapped continuation line's start against the first line's own
+      // (operator: "개행되면 그 윗줄 코멘트 시작점과 아랫줄 코멘트 시작이
+      // 위치가 같게 해"). Anchoring every tip to the exact same left edge
+      // makes every line -- across every tip, wrapped or not -- start at
+      // the identical x.
+      const tipLeftX = centerX - bodyWrapWidth / 2;
+      const tipTexts = tips.map((tip) => this.add.text(tipLeftX, 0, tip, {
         fontFamily: FONT_BODY,
         fontSize: '11px',
         color: COLORS.textPrimary,
@@ -564,7 +577,7 @@ export default class GameScene extends Phaser.Scene {
         wordWrap: { width: bodyWrapWidth },
         stroke: TEXT_STROKE,
         strokeThickness: 2,
-      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35));
+      }).setOrigin(0, 0).setScrollFactor(0).setDepth(35));
 
       const titleGap = 6;
       const tipsHeight = tipTexts.reduce((sum, t) => sum + t.height, 0) + tipGap * (tipTexts.length - 1);

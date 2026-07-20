@@ -16,8 +16,16 @@ export const FINAL_ROAM_STEP_MS = 15000;
 // 8 -- the map is only MAP_ROWS=7 tall, so an 8-tall window couldn't move
 // vertically at all; 6 leaves exactly 1 row of slack to roam within.
 export const FINAL_ROAM_WINDOW_SIZE = 6;
-export const START_COUNTDOWN_MS = 10000; // nobody (bots included) can move until this long into the round, so the client's pre-game countdown is a real freeze, not just cosmetic
-export const BOUNDARY_SHRINK_GRACE_MS = 20000; // the boundary doesn't start closing in until this long into the round
+// Raised from an original 10s specifically to give the countdown's own
+// left/right tip cards (GameScene's createCountdownTips()) enough time to
+// actually be read (operator: "10초동안 규칙 읽기 어려우니 15초로해").
+// BOUNDARY_SHRINK_GRACE_MS below is bumped by the same +5s alongside this,
+// preserving the ~10s free-roam window that sits between the countdown
+// ending and the boundary actually starting to close (see its own comment)
+// -- letting the countdown grow without a matching bump there would have
+// quietly shrunk that free-roam window from ~10s down to ~5s instead.
+export const START_COUNTDOWN_MS = 15000; // nobody (bots included) can move until this long into the round, so the client's pre-game countdown is a real freeze, not just cosmetic
+export const BOUNDARY_SHRINK_GRACE_MS = 25000; // the boundary doesn't start closing in until this long into the round
 // The boundary insets by one ring (all 4 sides at once) every this-many ms
 // after the grace period, once the first BOUNDARY_SHRINK_EARLY_STEPS rings
 // (see BOUNDARY_SHRINK_INTERVAL_EARLY_MS) have already fired at the faster
@@ -32,15 +40,17 @@ export const BOUNDARY_SHRINK_GRACE_MS = 20000; // the boundary doesn't start clo
 // the row axis's one deferred squeeze, MAX_ROW_INSET_TOP/BOTTOM — see
 // Room.js's shrinkBoundary()): BOUNDARY_SHRINK_EARLY_STEPS (3) of them at
 // BOUNDARY_SHRINK_INTERVAL_EARLY_MS (6s) = 18s, the remaining 5 at this
-// interval (10s) = 50s, for 68s total — finishing at grace (20s) + 68s =
-// 88s elapsed, i.e. with 32s left, comfortably inside the 30s target. A
-// flat 15s schedule (the previous tuning) took well over 8*15s = 120s to
-// cover the same 8 steps — past the round's own duration on its own, so the
-// deferred row squeeze that makes the safe zone an actual minimum-size
-// rectangle would never have fired within a real round at all. These two
-// constants are map-size-sensitive: if MAP_ROWS/MAP_COLS (or
-// SAFE_ZONE_MIN_ROWS/COLS) change, re-run the step-count math above rather
-// than assuming the same total still lands inside the 30s target.
+// interval (10s) = 50s, for 68s total — finishing at grace (25s, raised
+// from 20s alongside START_COUNTDOWN_MS -- see its own comment) + 68s =
+// 93s elapsed, i.e. with 27s left, a few seconds short of the original 30s
+// target but still comfortably before the round actually ends. A flat 15s
+// schedule (the previous tuning) took well over 8*15s = 120s to cover the
+// same 8 steps — past the round's own duration on its own, so the deferred
+// row squeeze that makes the safe zone an actual minimum-size rectangle
+// would never have fired within a real round at all. These two constants
+// are map-size-sensitive: if MAP_ROWS/MAP_COLS (or SAFE_ZONE_MIN_ROWS/COLS)
+// change, re-run the step-count math above rather than assuming the same
+// total still lands close to the 30s target.
 export const BOUNDARY_SHRINK_INTERVAL_MS = 10000;
 // The first few rings close on this shorter cadence instead of the normal
 // BOUNDARY_SHRINK_INTERVAL_MS (see Room.js's boundaryShrinkStepInterval()) —
@@ -63,10 +73,11 @@ export const BOUNDARY_SHRINK_EARLY_STEPS = 3;
 // "early" -- only the per-ring wait during those rings changes. Needs 6
 // total rings (both column edges inset once per step) to reach the fixed
 // FINAL_ROAM_WINDOW_SIZE window, so at this pace the shrink phase alone
-// takes 3*8s + 3*10s = 54s; combined with BOUNDARY_SHRINK_GRACE_MS (20s,
-// shared with SURVIVAL) that leaves comfortably under half of
-// FINAL_ROUND_DURATION_MS (90s) for the roam phase after -- slow this down
-// much further and the roam phase starts getting squeezed out entirely.
+// takes 3*8s + 3*10s = 54s; combined with BOUNDARY_SHRINK_GRACE_MS (25s,
+// shared with SURVIVAL, raised from 20s alongside START_COUNTDOWN_MS) that
+// leaves ~11s of FINAL_ROUND_DURATION_MS (90s) for the roam phase after --
+// down from ~16s before that grace bump, so slowing this down any further
+// risks squeezing the roam phase out almost entirely.
 export const FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 8000;
 export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this window, not all at once
 // SURVIVAL rounds have no other scoring mechanic, so a teammate's score
