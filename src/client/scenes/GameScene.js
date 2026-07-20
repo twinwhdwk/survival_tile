@@ -451,6 +451,14 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 8,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(35);
 
+    // Every player is frozen and staring at the same big number anyway for
+    // the whole START_COUNTDOWN_MS window -- the only genuinely dead,
+    // guaranteed-idle moment in a round -- so it doubles as the one spot
+    // rules/item tips can be read without competing with anything the
+    // player actually needs to react to (operator: "화면 한가운데는 카운트
+    // 다운, 카운트 다운을 기준으로 왼쪽과 오른쪽을 분할해서 팁을 알려줘").
+    const countdownTips = this.createCountdownTips();
+
     const deadline = (this.roundStartTime || Date.now()) + START_COUNTDOWN_MS;
 
     const tick = () => {
@@ -470,6 +478,7 @@ export default class GameScene extends Phaser.Scene {
           ease: 'Cubic.easeOut',
           onComplete: () => {
             countdownText.destroy();
+            countdownTips.forEach((obj) => obj.destroy());
             this.countdownActive = false;
             this.setAvatarsFrozenTint(false);
             if (onDone) {
@@ -501,6 +510,81 @@ export default class GameScene extends Phaser.Scene {
     };
 
     tick();
+  }
+
+  // Two short reference cards flanking the big countdown number -- the
+  // countdown itself sits at WORLD_WIDTH/2 (see showStartCountdown), so
+  // leftX/rightX below are chosen to clear its own width (a 2-digit "10" at
+  // 72px comfortably fits within a ~160px band centered on it) without
+  // touching either the top HUD strip (timer/score/player-count, y up to
+  // ~44) or the bottom banner (near WORLD_HEIGHT). Plain Phaser Text/
+  // Graphics, not DOM -- unlike GameScene's joystick or LobbyScene's rules
+  // modal, this sits inside the game's own world-space board rather than
+  // needing to escape Phaser.Scale.FIT's letterboxing, so it uses the same
+  // GameObject-based panel language (drawRoundedRect) every other HUD
+  // element here already does, and gets torn down for free by Phaser's own
+  // scene shutdown along with everything else -- no manual cleanup wiring
+  // needed beyond the array this returns for showStartCountdown's own
+  // "시작!" transition.
+  createCountdownTips() {
+    const panelWidth = 224;
+    const centerY = 150;
+    const leftX = 122;
+    const rightX = WORLD_WIDTH - 122;
+    const bodyWrapWidth = panelWidth - 28;
+
+    const makeTipCard = (centerX, title, titleColor, body) => {
+      const bodyText = this.add.text(centerX, 0, body, {
+        fontFamily: FONT_BODY,
+        fontSize: '11px',
+        color: COLORS.textPrimary,
+        align: 'left',
+        lineSpacing: 5,
+        wordWrap: { width: bodyWrapWidth },
+        stroke: TEXT_STROKE,
+        strokeThickness: 2,
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35);
+
+      const titleText = this.add.text(centerX, 0, title, {
+        fontFamily: FONT_BODY,
+        fontSize: '13px',
+        fontStyle: 'bold',
+        color: titleColor,
+        stroke: TEXT_STROKE,
+        strokeThickness: 2,
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35);
+
+      const gap = 6;
+      const totalHeight = titleText.height + gap + bodyText.height;
+      const top = centerY - totalHeight / 2;
+      titleText.setY(top);
+      bodyText.setY(top + titleText.height + gap);
+
+      const panel = this.add.graphics().setScrollFactor(0).setDepth(34);
+      drawRoundedRect(panel, centerX, top + totalHeight / 2, panelWidth, totalHeight + 20);
+
+      return [panel, titleText, bodyText];
+    };
+
+    // Deliberately short, mostly one line per tip -- long enough to matter,
+    // short enough to reliably fit this card without wordWrap blowing its
+    // height past the top HUD strip or bottom banner (no browser available
+    // in this environment to visually confirm exact wrap points, so this
+    // errs on the side of brevity rather than fine-tuned pixel math).
+    return [
+      ...makeTipCard(
+        leftX,
+        '🔥 기본 규칙',
+        COLORS.textEmber,
+        '밟은 타일은 곧 무너져요!\n안전지대가 점점 좁아져요.\n유령이 되면 타일을 터치해\n부활 게이지를 채우세요.',
+      ),
+      ...makeTipCard(
+        rightX,
+        '✨ 아이템 & 팁',
+        COLORS.textEmber,
+        '🛡️ 방패: 5초 무적 + 즉시 복구\n👼 날개: 유령 즉시 부활\n💣 폭탄: 2초 후 폭발\n⚠️ 부활 직후 2초는 무적!',
+      ),
+    ];
   }
 
   // A visible confirmation that the countdown freeze is real and applies
