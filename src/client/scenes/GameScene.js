@@ -576,7 +576,15 @@ export default class GameScene extends Phaser.Scene {
         leftX,
         '🔥 기본 규칙',
         COLORS.textEmber,
-        '밟은 타일은 곧 무너져요!\n안전지대가 점점 좁아져요.\n유령이 되면 타일을 터치해\n부활 게이지를 채우세요.',
+        // A leading '• ' on each of the 3 actual tips, not a '\n' per
+        // visual line -- the 3rd tip is long enough that wordWrap breaks it
+        // across 2 lines on its own, and without a bullet marking where
+        // each tip *starts* that read as 4 separate short tips instead of 3
+        // (operator: "좌측화면에 3가지 글이 있는데 구분이 4개로 돼"). Left
+        // unbroken (no manual '\n' inside it) so wordWrap's own wrap point
+        // decides where the continuation line falls, and that continuation
+        // line simply has no bullet of its own.
+        '• 밟은 타일은 곧 무너져요!\n• 안전지대가 점점 좁아져요.\n• 유령이 되면 타일을 터치해 부활 게이지를 채우세요.',
       ),
       ...makeTipCard(
         rightX,
