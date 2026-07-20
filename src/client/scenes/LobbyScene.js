@@ -300,6 +300,12 @@ export default class LobbyScene extends Phaser.Scene {
       this.buttonNode.setVisible(false);
     }
 
+    // Unlike the button bar above, this is for *everyone* waiting here --
+    // admin and regular players alike arrive with no in-game explanation of
+    // the rules or the three items until they're already mid-round (operator:
+    // "대기 시간동안 각 아이템과 규칙 설명하는 내용 추가해줘").
+    this.createRulesGuide();
+
     this.handleLobbyUpdate = (payload) => this.renderLobby(payload);
     this.handleGameStarting = (payload) => {
       this.cleanupSocketHandlers();
@@ -321,7 +327,16 @@ export default class LobbyScene extends Phaser.Scene {
     this.socket.on('gameStarting', this.handleGameStarting);
     this.socket.on('dashboardStarting', this.handleDashboardStarting);
 
-    this.events.once('shutdown', () => this.cleanupSocketHandlers());
+    this.events.once('shutdown', () => {
+      this.cleanupSocketHandlers();
+      // Plain document.body-level DOM, not tied to this scene's own
+      // GameObject/add.dom() lifecycle -- see createRulesGuide()'s own
+      // comment for why -- so nothing else would ever remove these once
+      // the tournament actually starts and this scene shuts down.
+      if (this.rulesGuideCleanup) {
+        this.rulesGuideCleanup();
+      }
+    });
 
     this.renderLobby(data);
   }
@@ -330,6 +345,82 @@ export default class LobbyScene extends Phaser.Scene {
     this.socket.off('lobbyUpdate', this.handleLobbyUpdate);
     this.socket.off('gameStarting', this.handleGameStarting);
     this.socket.off('dashboardStarting', this.handleDashboardStarting);
+  }
+
+  // Plain DOM appended straight to document.body, deliberately not
+  // this.add.dom() -- same reasoning as GameScene's own joystick (see its
+  // createJoystick() comment): Phaser.Scale.FIT can letterbox the canvas,
+  // and any ancestor picking up a CSS transform for that scaling turns a
+  // position:fixed *descendant* fixed to that ancestor instead of the real
+  // viewport. Appending directly to document.body sidesteps that, so this
+  // modal reliably covers the whole real screen (not just the tiny
+  // WORLD_WIDTH x WORLD_HEIGHT board canvas, which for this map is only
+  // a few hundred px tall) on any device/aspect ratio.
+  createRulesGuide() {
+    const helpButton = document.createElement('button');
+    helpButton.type = 'button';
+    helpButton.textContent = '📖 게임 방법';
+    helpButton.style.cssText = `position:fixed;top:8px;right:8px;z-index:600;padding:6px 10px;font-size:11px;border-radius:7px;border:1px solid ${BUTTON.secondaryBorder};background:${BUTTON.secondaryBg};color:${BUTTON.secondaryText};cursor:pointer;font-family:${FONT_BODY};`;
+    document.body.appendChild(helpButton);
+    applyButtonFx(helpButton);
+
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(8,4,2,0.68);z-index:700;display:none;';
+    document.body.appendChild(backdrop);
+
+    // min(92vw, 420px) rather than a flat width -- this modal is plain
+    // viewport-relative DOM (see above), so it needs its own responsive
+    // cap instead of inheriting anything from the game canvas's own
+    // WORLD_WIDTH.
+    const panel = document.createElement('div');
+    panel.style.cssText = `position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,420px);max-height:82vh;overflow-y:auto;background:#1c130dee;border:2px solid ${BUTTON.secondaryBorder};border-radius:14px;padding:18px 20px;box-shadow:0 8px 28px rgba(0,0,0,0.5);z-index:701;display:none;font-family:${FONT_BODY};color:${COLORS.textPrimary};`;
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="font-size:17px;font-weight:700;color:${COLORS.textGold};">📖 게임 방법</div>
+        <button id="rules-close-button" type="button" style="background:none;border:none;color:${COLORS.textPrimary};font-size:20px;cursor:pointer;line-height:1;padding:2px 8px;">✕</button>
+      </div>
+      <div style="font-size:13px;line-height:1.7;">
+        <div style="margin-bottom:14px;">
+          <div style="color:${COLORS.textEmber};font-weight:700;margin-bottom:5px;">🔥 기본 규칙</div>
+          밟은 타일은 곧 무너져요. 무너지기 전에 계속 다른 타일로 움직이세요!<br>
+          시간이 지나면 안전지대가 점점 좁아지고, 경계 밖 타일은 다시 되돌아오지 않아요.<br>
+          끝까지 살아남으면 승리!
+        </div>
+        <div style="margin-bottom:14px;">
+          <div style="color:${COLORS.textEmber};font-weight:700;margin-bottom:5px;">💫 탈락과 부활</div>
+          탈락하면 유령이 되어요 — 무너진 타일을 계속 터치하면 팀 부활 게이지가 채워집니다.<br>
+          게이지가 가득 차면 동료 한 명이 무작위로 부활해요.<br>
+          <b style="color:${COLORS.textGood};">⚠️ 부활한 직후 2초간은 무적!</b> 그 자리는 타일이 무너지지 않고, 폭탄도 무효화돼요.<br>
+          <span style="color:${COLORS.textMuted};">(개인전에는 부활이 없어요)</span>
+        </div>
+        <div>
+          <div style="color:${COLORS.textEmber};font-weight:700;margin-bottom:5px;">✨ 아이템</div>
+          🛡️ <b>황금 방패</b>: 밟으면 주변 7칸이 5초간 무너지지 않고, 이미 무너진 타일도 즉시 복구돼요. 폭탄도 무효화!<br>
+          👼 <b>천사의 날개</b>: 밟으면 유령 한 명이 즉시 부활해요. (팀전에만 등장)<br>
+          💣 <b>폭탄</b>: 밟으면 2초 후 폭발! 주변 타일이 무너지고, 폭발 반경 안에 있으면 탈락해요.
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    const open = () => {
+      backdrop.style.display = 'block';
+      panel.style.display = 'block';
+    };
+    const close = () => {
+      backdrop.style.display = 'none';
+      panel.style.display = 'none';
+    };
+    helpButton.addEventListener('click', open);
+    backdrop.addEventListener('click', close);
+    panel.querySelector('#rules-close-button').addEventListener('click', close);
+    applyButtonFx(panel.querySelector('#rules-close-button'));
+
+    this.rulesGuideCleanup = () => {
+      helpButton.remove();
+      backdrop.remove();
+      panel.remove();
+    };
   }
 
   renderLobby({ players, phase }) {
