@@ -533,18 +533,19 @@ export default class GameScene extends Phaser.Scene {
     const rightX = WORLD_WIDTH - 122;
     const bodyWrapWidth = panelWidth - 28;
 
-    const makeTipCard = (centerX, title, titleColor, body) => {
-      const bodyText = this.add.text(centerX, 0, body, {
-        fontFamily: FONT_BODY,
-        fontSize: '11px',
-        color: COLORS.textPrimary,
-        align: 'left',
-        lineSpacing: 5,
-        wordWrap: { width: bodyWrapWidth },
-        stroke: TEXT_STROKE,
-        strokeThickness: 2,
-      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35);
+    // Each tip is its own Text object (not one Text with '\n'-joined tips)
+    // specifically so the gap *within* a tip's own wordWrap-continuation
+    // lines (tightLineSpacing) can be tighter than the gap *between*
+    // separate tips (tipGap) -- a single Text's lineSpacing applies
+    // uniformly to every line break, wrapped or not, so same-item wrapped
+    // lines and different-item lines used to sit exactly as far apart as
+    // each other, undercutting the '• ' bullets' own job of showing where
+    // one tip ends and the next begins (operator: "같은 항목이면 줄간격을
+    // 좀 줄여야지").
+    const tightLineSpacing = 1;
+    const tipGap = 9;
 
+    const makeTipCard = (centerX, title, titleColor, tips) => {
       const titleText = this.add.text(centerX, 0, title, {
         fontFamily: FONT_BODY,
         fontSize: '13px',
@@ -554,16 +555,32 @@ export default class GameScene extends Phaser.Scene {
         strokeThickness: 2,
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35);
 
-      const gap = 6;
-      const totalHeight = titleText.height + gap + bodyText.height;
+      const tipTexts = tips.map((tip) => this.add.text(centerX, 0, tip, {
+        fontFamily: FONT_BODY,
+        fontSize: '11px',
+        color: COLORS.textPrimary,
+        align: 'left',
+        lineSpacing: tightLineSpacing,
+        wordWrap: { width: bodyWrapWidth },
+        stroke: TEXT_STROKE,
+        strokeThickness: 2,
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(35));
+
+      const titleGap = 6;
+      const tipsHeight = tipTexts.reduce((sum, t) => sum + t.height, 0) + tipGap * (tipTexts.length - 1);
+      const totalHeight = titleText.height + titleGap + tipsHeight;
       const top = centerY - totalHeight / 2;
       titleText.setY(top);
-      bodyText.setY(top + titleText.height + gap);
+      let cursorY = top + titleText.height + titleGap;
+      tipTexts.forEach((t) => {
+        t.setY(cursorY);
+        cursorY += t.height + tipGap;
+      });
 
       const panel = this.add.graphics().setScrollFactor(0).setDepth(34);
       drawRoundedRect(panel, centerX, top + totalHeight / 2, panelWidth, totalHeight + 20);
 
-      return [panel, titleText, bodyText];
+      return [panel, titleText, ...tipTexts];
     };
 
     // Deliberately short, mostly one line per tip -- long enough to matter,
@@ -576,21 +593,22 @@ export default class GameScene extends Phaser.Scene {
         leftX,
         '🔥 기본 규칙',
         COLORS.textEmber,
-        // A leading '• ' on each of the 3 actual tips, not a '\n' per
-        // visual line -- the 3rd tip is long enough that wordWrap breaks it
-        // across 2 lines on its own, and without a bullet marking where
-        // each tip *starts* that read as 4 separate short tips instead of 3
-        // (operator: "좌측화면에 3가지 글이 있는데 구분이 4개로 돼"). Left
-        // unbroken (no manual '\n' inside it) so wordWrap's own wrap point
-        // decides where the continuation line falls, and that continuation
-        // line simply has no bullet of its own.
-        '• 밟은 타일은 곧 무너져요!\n• 안전지대가 점점 좁아져요.\n• 유령이 되면 타일을 터치해 부활 게이지를 채우세요.',
+        [
+          '• 밟은 타일은 곧 무너져요!',
+          '• 안전지대가 점점 좁아져요.',
+          '• 유령이 되면 타일을 터치해 부활 게이지를 채우세요.',
+        ],
       ),
       ...makeTipCard(
         rightX,
         '✨ 아이템 & 팁',
         COLORS.textEmber,
-        '🛡️ 방패: 5초 무적 + 즉시 복구\n👼 날개: 유령 즉시 부활\n💣 폭탄: 2초 후 폭발\n⚠️ 부활 직후 2초는 무적!',
+        [
+          '🛡️ 방패: 5초 무적 + 즉시 복구',
+          '👼 날개: 유령 즉시 부활',
+          '💣 폭탄: 2초 후 폭발',
+          '⚠️ 부활 직후 2초는 무적!',
+        ],
       ),
     ];
   }
