@@ -1299,7 +1299,16 @@ export default class Room {
       this.emit('lastStandActivated', { active: true });
     }
 
-    const allEliminated = Object.values(this.players).every((p) => p.eliminated);
+    // Excludes SOLO below (see the big comment just under allHumansGone) --
+    // a 개인전 room tested solo with no bots added trivially satisfies this
+    // the instant the one and only player dies (1 player, 1 eliminated),
+    // which used to end the round immediately even with plenty of time left
+    // on the clock (operator: "개인전 하는데, 죽으니까 아직 시간이 남았는데
+    // 도 대기실로 튕김"). The earlier SOLO fix below only covered "all real
+    // humans gone but bots remain" -- this covers the equally real "no bots
+    // at all, so eliminated is trivially universal" case the same way.
+    const allEliminated = this.gameMode !== 'SOLO'
+      && Object.values(this.players).every((p) => p.eliminated);
     // TEAM mode ends the room once every real human has *disconnected* --
     // bots only exist for admin testing there, so there's no one left to
     // actually watch the room continue in that case. This checks
@@ -1313,7 +1322,9 @@ export default class Room {
       && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected);
 
     // 개인전 deliberately does *not* end the room the instant every real
-    // human is gone (only bots left) or only one player is left alive --
+    // human is gone (only bots left), literally everyone including bots is
+    // gone (a solo test with no bots at all), or only one player is left
+    // alive --
     // an earlier version ended on both of those triggers (nothing left to
     // threaten/watch, so why keep ticking), but that cut a solo tester's own
     // spectating short: an eliminated SOLO player already just becomes a
