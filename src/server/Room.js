@@ -37,7 +37,7 @@ import {
   BOMB_TILES_PER_PLAYERS,
   BOMB_FUSE_MS,
   BOMB_BLAST_RADIUS,
-  SHIELD_TILES_PER_PLAYERS,
+  SHIELD_TILES_PER_ZONE_TILES,
   SHIELD_GRACE_MS,
   SHIELD_RADIUS,
   ANGEL_TILE_INTERVAL_MS,
@@ -413,9 +413,10 @@ export default class Room {
       }
     }
 
-    // Same generation rule as bomb tiles (see SHIELD_TILES_PER_PLAYERS'
-    // own comment) -- maintainShieldTiles() (called every checkRoundState
-    // tick, same as maintainBombTiles()) keeps this topped up the same way.
+    // Topped-up-every-tick the same way bomb tiles are (see
+    // maintainShieldTiles(), called every checkRoundState tick same as
+    // maintainBombTiles()) -- see SHIELD_TILES_PER_ZONE_TILES' own comment
+    // for why the target count itself is zone-size-scaled, not player-scaled.
     const shieldTileCount = this.shieldTileTarget();
     for (let i = 0; i < shieldTileCount; i++) {
       const spot = this.pickShieldTileSpot(initialZoneTiles);
@@ -701,11 +702,12 @@ export default class Room {
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  // Same generation rule as bombTileTarget() (see SHIELD_TILES_PER_PLAYERS'
-  // own comment) -- scales with currently-alive players, not the room's
-  // original headcount.
+  // Unlike bombTileTarget() (alive-player scaled), this scales with the
+  // safe zone's own current tile count -- see SHIELD_TILES_PER_ZONE_TILES'
+  // own comment for why alive-player scaling read as "too many shields"
+  // once the boundary shrank well past the player count shrinking.
   shieldTileTarget() {
-    return Math.max(1, Math.ceil(this.getAliveCount() / SHIELD_TILES_PER_PLAYERS));
+    return Math.max(1, Math.ceil(this.getSafeZoneTiles().length / SHIELD_TILES_PER_ZONE_TILES));
   }
 
   // Mirrors pickBombTileSpot() exactly, just checking the other two hazard

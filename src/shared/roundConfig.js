@@ -227,17 +227,26 @@ export const BOMB_FUSE_MS = 2000;
 // "3x3", which doesn't correspond to true adjacency on this hex map.
 export const BOMB_BLAST_RADIUS = 1;
 
-// Shield tiles: the same generation rule as bomb tiles (environmental
-// hazard/boon layered on top of the normal tile map in any mode, not gated
-// to SURVIVAL/FINAL) -- count scales with how many players are currently
-// alive, same ~1-per-N-players/topped-up-every-tick pattern as
-// BOMB_TILES_PER_PLAYERS (see Room.shieldTileTarget()/maintainShieldTiles()).
+// Shield tiles: an environmental boon layered on top of the normal tile map
+// in any mode (not gated to SURVIVAL/FINAL), topped-up-every-tick the same
+// way bomb tiles are (see Room.shieldTileTarget()/maintainShieldTiles()) --
+// but scaled by the *safe zone's own current tile count* rather than
+// alive-player count. Player-count scaling used to leave the shield count
+// roughly flat across a whole round (eliminations trickle in slowly), while
+// the shrinking boundary shrinks the zone itself far faster -- so the same
+// handful of shields ended up crammed into a much smaller space late in a
+// round, reading as "way too many shields" even though the actual count
+// never grew (operator feedback: "맵이 좁아졌는데 방패가 너무 많이
+// 나오는것 같아"). Scaling by zone size instead keeps density roughly
+// constant as the boundary closes: ~1 per 40 zone tiles means ~4 across the
+// full ~126-tile map, shrinking down to the floor of 1 once the zone
+// bottoms out at Room.js's 5x5 (25-tile) minimum.
 // Stepping on one shields every tile within SHIELD_RADIUS rings of it
 // (itself included) from collapsing for SHIELD_GRACE_MS -- see
 // Room.armShieldTile(), which reuses the same regenGraceUntil map every
 // other "this tile is briefly immune" case already writes into (auto-regen
 // burst, ghost respawn, reconnect immunity).
-export const SHIELD_TILES_PER_PLAYERS = 6;
+export const SHIELD_TILES_PER_ZONE_TILES = 40;
 export const SHIELD_GRACE_MS = 5000;
 // 1 ring = the shield tile itself plus its 6 hex neighbors, 7 tiles total --
 // see BOMB_BLAST_RADIUS's own comment on why this isn't a square "3x3".
