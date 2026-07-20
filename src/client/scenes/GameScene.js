@@ -220,6 +220,22 @@ export default class GameScene extends Phaser.Scene {
         this.handleGhostScreenTap(pointer);
       }
     });
+
+    // PC-only equivalent of the touch/click gesture above — same throttle,
+    // same server call, same visual/haptic payoff, just triggered by a key
+    // instead of a pointer so a mouse-and-keyboard player isn't stuck
+    // click-spamming a small screen area to keep up with someone tapping a
+    // touchscreen with multiple fingers. No pointer position to draw the
+    // effect at, so it lands on the ghost's own avatar instead — reads as
+    // "you" doing something rather than an arbitrary screen point. Same
+    // InputPlugin-lifecycle reasoning as pointerdown above applies to
+    // keyboard listeners too, so this needs no manual shutdown cleanup.
+    // Prevent the browser's own default SPACE behavior (page scroll,
+    // shifting focus to whatever element last had it) from firing
+    // alongside the ghost-tap handler below.
+    this.input.keyboard.addCapture('SPACE');
+    this.input.keyboard.on('keydown-SPACE', () => this.handleGhostScreenTap(null));
+
     this.applySnapshot(data);
   }
 
@@ -2132,15 +2148,17 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // Ghost mode's whole input surface, registered once in create() as a
-  // scene-level 'pointerdown'/'pointermove' listener (not a per-tile one —
-  // there's no longer a specific tile to aim for) — a ghost just keeps
-  // touching/dragging across the screen and every point they touch fills
-  // the shared revival gauge a little, with the server itself picking which
-  // collapsed tile actually comes back (see Room.reviveTile()'s auto-pick
-  // branch). Throttled to GHOST_TAP_EFFECT_INTERVAL_MS so a held drag
+  // Ghost mode's whole input surface — a scene-level 'pointerdown'/
+  // 'pointermove' listener (not a per-tile one — there's no longer a
+  // specific tile to aim for) plus keydown-SPACE for PC players (both
+  // registered in create()) — a ghost just keeps touching/dragging across
+  // the screen (or tapping space) and every input fills the shared revival
+  // gauge a little, with the server itself picking which collapsed tile
+  // actually comes back (see Room.reviveTile()'s auto-pick branch).
+  // Throttled to GHOST_TAP_EFFECT_INTERVAL_MS so a held drag or a held key
   // doesn't spawn a golden burst (or a socket emit) on every single
-  // rendered pointermove sample.
+  // rendered pointermove/key-repeat sample. `pointer` is null when called
+  // from the keyboard path.
   handleGhostScreenTap(pointer) {
     // 개인전 has no ghost tile-revival mechanic at all -- an eliminated
     // solo player just spectates the rest of their room, so touching the
@@ -2161,8 +2179,13 @@ export default class GameScene extends Phaser.Scene {
     // whether to react at all.
     playClick();
     vibrateTap();
-    this.spawnImpactRing(pointer.worldX, pointer.worldY, { color: 0xffd700, endScale: 3, duration: 300 });
-    this.ghostTapEmitter.explode(8, pointer.worldX, pointer.worldY);
+    // A keyboard trigger (see the keydown-SPACE listener in create()) has
+    // no pointer to draw the effect at — falls back to the ghost's own
+    // avatar position instead of an arbitrary point.
+    const x = pointer ? pointer.worldX : this.player.x;
+    const y = pointer ? pointer.worldY : this.player.y;
+    this.spawnImpactRing(x, y, { color: 0xffd700, endScale: 3, duration: 300 });
+    this.ghostTapEmitter.explode(8, x, y);
 
     this.socket.emit('reviveTile', {});
   }
