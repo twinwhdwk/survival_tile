@@ -37,7 +37,8 @@ import {
   BOMB_TILES_PER_PLAYERS,
   BOMB_FUSE_MS,
   BOMB_BLAST_RADIUS,
-  SHIELD_TILES_PER_ZONE_TILES,
+  SHIELD_SPAWN_INTERVAL_MIN_MS,
+  SHIELD_SPAWN_INTERVAL_MAX_MS,
   SHIELD_GRACE_MS,
   SHIELD_RADIUS,
   ANGEL_TILE_INTERVAL_MS,
@@ -413,17 +414,18 @@ export default class Room {
       }
     }
 
-    // Topped-up-every-tick the same way bomb tiles are (see
-    // maintainShieldTiles(), called every checkRoundState tick same as
-    // maintainBombTiles()) -- see SHIELD_TILES_PER_ZONE_TILES' own comment
-    // for why the target count itself is zone-size-scaled, not player-scaled.
-    const shieldTileCount = this.shieldTileTarget();
-    for (let i = 0; i < shieldTileCount; i++) {
-      const spot = this.pickShieldTileSpot(initialZoneTiles);
-      if (spot) {
-        this.shieldTiles.push(spot);
-      }
+    // Exactly one shield tile ever exists at a time -- see
+    // SHIELD_SPAWN_INTERVAL_MAX_MS' own comment for why (an earlier
+    // several-at-once, zone-size-scaled count read as "way too many
+    // shields dropped on me at once"). Placed immediately at construction,
+    // same as bomb tiles above; maintainShieldTiles() handles every
+    // respawn after this one the same timer-gated way armShieldTile()'s
+    // own comment describes.
+    const initialShieldSpot = this.pickShieldTileSpot(initialZoneTiles);
+    if (initialShieldSpot) {
+      this.shieldTiles.push(initialShieldSpot);
     }
+    this.shieldNextSpawnAt = Date.now() + this.shieldSpawnIntervalMs();
 
     // TEAM-only (see ANGEL_TILE_INTERVAL_MS's own comment) -- a SOLO room
     // simply never reaches its spawn time, so maintainAngelTile() never
@@ -702,12 +704,21 @@ export default class Room {
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  // Unlike bombTileTarget() (alive-player scaled), this scales with the
-  // safe zone's own current tile count -- see SHIELD_TILES_PER_ZONE_TILES'
-  // own comment for why alive-player scaling read as "too many shields"
-  // once the boundary shrank well past the player count shrinking.
-  shieldTileTarget() {
-    return Math.max(1, Math.ceil(this.getSafeZoneTiles().length / SHIELD_TILES_PER_ZONE_TILES));
+  // How long to wait before a new shield tile appears, once there isn't
+  // currently one -- see SHIELD_SPAWN_INTERVAL_MAX_MS' own comment for why
+  // this scales with the safe zone's current size (a big zone can wait
+  // longer between shields; a small one needs them replaced quickly) rather
+  // than staying fixed or scaling with player count the way bomb tiles do.
+  // Linearly interpolated between the two, clamped at both ends so a zone
+  // bigger than the full board or smaller than the 5x5 minimum (neither
+  // should happen, but Math.min/max costs nothing) can't push the result
+  // outside [SHIELD_SPAWN_INTERVAL_MIN_MS, SHIELD_SPAWN_INTERVAL_MAX_MS].
+  shieldSpawnIntervalMs() {
+    const zoneTileCount = this.getSafeZoneTiles().length;
+    const maxZoneTiles = MAP_ROWS * MAP_COLS;
+    const minZoneTiles = SAFE_ZONE_MIN_ROWS * SAFE_ZONE_MIN_COLS;
+    const ratio = Math.max(0, Math.min(1, (zoneTileCount - minZoneTiles) / (maxZoneTiles - minZoneTiles)));
+    return SHIELD_SPAWN_INTERVAL_MIN_MS + ratio * (SHIELD_SPAWN_INTERVAL_MAX_MS - SHIELD_SPAWN_INTERVAL_MIN_MS);
   }
 
   // Mirrors pickBombTileSpot() exactly, just checking the other two hazard
@@ -1009,17 +1020,15 @@ export default class Room {
   // *new* collapse from starting, so setting it after the landing tile's
   // own collapse had already been triggered would let that one tile pop on
   // its normal timer regardless, directly contradicting "this tile doesn't
-  // break for 3 seconds." Swapped out for a fresh spot immediately, same
-  // reasoning as armBombTile()'s own comment on why the live count can't
-  // dip for the whole grace window.
+  // break for 3 seconds." Unlike armBombTile(), deliberately does *not*
+  // swap in a fresh spot immediately -- only one shield tile ever exists at
+  // a time (see SHIELD_SPAWN_INTERVAL_MAX_MS' own comment), so this just
+  // arms maintainShieldTiles()'s own timer for the next one instead.
   armShieldTile(index) {
     const shield = this.shieldTiles[index];
     this.shieldTiles.splice(index, 1);
+    this.shieldNextSpawnAt = Date.now() + this.shieldSpawnIntervalMs();
 
-    const spot = this.pickShieldTileSpot();
-    if (spot) {
-      this.shieldTiles.push(spot);
-    }
     this.emit('shieldTilesUpdate', { shieldTiles: this.shieldTiles });
     this.emit('shieldActivated', { row: shield.row, col: shield.col });
 
@@ -1080,27 +1089,25 @@ export default class Room {
     });
   }
 
-  // Mirrors maintainBombTiles() exactly -- prunes any shield tile the
-  // shrinking boundary has swept out from under, then tops the count back
-  // up to shieldTileTarget().
+  // Prunes any shield tile the shrinking boundary has swept out from under
+  // (same as maintainBombTiles()), then -- unlike bomb tiles, which top
+  // back up immediately -- only places a replacement once shieldNextSpawnAt
+  // has actually passed. A boundary sweep re-arms that timer exactly the
+  // same way armShieldTile()'s own removal does, so losing a shield to the
+  // boundary can't bypass the spawn cadence and place a new one instantly.
   maintainShieldTiles() {
     const before = this.shieldTiles.length;
     this.shieldTiles = this.shieldTiles.filter(
       ({ row, col }) => this.tileMap[row][col] === TILE_STATE.SOLID && this.isSafeTile(row, col),
     );
     let changed = this.shieldTiles.length !== before;
+    if (changed) {
+      this.shieldNextSpawnAt = Date.now() + this.shieldSpawnIntervalMs();
+    }
 
-    const target = this.shieldTileTarget();
-    if (this.shieldTiles.length > target) {
-      this.shieldTiles.length = target;
-      changed = true;
-    } else if (this.shieldTiles.length < target) {
-      const zoneTiles = this.getSafeZoneTiles();
-      while (this.shieldTiles.length < target) {
-        const spot = this.pickShieldTileSpot(zoneTiles);
-        if (!spot) {
-          break;
-        }
+    if (this.shieldTiles.length === 0 && Date.now() >= this.shieldNextSpawnAt) {
+      const spot = this.pickShieldTileSpot();
+      if (spot) {
         this.shieldTiles.push(spot);
         changed = true;
       }

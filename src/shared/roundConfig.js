@@ -239,25 +239,31 @@ export const BOMB_FUSE_MS = 2000;
 export const BOMB_BLAST_RADIUS = 1;
 
 // Shield tiles: an environmental boon layered on top of the normal tile map
-// in any mode (not gated to SURVIVAL/FINAL), topped-up-every-tick the same
-// way bomb tiles are (see Room.shieldTileTarget()/maintainShieldTiles()) --
-// but scaled by the *safe zone's own current tile count* rather than
-// alive-player count. Player-count scaling used to leave the shield count
-// roughly flat across a whole round (eliminations trickle in slowly), while
-// the shrinking boundary shrinks the zone itself far faster -- so the same
-// handful of shields ended up crammed into a much smaller space late in a
-// round, reading as "way too many shields" even though the actual count
-// never grew (operator feedback: "맵이 좁아졌는데 방패가 너무 많이
-// 나오는것 같아"). Scaling by zone size instead keeps density roughly
-// constant as the boundary closes: ~1 per 40 zone tiles means ~4 across the
-// full ~126-tile map, shrinking down to the floor of 1 once the zone
-// bottoms out at Room.js's 5x5 (25-tile) minimum.
-// Stepping on one shields every tile within SHIELD_RADIUS rings of it
-// (itself included) from collapsing for SHIELD_GRACE_MS -- see
+// in any mode (not gated to SURVIVAL/FINAL). Went through two earlier
+// designs, both rejected by operator feedback: a fixed count scaled by
+// alive-player count read as "way too many shields" once the boundary
+// shrank well past the player count shrinking (the same handful of shields
+// crammed into a much smaller space), and a follow-up fix that scaled the
+// count by the safe zone's own tile count instead still started a round
+// with several shields all present at once ("초반에 4개는 너무 많다").
+// Now there is only ever *one* shield tile on the map at a time (see
+// Room.armShieldTile()/maintainShieldTiles()) -- once it's used (or swept
+// away by the shrinking boundary), the next one appears after
+// shieldSpawnIntervalMs(), not instantly. That interval itself still scales
+// with the safe zone's current size, same reasoning as before: a big zone
+// can comfortably wait longer between shields, while a small one should
+// hand out replacements quickly. SHIELD_SPAWN_INTERVAL_MIN_MS is a hard
+// floor regardless of how small the zone gets ("최소 3초에 1개는
+// 나왔으면 함" -- never rarer than one every 3 seconds), and
+// SHIELD_SPAWN_INTERVAL_MAX_MS is the slow end, reached once the zone is
+// still at (or near) its full ~126-tile size.
+export const SHIELD_SPAWN_INTERVAL_MIN_MS = 3000;
+export const SHIELD_SPAWN_INTERVAL_MAX_MS = 8000;
+// Stepping on the shield tile shields every tile within SHIELD_RADIUS rings
+// of it (itself included) from collapsing for SHIELD_GRACE_MS -- see
 // Room.armShieldTile(), which reuses the same regenGraceUntil map every
 // other "this tile is briefly immune" case already writes into (auto-regen
 // burst, ghost respawn, reconnect immunity).
-export const SHIELD_TILES_PER_ZONE_TILES = 40;
 export const SHIELD_GRACE_MS = 5000;
 // 1 ring = the shield tile itself plus its 6 hex neighbors, 7 tiles total --
 // see BOMB_BLAST_RADIUS's own comment on why this isn't a square "3x3".
