@@ -15,7 +15,8 @@ import {
   FINAL_ROAM_WINDOW_SIZE,
   FINAL_LAST_SURVIVOR_EXTRA_MS,
   START_COUNTDOWN_MS,
-  BOUNDARY_SHRINK_GRACE_MS,
+  START_COUNTDOWN_LATER_MS,
+  BOUNDARY_FREE_ROAM_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
   BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
   FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
@@ -183,6 +184,19 @@ export default class Room {
     this.io = io;
     this.mode = mode || 'SURVIVAL';
     this.stage = stage || 1;
+    // Stage 1 gets the longer countdown so first-timers can read the tip
+    // cards; every later round uses the shorter one (see START_COUNTDOWN_MS /
+    // START_COUNTDOWN_LATER_MS in roundConfig.js). Chosen once here and used
+    // everywhere the old flat START_COUNTDOWN_MS constant was (scoringStartTime,
+    // roundEndTime, the movePlayerTo freeze, the spawn-stillness collapse,
+    // getSummary's scored-time math), and sent to the client via getSnapshot()
+    // so its countdown overlay/timer/live-score all agree on the same value.
+    this.startCountdownMs = this.stage === 1 ? START_COUNTDOWN_MS : START_COUNTDOWN_LATER_MS;
+    // The boundary's grace period is derived from that countdown plus a
+    // constant post-countdown free-roam window, so the open-map time before
+    // the boundary starts closing stays the same regardless of the countdown
+    // length (see BOUNDARY_FREE_ROAM_MS's own comment).
+    this.boundaryGraceMs = this.startCountdownMs + BOUNDARY_FREE_ROAM_MS;
     // 'TEAM' (default) is the tournament bracket this app was originally
     // built around: lineages merge across stages, revival/scoring are
     // shared team resources. 'SOLO' is a single flat SURVIVAL round with
@@ -208,7 +222,7 @@ export default class Room {
     // roundStartTime instead credited every player ~10s of "survival" for
     // time they spent literally unable to do anything yet, showing up as
     // score that had already ticked up the instant the round appeared.
-    this.scoringStartTime = this.roundStartTime + START_COUNTDOWN_MS;
+    this.scoringStartTime = this.roundStartTime + this.startCountdownMs;
     // Same reasoning as scoringStartTime just above, applied to the round's
     // own displayed/scored duration instead of per-player scoring: the
     // round-end check in checkRoundState() used to fire at roundStartTime +
@@ -288,7 +302,7 @@ export default class Room {
     // due — advanced by boundaryShrinkStepInterval() each time a step fires
     // (see checkRoundState()), rather than recomputed from a flat interval,
     // so the front-loaded early cadence can differ step to step.
-    this.nextBoundaryShrinkAt = BOUNDARY_SHRINK_GRACE_MS + this.boundaryShrinkStepInterval(1);
+    this.nextBoundaryShrinkAt = this.boundaryGraceMs + this.boundaryShrinkStepInterval(1);
     this.lastRegenAt = 0;
     // FINAL mode only (stage 3's solo finale): once the rapid shrink phase
     // reaches a fixed FINAL_ROAM_WINDOW_SIZE-square window, finalRoamActive
@@ -383,7 +397,7 @@ export default class Room {
         if (coords.row === spawnCoords.row && coords.col === spawnCoords.col) {
           this.triggerTileCollapse(spawnCoords.row, spawnCoords.col);
         }
-      }, START_COUNTDOWN_MS + ROUND_START_STILLNESS_MS);
+      }, this.startCountdownMs + ROUND_START_STILLNESS_MS);
     });
 
     // Bots exist only for admin testing, not real matches. If this room did
@@ -454,6 +468,7 @@ export default class Room {
       tileMap: this.tileMap,
       roundStartTime: this.roundStartTime,
       roundDuration: this.roundDurationMs,
+      startCountdownMs: this.startCountdownMs,
       bombTiles: this.bombTiles,
       shieldTiles: this.shieldTiles,
       angelTile: this.angelTile,
@@ -497,7 +512,7 @@ export default class Room {
     // still the correct *trigger* timestamp for actually ending the round,
     // used in checkRoundState() -- this is just how the admin dashboard
     // displays the remaining time from it.)
-    const elapsedSincePlayable = Math.max(0, Date.now() - this.roundStartTime - START_COUNTDOWN_MS);
+    const elapsedSincePlayable = Math.max(0, Date.now() - this.roundStartTime - this.startCountdownMs);
     const remainingMs = Math.max(0, this.roundDurationMs - elapsedSincePlayable);
     return {
       roomId: this.id,
@@ -1382,7 +1397,7 @@ export default class Room {
     // overlay — without this check bots (and any real player whose input
     // beat the countdown) would already be roaming and popping tiles while
     // everyone else is still watching numbers count down.
-    if (Date.now() - this.roundStartTime < START_COUNTDOWN_MS) {
+    if (Date.now() - this.roundStartTime < this.startCountdownMs) {
       return;
     }
 
@@ -2038,7 +2053,7 @@ export default class Room {
   // found within the search radius (e.g. everything reachable nearby is
   // already gone).
   moveBotsRandomly() {
-    if (Date.now() - this.roundStartTime < START_COUNTDOWN_MS) {
+    if (Date.now() - this.roundStartTime < this.startCountdownMs) {
       return;
     }
 
@@ -2248,7 +2263,7 @@ export default class Room {
     }
 
     const elapsed = Date.now() - this.roundStartTime;
-    const boundaryActive = elapsed >= BOUNDARY_SHRINK_GRACE_MS;
+    const boundaryActive = elapsed >= this.boundaryGraceMs;
 
     this.maintainBombTiles();
     this.maintainShieldTiles();
@@ -2387,14 +2402,23 @@ export default class Room {
     if (reason === 'all-eliminated') {
       survivorIds = [];
     } else {
-      survivorIds = Object.keys(this.players).filter((id) => {
-        const player = this.players[id];
-        if (player.eliminated) {
-          return false;
-        }
-        const coords = this.getTileCoords(player.x, player.y);
-        return this.isSafeTile(coords.row, coords.col);
-      });
+      // Being alive already implies being inside the safe zone -- anyone
+      // who fails to retreat as the boundary closes has their tile
+      // collapsed out from under them by collapseTilesLeavingSafeZone(),
+      // which sets `eliminated` the normal way. Re-deriving "inside the
+      // safe zone" here from the player's raw (x, y) via isSafeTile() was
+      // redundant with that, and actively wrong at the edges: the hex grid's
+      // odd-q column offset means the boundary outline the client renders
+      // (see GameScene.js's updateBoundaryOutline(), which only samples two
+      // corner tiles' pixel positions) doesn't line up pixel-exactly with
+      // isSafeTile()'s row/col rectangle, so a real player standing where
+      // the outline visibly shows "safe" could still fail this coordinate
+      // recheck and be wrongly excluded from survivorIds even though their
+      // tile never collapsed. Bots never hit this, since their own pathing
+      // calls isSafeTile() directly rather than eyeballing the outline --
+      // which is exactly why bots always advanced in testing while human
+      // players advanced inconsistently.
+      survivorIds = Object.keys(this.players).filter((id) => !this.players[id].eliminated);
     }
 
     const totalHumans = Object.keys(this.players).length;

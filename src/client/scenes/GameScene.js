@@ -178,6 +178,9 @@ export default class GameScene extends Phaser.Scene {
     this.liveScoreBaseline = 0;
     this.liveScoreSince = null;
     this.roundDuration = null;
+    // Set authoritatively from each snapshot's per-round value (applySnapshot);
+    // the imported START_COUNTDOWN_MS is only a pre-snapshot default.
+    this.startCountdownMs = START_COUNTDOWN_MS;
     this.eliminated = false;
     this.roomFinished = false;
     this.isSpectator = false;
@@ -346,7 +349,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile,
+    roomId, players, tileMap, roundStartTime, roundDuration, startCountdownMs, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
@@ -387,8 +390,21 @@ export default class GameScene extends Phaser.Scene {
     }
 
     this.roundStartTime = roundStartTime;
+    // Per-round countdown length, chosen server-side by stage (Room.js's
+    // this.startCountdownMs). Everything below that used to reference the flat
+    // imported START_COUNTDOWN_MS -- the countdown overlay, the round timer,
+    // and the live-score baseline -- now reads this instead so a 10s later-
+    // round countdown stays in lockstep with the server. Falls back to the
+    // imported constant only if an older/edge snapshot omits it.
+    this.startCountdownMs = Number.isFinite(startCountdownMs) ? startCountdownMs : START_COUNTDOWN_MS;
     this.liveScoreBaseline = 0;
-    this.liveScoreSince = roundStartTime;
+    // Scoring doesn't begin until the countdown freeze lifts (server credits
+    // from scoringStartTime = roundStartTime + countdown, see Room.js), so the
+    // 개인전 live ticker must start from that same moment -- starting it at
+    // roundStartTime made the "내 점수" readout visibly climb during the
+    // countdown for time nobody could actually play (operator: "카운트할 때
+    // 점수 올라가는데 게임시간 아니니 계산 필요없어").
+    this.liveScoreSince = roundStartTime + this.startCountdownMs;
     this.roundDuration = roundDuration;
     this.mode = mode || 'SURVIVAL';
 
@@ -459,7 +475,8 @@ export default class GameScene extends Phaser.Scene {
     // 다운, 카운트 다운을 기준으로 왼쪽과 오른쪽을 분할해서 팁을 알려줘").
     const countdownTips = this.createCountdownTips();
 
-    const deadline = (this.roundStartTime || Date.now()) + START_COUNTDOWN_MS;
+    const deadline = (this.roundStartTime || Date.now())
+      + (Number.isFinite(this.startCountdownMs) ? this.startCountdownMs : START_COUNTDOWN_MS);
 
     const tick = () => {
       const remainingMs = deadline - Date.now();
@@ -2552,7 +2569,8 @@ export default class GameScene extends Phaser.Scene {
     // actually ticking down once it ends -- mirrors Room.js's own
     // roundEndTime exactly (no separate field needed; both sides already
     // have roundStartTime/roundDuration/START_COUNTDOWN_MS).
-    const elapsed = Math.max(0, Date.now() - this.roundStartTime - START_COUNTDOWN_MS);
+    const countdownMs = Number.isFinite(this.startCountdownMs) ? this.startCountdownMs : START_COUNTDOWN_MS;
+    const elapsed = Math.max(0, Date.now() - this.roundStartTime - countdownMs);
     const remaining = Math.max(0, Math.ceil((this.roundDuration - elapsed) / 1000));
 
     // The mm:ss readout only actually changes once per second, but update()
