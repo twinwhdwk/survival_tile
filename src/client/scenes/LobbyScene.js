@@ -388,7 +388,7 @@ export default class LobbyScene extends Phaser.Scene {
         </div>
         <div style="margin-bottom:14px;">
           <div style="color:${COLORS.textEmber};font-weight:700;margin-bottom:5px;">💫 탈락과 부활</div>
-          탈락하면 유령이 되어요 — 무너진 타일을 계속 터치(PC는 스페이스)하면 팀 부활 게이지가 채워집니다.<br>
+          탈락하면 유령이 되어요 — 무너진 타일을 계속 터치(스페이스)하면 팀 부활 게이지가 채워집니다.<br>
           게이지가 가득 차면 동료 한 명이 무작위로 부활해요.<br>
           <b style="color:${COLORS.textGood};">⚠️ 부활한 직후 2초간은 무적!</b> 그 자리는 타일이 무너지지 않고, 폭탄도 무효화돼요.<br>
           <span style="color:${COLORS.textMuted};">(개인전에는 부활이 없어요)</span>

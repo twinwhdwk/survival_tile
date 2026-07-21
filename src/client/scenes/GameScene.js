@@ -114,7 +114,7 @@ const OTHER_PLAYER_LERP_TAU = 70;
 // GHOST_REVIVE_COOLDOWN_MS rate. Swapped out for the "라스트 스탠드" copy while
 // that's active (see the lastStandActivated handler) and restored here once
 // the server signals it's deactivated again.
-const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치(PC는 스페이스)하세요 (모두의 게이지가 차면 유령 1명 부활!)';
+const GHOST_HINT_DEFAULT_TEXT = '유령 모드 - 화면을 계속 터치(스페이스)하세요 (모두의 게이지가 차면 유령 1명 부활!)';
 
 // Throttles both the golden tap effect and the server emit while a ghost
 // keeps their finger down and drags across the screen (see
@@ -609,7 +609,7 @@ export default class GameScene extends Phaser.Scene {
         [
           '• 밟은 타일은 곧 무너져요!',
           '• 안전지대가 점점 좁아져요.',
-          '• 유령이 되면 타일을 터치(PC는 스페이스)해 부활 게이지를 채우세요.',
+          '• 유령이 되면 타일을 터치(스페이스)해 부활 게이지를 채우세요.',
         ],
       ),
       ...makeTipCard(
@@ -1615,7 +1615,7 @@ export default class GameScene extends Phaser.Scene {
         this.showBanner('⚡ 라스트 스탠드! 유령 복구 속도 대폭 상승', '#ffd700');
         this.roomTransitionHoldUntil = this.time.now + LAST_STAND_BANNER_MS;
         if (this.eliminated) {
-          this.ghostHintText.setText('지금 미친듯이 화면을 터치(PC는 스페이스)하세요! 게이지 채워 동료를 부활시키세요!');
+          this.ghostHintText.setText('지금 미친듯이 화면을 터치(스페이스)하세요! 게이지 채워 동료를 부활시키세요!');
           fitAnchoredRoundedPanel(this.ghostHintPanel, WORLD_WIDTH / 2, WORLD_HEIGHT - 106, 0.5, 0, 24, this.ghostHintText, 24);
         }
       },
