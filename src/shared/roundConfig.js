@@ -16,6 +16,15 @@ export const FINAL_ROAM_STEP_MS = 15000;
 // 8 -- the map is only MAP_ROWS=7 tall, so an 8-tall window couldn't move
 // vertically at all; 6 leaves exactly 1 row of slack to roam within.
 export const FINAL_ROAM_WINDOW_SIZE = 6;
+// FINAL only: once the field is down to a single survivor, the finale doesn't
+// need to keep running out its full clock -- the winner is already decided.
+// But cutting the round the *instant* the second-to-last player dies would
+// freeze the winner's score right at that moment, whereas they should end the
+// game with the clearly-highest total for actually being last one standing.
+// So instead of ending immediately, give the lone survivor this short extra
+// window to keep accruing survival score before finishRoom() fires and the
+// final standings show. Operator: "최종 1인이 남으면 3초 정도 더 플레이하고 끝".
+export const FINAL_LAST_SURVIVOR_EXTRA_MS = 3000;
 // Raised from an original 10s specifically to give the countdown's own
 // left/right tip cards (GameScene's createCountdownTips()) enough time to
 // actually be read (operator: "10초동안 규칙 읽기 어려우니 15초로해").

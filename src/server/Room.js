@@ -13,6 +13,7 @@ import {
   FINAL_ROUND_DURATION_MS,
   FINAL_ROAM_STEP_MS,
   FINAL_ROAM_WINDOW_SIZE,
+  FINAL_LAST_SURVIVOR_EXTRA_MS,
   START_COUNTDOWN_MS,
   BOUNDARY_SHRINK_GRACE_MS,
   BOUNDARY_SHRINK_INTERVAL_MS,
@@ -299,6 +300,13 @@ export default class Room {
     this.finalWindowColStart = 0;
     this.finalRoamDirIndex = 0;
     this.lastFinalRoamAt = 0;
+    // FINAL mode only: set to a wall-clock deadline the moment the field
+    // drops to a single survivor (see eliminatePlayer()). checkRoundState()
+    // then ends the room once this passes, giving the lone winner
+    // FINAL_LAST_SURVIVOR_EXTRA_MS of extra survival scoring first rather
+    // than either freezing their score on the spot or dragging the finale
+    // out to its full clock with the outcome already decided.
+    this.finalWinnerDeadline = null;
     // Tracks the 0-alive -> 1-alive "last stand" state as an explicit
     // false->true->false transition (see eliminatePlayer()/respawnGhost())
     // rather than re-deriving it from aliveCount alone — the ghost-revive
@@ -1306,6 +1314,19 @@ export default class Room {
       this.emit('lastStandActivated', { active: true });
     }
 
+    // FINAL (개인전) only: the instant the field narrows to a single survivor
+    // the champion is effectively decided, so don't keep running the finale
+    // out to its full clock. Arm a short countdown instead of ending on the
+    // spot -- those extra FINAL_LAST_SURVIVOR_EXTRA_MS let the lone survivor
+    // keep banking survival score (finishRoom() credits them right up to the
+    // deadline), so they finish with the clearly-highest total for actually
+    // being last standing, then the final standings show. Only armed once
+    // (deadline stays put even if that survivor later dies too -- aliveCount
+    // can't climb back in SOLO, which has no revival).
+    if (this.mode === 'FINAL' && aliveCount === 1 && this.finalWinnerDeadline === null) {
+      this.finalWinnerDeadline = Date.now() + FINAL_LAST_SURVIVOR_EXTRA_MS;
+    }
+
     // Excludes SOLO below (see the big comment just under allHumansGone) --
     // a 개인전 room tested solo with no bots added trivially satisfies this
     // the instant the one and only player dies (1 player, 1 eliminated),
@@ -2308,7 +2329,8 @@ export default class Room {
       }
     }
 
-    if (Date.now() >= this.roundEndTime) {
+    if (Date.now() >= this.roundEndTime
+      || (this.finalWinnerDeadline !== null && Date.now() >= this.finalWinnerDeadline)) {
       this.finishRoom('rescue');
     }
   }
