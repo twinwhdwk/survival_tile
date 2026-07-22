@@ -10,6 +10,7 @@ import {
 } from '../shared/hexGrid';
 import {
   SURVIVAL_ROUND_DURATION_MS,
+  SOLO_ROUND_DURATION_MS,
   FINAL_ROUND_DURATION_MS,
   FINAL_ROAM_STEP_MS,
   FINAL_ROAM_WINDOW_SIZE,
@@ -209,8 +210,14 @@ export default class Room {
     this.onFinished = onFinished;
     this.score = startingScore || 0;
     // BOSS mode has been removed -- stage 2 is now a second SURVIVAL round
-    // (see server.js's startStage()), same duration as stage 1.
-    this.roundDurationMs = this.mode === 'FINAL' ? FINAL_ROUND_DURATION_MS : SURVIVAL_ROUND_DURATION_MS;
+    // (see server.js's startStage()), same duration as stage 1. 개인전 is
+    // always run as a stage-1 SURVIVAL round too (see gameMode's own
+    // comment above), so without this it would silently inherit the team
+    // duration -- checked first since 'FINAL' only ever happens in TEAM
+    // brackets (SOLO never reaches stage 3, its own tournament ends the
+    // instant its one and only stage's rooms all report in).
+    this.roundDurationMs = this.gameMode === 'SOLO' ? SOLO_ROUND_DURATION_MS
+      : this.mode === 'FINAL' ? FINAL_ROUND_DURATION_MS : SURVIVAL_ROUND_DURATION_MS;
 
     this.players = {};
     this.tileMap = createSolidTileMap();

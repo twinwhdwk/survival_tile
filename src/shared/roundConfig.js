@@ -5,6 +5,15 @@
 // (BOUNDARY_SHRINK_INTERVAL_* below) still finishes closing comfortably
 // before this shorter clock runs out; see that budget comment for the math.
 export const SURVIVAL_ROUND_DURATION_MS = 90000; // 1.5 min of playable time (excludes the pre-round countdown)
+// 개인전 (SOLO) uses the same stage-1 SURVIVAL round shape as team play (see
+// Room's roundDurationMs assignment below) but wants its own, longer clock
+// -- there's no lineage carrying forward to a next stage to keep brisk for,
+// and the operator wants more individual playtime specifically here
+// (operator: "개인전은 게임 시간을 30초만 더 늘려줘"). +30s on top of the
+// current SURVIVAL_ROUND_DURATION_MS rather than a value hand-picked
+// independently, so a future change to the shared team duration doesn't
+// silently leave this one stale relative to it.
+export const SOLO_ROUND_DURATION_MS = SURVIVAL_ROUND_DURATION_MS + 30000;
 // Stage 3's solo final: rapid shrink to a fixed 6x6 window, then that
 // window roams the map (see Room.js's FINAL-mode boundary logic) until
 // time runs out or one player is left. Shorter than stage 1/2's SURVIVAL
