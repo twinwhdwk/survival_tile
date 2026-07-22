@@ -68,11 +68,11 @@ export default class LobbyScene extends Phaser.Scene {
     this.cellScale = 1;
     this.isAdmin = !!data.isAdmin;
     this.statusPulseTween = null;
-    // 팀전 (TEAM) is the original bracket this app was built around, so it
-    // stays the default — 개인전 (SOLO) is an admin opt-in per tournament,
-    // not a per-player choice (a single lobby roster can't be split into
-    // two simultaneous modes). Sent along with 'startTournament' below.
-    this.selectedGameMode = 'TEAM';
+    // 개인전 (SOLO) is the default mode now (operator preference); 팀전
+    // (TEAM) is an admin opt-in per tournament instead, not a per-player
+    // choice (a single lobby roster can't be split into two simultaneous
+    // modes). Sent along with 'startTournament' below.
+    this.selectedGameMode = 'SOLO';
 
     generateBackgroundTexture(this, 'bg_gradient', WORLD_WIDTH, WORLD_HEIGHT);
     generateParticleTextures(this);

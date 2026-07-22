@@ -1219,11 +1219,13 @@ function setServerHandlers() {
       if (!adminSockets.has(socket.id) || globalPhase !== 'LOBBY') {
         return;
       }
-      // 팀전 (TEAM, the default/original bracket) merges adjacent lineages
-      // across stages and shares one score per room; 개인전 (SOLO) is a
-      // single flat SURVIVAL stage with no merging, ranked by each
-      // player's own score — see handleRoomFinished()'s gameMode branch.
-      const gameMode = payload && payload.mode === 'SOLO' ? 'SOLO' : 'TEAM';
+      // 개인전 (SOLO, now the default) is a single flat SURVIVAL stage with
+      // no merging, ranked by each player's own score; 팀전 (TEAM) merges
+      // adjacent lineages across stages and shares one score per room — see
+      // handleRoomFinished()'s gameMode branch. This fallback only matters
+      // if payload is missing/malformed, since LobbyScene always sends an
+      // explicit mode now — kept consistent with that default regardless.
+      const gameMode = payload && payload.mode === 'TEAM' ? 'TEAM' : 'SOLO';
       // The admin who starts the match watches it rather than playing —
       // never seated into a room, so they can't die and can't be counted
       // toward hasHumans/allHumansGone. See startStage() for how they're
