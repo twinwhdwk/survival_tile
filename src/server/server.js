@@ -167,31 +167,39 @@ function tickAllRooms() {
   }
 }
 
-// 팀전(TEAM) SURVIVAL is played in per-lineage rooms, so the moment a
-// player's whole team is down to just them, the room they're in goes
-// completely quiet for the rest of the round (operator: "혼자만 조에서
-// 남았을 경우에... 플레이하는 게 좀 고독한것 같아"). This mirrors one other
-// still-alive player from a sibling 팀전 room in this same stage into that
-// lonely room as a translucent, non-interactive "echo" -- position only, no
-// tile/collision/elimination effects, so it can't be mistaken for a real
-// threat or teammate. `rooms` only ever holds the current stage's live
-// rooms (see broadcastDashboard()'s own comment), so no extra stage
-// filtering is needed here either.
+// Stage 1 (and TEAM's stage 2) splits every player into separate rooms
+// capped at MAX_PLAYERS/STAGE_2_MAX_GROUP_SIZE regardless of gameMode --
+// 개인전 (SOLO) with a big enough lobby gets multiple independent free-for-
+// all rooms same as 팀전 (TEAM) gets multiple lineage rooms. Either way, the
+// moment a room is down to its last living human, that room goes
+// completely quiet for the rest of the round (operator, about 팀전
+// specifically at first, but the same room-splitting applies to 개인전 too:
+// "혼자만 조에서 남았을 경우에... 플레이하는 게 좀 고독한것 같아" -- 개인전
+// doesn't even have TEAM's revival to ever bring it back from that). This
+// mirrors one other still-alive player from a sibling room in this same
+// stage into that lonely room as a translucent, non-interactive "echo" --
+// position only, no tile/collision/elimination effects, so it can't be
+// mistaken for a real threat or teammate. `rooms` only ever holds the
+// current stage's live rooms (see broadcastDashboard()'s own comment), so
+// no extra stage filtering is needed, and every room in it already shares
+// one gameMode (stage 3's solo FINAL is always a single room, so it never
+// has a sibling to borrow from regardless).
 function updateEchoCompanions() {
-  const teamSurvivalRooms = [];
+  const survivalRooms = [];
   rooms.forEach((room) => {
-    if (!room.finished && room.mode === 'SURVIVAL' && room.gameMode === 'TEAM') {
-      teamSurvivalRooms.push(room);
+    if (!room.finished && room.mode === 'SURVIVAL') {
+      survivalRooms.push(room);
     }
   });
 
-  teamSurvivalRooms.forEach((room) => {
+  survivalRooms.forEach((room) => {
     const alive = Object.values(room.players).filter((p) => !p.eliminated);
-    // Only mirror a companion in for an actual human playing solo -- a
-    // room whose last-standing player happens to be a bot (every real
-    // human already gone, just not yet cleaned up) has nobody to show this
-    // to, and 2+ still alive isn't lonely yet.
-    const lonely = alive.length === 1 && !alive[0].isBot ? alive[0] : null;
+    // Not gated to real humans -- an all-bot admin test room (the normal
+    // way this feature gets verified, since real matches rarely have bots
+    // at all) is just as quiet down to its last bot as a real player's
+    // room would be, and anyone spectating it benefits from the same
+    // company. 2+ still alive isn't lonely yet.
+    const lonely = alive.length === 1 ? alive[0] : null;
 
     if (!lonely) {
       if (echoAssignments.has(room.id)) {
@@ -210,11 +218,13 @@ function updateEchoCompanions() {
       return;
     }
 
-    // (Re)assign: every other 팀전 SURVIVAL room's still-alive players
-    // (bots included -- operator: someone to see is better than nobody,
-    // even if it's a bot wandering around) are fair game.
+    // (Re)assign: every other currently-active SURVIVAL room's still-alive
+    // players (bots included -- operator: someone to see is better than
+    // nobody, even if it's a bot wandering around) are fair game. Every
+    // room here already shares this room's own gameMode (see this
+    // function's own comment), so there's no need to check that again.
     const candidates = [];
-    teamSurvivalRooms.forEach((otherRoom) => {
+    survivalRooms.forEach((otherRoom) => {
       if (otherRoom.id === room.id) {
         return;
       }
