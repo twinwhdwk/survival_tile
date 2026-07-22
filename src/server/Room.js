@@ -22,6 +22,8 @@ import {
   BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
   FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
   BOUNDARY_SHRINK_EARLY_STEPS,
+  SOLO_BOUNDARY_SHRINK_EARLY_STEPS,
+  SOLO_BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
   BOUNDARY_WAVE_MS,
   AUTO_REGEN_BASE_BURST,
   AUTO_REGEN_BURST_PER_ALIVE_PLAYER,
@@ -1812,16 +1814,25 @@ export default class Room {
 
   // The interval before the Nth boundary-shrink step (1-indexed) — mode-
   // aware so FINAL's own rapid-shrink phase (see shrinkTowardFinalWindow())
-  // can run its early rings on a slower cadence than SURVIVAL's, without
-  // touching SURVIVAL's own tuning (see FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS's
-  // own comment in roundConfig.js for why). Both modes share the same
-  // BOUNDARY_SHRINK_EARLY_STEPS count and the same steady-state
-  // BOUNDARY_SHRINK_INTERVAL_MS once past it.
+  // can run its early rings on a slower cadence than SURVIVAL's, and
+  // gameMode-aware so 개인전's SURVIVAL-shaped round can run its early rings
+  // on a *faster*, longer-covering cadence than TEAM's (see
+  // SOLO_BOUNDARY_SHRINK_EARLY_STEPS/SOLO_BOUNDARY_SHRINK_INTERVAL_EARLY_MS's
+  // own comment in roundConfig.js for why) -- needed so 개인전's full-closure
+  // shrink still finishes with margin inside its own flat-2-minutes round.
+  // All three variants share the same steady-state BOUNDARY_SHRINK_INTERVAL_MS
+  // once past their own early-step count.
   boundaryShrinkStepInterval(stepNumber) {
-    if (stepNumber > BOUNDARY_SHRINK_EARLY_STEPS) {
-      return BOUNDARY_SHRINK_INTERVAL_MS;
+    if (this.mode === 'FINAL') {
+      return stepNumber > BOUNDARY_SHRINK_EARLY_STEPS
+        ? BOUNDARY_SHRINK_INTERVAL_MS : FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS;
     }
-    return this.mode === 'FINAL' ? FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS : BOUNDARY_SHRINK_INTERVAL_EARLY_MS;
+    if (this.gameMode === 'SOLO') {
+      return stepNumber > SOLO_BOUNDARY_SHRINK_EARLY_STEPS
+        ? BOUNDARY_SHRINK_INTERVAL_MS : SOLO_BOUNDARY_SHRINK_INTERVAL_EARLY_MS;
+    }
+    return stepNumber > BOUNDARY_SHRINK_EARLY_STEPS
+      ? BOUNDARY_SHRINK_INTERVAL_MS : BOUNDARY_SHRINK_INTERVAL_EARLY_MS;
   }
 
   // FINAL mode's own rapid-shrink phase (see checkRoundState) closes the

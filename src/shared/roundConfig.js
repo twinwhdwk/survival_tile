@@ -131,6 +131,27 @@ export const BOUNDARY_SHRINK_EARLY_STEPS = 3;
 // FINAL_ROUND_DURATION_MS (90s, ending at countdown(10s) + 90s = 100s) for
 // the roam phase after -- so there's comfortable roam room here now.
 export const FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 8000;
+// 개인전 (SOLO)'s own early-ring cadence for its stage-1 SURVIVAL-shaped
+// round (mode-aware in Room.js's boundaryShrinkStepInterval(), same idea as
+// FINAL_BOUNDARY_SHRINK_INTERVAL_EARLY_MS above) -- faster AND covering more
+// rings than TEAM's BOUNDARY_SHRINK_EARLY_STEPS/BOUNDARY_SHRINK_INTERVAL_EARLY_MS,
+// specifically so 개인전's full-closure shrink (see this.maxRowInsetTop/Bottom
+// in Room.js) can fit inside SOLO_ROUND_DURATION_MS's flat 2 minutes without
+// stretching the round itself (operator explicitly rejected a 2:30 stretch:
+// "왜 게임시간이 2분 30초야 2분으로 해야지", then asked for this instead:
+// "안전지대 좁혀지는 시간을 초반에 좀 줄이면 2분안에 들어올거 같은데"). Full
+// closure needs 13 total shrink steps (vs TEAM's 8, see shrinkBoundary()'s
+// own comment) -- at these 5 steps @ 4s = 20s, remaining 8 @ the shared
+// BOUNDARY_SHRINK_INTERVAL_MS (10s) = 80s, for 100s total. Grace for stage 1
+// is countdown(15s) + BOUNDARY_FREE_ROAM_MS(10s) = 25s, so closure finishes
+// at 25 + 100 = 125s, against this round's own end at countdown(15s) +
+// SOLO_ROUND_DURATION_MS(120s) = 135s -- a comfortable ~10s margin, in the
+// same ballpark as TEAM's own ~12s (see BOUNDARY_SHRINK_INTERVAL_MS's
+// comment). Only changes the *early* pacing, not the later, more
+// consequential rings' BOUNDARY_SHRINK_INTERVAL_MS cadence, which stays
+// identical to TEAM's.
+export const SOLO_BOUNDARY_SHRINK_EARLY_STEPS = 5;
+export const SOLO_BOUNDARY_SHRINK_INTERVAL_EARLY_MS = 4000;
 export const BOUNDARY_WAVE_MS = 3000; // a burning ring crumbles across this window, not all at once
 // SURVIVAL rounds have no other scoring mechanic, so a teammate's score
 // contribution is how long they personally stayed alive (in whole
