@@ -507,6 +507,16 @@ export default class Room {
       bombTiles: this.bombTiles,
       shieldTiles: this.shieldTiles,
       angelTile: this.angelTile,
+      // A regular player's own round-start snapshot has nothing meaningful
+      // to draw yet (still the whole map, pre-shrink), but a spectator
+      // joining mid-round via adminSpectateRoom previously had no way to
+      // know the *current* boundary at all until the next shrink step's
+      // own massCollapseStarted/boundaryPulse happened to fire -- everyone
+      // else in the room already got that broadcast before this socket
+      // ever connected. Sending it unconditionally here means the client
+      // can just always draw whatever this says instead of needing to
+      // separately track "have I seen a boundary event yet."
+      safeBounds: this.getSafeBounds(),
     };
   }
 

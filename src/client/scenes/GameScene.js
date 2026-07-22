@@ -358,7 +358,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, startCountdownMs, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile, echoCompanion,
+    roomId, players, tileMap, roundStartTime, roundDuration, startCountdownMs, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile, echoCompanion, safeBounds,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
@@ -373,6 +373,16 @@ export default class GameScene extends Phaser.Scene {
     this.initBombTiles(bombTiles);
     this.initShieldTiles(shieldTiles);
     this.initAngelTile(angelTile);
+    // Draws the *current* boundary immediately instead of waiting on the
+    // next massCollapseStarted/boundaryPulse broadcast -- a regular player
+    // at round start gets the harmless whole-map rectangle (nothing's
+    // shrunk yet), but a spectator joining mid-round via adminSpectateRoom
+    // (operator: "관전모드에서 방 들어가면 경계가 바로 안보이고") previously
+    // had no boundary at all until the *next* shrink step happened to
+    // fire, even if the round was already most of the way closed in.
+    if (safeBounds) {
+      this.updateBoundaryOutline(safeBounds);
+    }
     // Only ever present on a late adminSpectateRoom join (a room's own
     // initial 'gameStarting' fires before anyone could be lonely yet) --
     // seeds the echo companion this room was already showing rather than
