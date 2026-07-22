@@ -70,10 +70,6 @@ const CENTER_COL = Math.floor(MAP_COLS / 2);
 // value per axis to allow that unevenness.
 const SAFE_ZONE_MIN_ROWS = 5;
 const SAFE_ZONE_MIN_COLS = 5;
-const MAX_ROW_INSET_TOP = Math.floor((MAP_ROWS - SAFE_ZONE_MIN_ROWS) / 2);
-const MAX_ROW_INSET_BOTTOM = Math.ceil((MAP_ROWS - SAFE_ZONE_MIN_ROWS) / 2);
-const MAX_COL_INSET_LEFT = Math.floor((MAP_COLS - SAFE_ZONE_MIN_COLS) / 2);
-const MAX_COL_INSET_RIGHT = Math.ceil((MAP_COLS - SAFE_ZONE_MIN_COLS) / 2);
 
 // How many tiles out a bot's findStepTowardSafety() BFS scans before giving
 // up and falling back to simple immediate-neighbor avoidance. Deep enough to
@@ -304,6 +300,26 @@ export default class Room {
     this.rowInsetBottom = 0;
     this.colInsetLeft = 0;
     this.colInsetRight = 0;
+    // TEAM/FINAL keeps the SAFE_ZONE_MIN_ROWS/COLS (5x5) floor -- players
+    // are meant to survive and advance out of a SURVIVAL round, and FINAL
+    // has its own separate roaming-window mechanic entirely. 개인전 has
+    // neither: it's a single decisive round with nowhere to advance to, so
+    // stopping at the same comfortable floor let several players simply
+    // sit inside it for the whole round with nothing forcing them out,
+    // finishing with no real ranking distinction between them (operator:
+    // "마지막까지 순위 결정이 안 나"). Targeting 0 instead of 5 here makes
+    // shrinkBoundary() below keep closing all the way to full closure —
+    // getSafeBounds() ends up with rowStart > rowEnd / colStart > colEnd
+    // once it does, which isSafeTile()/getSafeZoneTiles()/safeMargin()
+    // already treat correctly as "the zone is empty, nobody is safe"
+    // (a plain range check / an empty-body for loop), so nothing else
+    // needed to change for this to work.
+    const safeZoneMinRows = this.gameMode === 'SOLO' ? 0 : SAFE_ZONE_MIN_ROWS;
+    const safeZoneMinCols = this.gameMode === 'SOLO' ? 0 : SAFE_ZONE_MIN_COLS;
+    this.maxRowInsetTop = Math.floor((MAP_ROWS - safeZoneMinRows) / 2);
+    this.maxRowInsetBottom = Math.ceil((MAP_ROWS - safeZoneMinRows) / 2);
+    this.maxColInsetLeft = Math.floor((MAP_COLS - safeZoneMinCols) / 2);
+    this.maxColInsetRight = Math.ceil((MAP_COLS - safeZoneMinCols) / 2);
     this.boundaryShrinkStepsDone = 0;
     // Elapsed-ms threshold (from roundStartTime) at which the *next* step is
     // due — advanced by boundaryShrinkStepInterval() each time a step fires
@@ -1740,20 +1756,20 @@ export default class Room {
   // before the larger one via Math.min, rather than needing separate
   // branches per edge.
   shrinkBoundary() {
-    if (this.colInsetLeft < MAX_COL_INSET_LEFT || this.colInsetRight < MAX_COL_INSET_RIGHT) {
+    if (this.colInsetLeft < this.maxColInsetLeft || this.colInsetRight < this.maxColInsetRight) {
       const oldLeft = this.colInsetLeft;
       const oldRight = this.colInsetRight;
-      this.colInsetLeft = Math.min(MAX_COL_INSET_LEFT, this.colInsetLeft + 1);
-      this.colInsetRight = Math.min(MAX_COL_INSET_RIGHT, this.colInsetRight + 1);
+      this.colInsetLeft = Math.min(this.maxColInsetLeft, this.colInsetLeft + 1);
+      this.colInsetRight = Math.min(this.maxColInsetRight, this.colInsetRight + 1);
       this.collapseTilesLeavingSafeZone(this.insetBounds(this.rowInsetTop, this.rowInsetBottom, oldLeft, oldRight));
       return;
     }
 
-    if (this.rowInsetTop < MAX_ROW_INSET_TOP || this.rowInsetBottom < MAX_ROW_INSET_BOTTOM) {
+    if (this.rowInsetTop < this.maxRowInsetTop || this.rowInsetBottom < this.maxRowInsetBottom) {
       const oldTop = this.rowInsetTop;
       const oldBottom = this.rowInsetBottom;
-      this.rowInsetTop = MAX_ROW_INSET_TOP;
-      this.rowInsetBottom = MAX_ROW_INSET_BOTTOM;
+      this.rowInsetTop = this.maxRowInsetTop;
+      this.rowInsetBottom = this.maxRowInsetBottom;
       this.collapseTilesLeavingSafeZone(this.insetBounds(oldTop, oldBottom, this.colInsetLeft, this.colInsetRight));
     }
   }
