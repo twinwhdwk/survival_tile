@@ -8,12 +8,23 @@ export const SURVIVAL_ROUND_DURATION_MS = 90000; // 1.5 min of playable time (ex
 // 개인전 (SOLO) uses the same stage-1 SURVIVAL round shape as team play (see
 // Room's roundDurationMs assignment below) but wants its own, longer clock
 // -- there's no lineage carrying forward to a next stage to keep brisk for,
-// and the operator wants more individual playtime specifically here
-// (operator: "개인전은 게임 시간을 30초만 더 늘려줘"). +30s on top of the
-// current SURVIVAL_ROUND_DURATION_MS rather than a value hand-picked
-// independently, so a future change to the shared team duration doesn't
-// silently leave this one stale relative to it.
-export const SOLO_ROUND_DURATION_MS = SURVIVAL_ROUND_DURATION_MS + 30000;
+// and the operator originally wanted more individual playtime specifically
+// here (operator: "개인전은 게임 시간을 30초만 더 늘려줘"). Derived as an
+// offset on top of the current SURVIVAL_ROUND_DURATION_MS rather than a
+// value hand-picked independently, so a future change to the shared team
+// duration doesn't silently leave this one stale relative to it. Bumped
+// from +30s to +60s once 개인전's own safe zone started shrinking all the
+// way to full closure (see Room.js's this.maxRowInsetTop/Bottom) with the
+// boundary now also converging toward a square instead of exhausting
+// columns before ever touching rows (see shrinkBoundary()'s own comment) --
+// full closure for SOLO needs 13 total shrink steps under that scheme
+// (vs. TEAM's 8), finishing at grace(25s) + 118s = 143s from round start.
+// The original +30s (120s round, ending at 135s) would leave the boundary
+// finishing 8s *after* the round already ended, letting a few players
+// survive the closing zone by luck at the buzzer. +60s (150s round, ending
+// at 165s) restores a ~22s margin, matching what the original full-closure
+// patch counted on.
+export const SOLO_ROUND_DURATION_MS = SURVIVAL_ROUND_DURATION_MS + 60000;
 // Stage 3's solo final: rapid shrink to a fixed 6x6 window, then that
 // window roams the map (see Room.js's FINAL-mode boundary logic) until
 // time runs out or one player is left. Shorter than stage 1/2's SURVIVAL

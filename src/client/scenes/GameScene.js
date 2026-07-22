@@ -164,6 +164,15 @@ export default class GameScene extends Phaser.Scene {
     this.socket = getSocket();
     this.player = null;
     this.otherPlayers = {};
+    // A purely cosmetic "echo" of one still-alive player from a sibling
+    // 팀전 room, mirrored in only while this room's own team has been
+    // reduced to its last living member (see server.js's
+    // updateEchoCompanions()) so playing out the rest of a lonely round
+    // doesn't feel completely empty. Position-only -- no tile/collision/
+    // elimination logic ever touches it, so it's kept entirely separate
+    // from this.otherPlayers rather than being just another faint entry
+    // in it. Null whenever nobody's currently assigned.
+    this.echoCompanion = null;
     this.tileSprites = {};
     this.localTileMap = null;
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -349,7 +358,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applySnapshot({
-    roomId, players, tileMap, roundStartTime, roundDuration, startCountdownMs, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile,
+    roomId, players, tileMap, roundStartTime, roundDuration, startCountdownMs, mode, gameMode, score, isSpectator, fromDashboard, isAdmin, bombTiles, shieldTiles, angelTile, echoCompanion,
   }) {
     this.roomId = roomId;
     this.gameMode = gameMode || 'TEAM';
@@ -364,6 +373,15 @@ export default class GameScene extends Phaser.Scene {
     this.initBombTiles(bombTiles);
     this.initShieldTiles(shieldTiles);
     this.initAngelTile(angelTile);
+    // Only ever present on a late adminSpectateRoom join (a room's own
+    // initial 'gameStarting' fires before anyone could be lonely yet) --
+    // seeds the echo companion this room was already showing rather than
+    // leaving the spectator staring at an empty board until the next 1s
+    // updateEchoCompanions() tick happens to reassign one in. See
+    // this.echoCompanion's own comment above for what this actually is.
+    if (echoCompanion) {
+      this.spawnEchoCompanion(echoCompanion);
+    }
 
     // A spectator's own socket id is never a key in `players` (the server
     // never seats an admin into a room — see startTournament/startStage in
@@ -1837,6 +1855,19 @@ export default class GameScene extends Phaser.Scene {
         }
       },
 
+      // Purely cosmetic "buddy echo" for a lonely last-teammate room (see
+      // server.js's updateEchoCompanions()) -- assigned/reassigned/cleared
+      // entirely server-side, this scene just mirrors whatever it's told.
+      echoCompanionAssigned: ({ x, y, animalIndex }) => {
+        this.spawnEchoCompanion({ x, y, animalIndex });
+      },
+      echoCompanionMoved: ({ x, y }) => {
+        this.moveEchoCompanion(x, y);
+      },
+      echoCompanionCleared: () => {
+        this.despawnEchoCompanion();
+      },
+
       playerEliminated: ({ playerId, score, playerScore, x, y }) => {
         // eliminatePlayer() can finish the room in this exact same call
         // (see the roomTransitionHoldUntil constants' own comments) --
@@ -2408,6 +2439,22 @@ export default class GameScene extends Phaser.Scene {
       avatar.x += dx * t;
       avatar.y += dy * t;
     });
+
+    // Same lerp, just for the one (optional) echo companion sprite instead
+    // of looping this.otherPlayers -- it isn't stored in there (see its own
+    // comment in create()).
+    if (this.echoCompanion) {
+      const echo = this.echoCompanion;
+      const dx = echo.targetX - echo.x;
+      const dy = echo.targetY - echo.y;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        echo.x = echo.targetX;
+        echo.y = echo.targetY;
+      } else {
+        echo.x += dx * t;
+        echo.y += dy * t;
+      }
+    }
   }
 
   update(time, delta) {
@@ -3013,5 +3060,49 @@ export default class GameScene extends Phaser.Scene {
     });
 
     return container;
+  }
+
+  // The lonely-room buddy echo (see this.echoCompanion's own comment in
+  // create()) -- deliberately just a bare tinted+translucent sprite, not a
+  // full createAvatar() container: no shadow/name-tag/bot-badge, since
+  // those all read as "this is a real participant" and this explicitly
+  // isn't one. Depth 2 keeps it under real player avatars (3/4) so it can
+  // never visually compete with them.
+  spawnEchoCompanion({ x, y, animalIndex }) {
+    this.despawnEchoCompanion();
+    const sprite = this.add.image(x, y, ensureAnimalTexture(this, animalIndex))
+      .setAlpha(0)
+      .setTint(0x9fc6ff)
+      .setDepth(2);
+    sprite.targetX = x;
+    sprite.targetY = y;
+    this.tweens.add({
+      targets: sprite, alpha: 0.4, duration: 500, ease: 'Sine.easeOut',
+    });
+    this.echoCompanion = sprite;
+  }
+
+  moveEchoCompanion(x, y) {
+    if (!this.echoCompanion) {
+      return;
+    }
+    if (x < this.echoCompanion.targetX) {
+      this.echoCompanion.setFlipX(true);
+    } else if (x > this.echoCompanion.targetX) {
+      this.echoCompanion.setFlipX(false);
+    }
+    this.echoCompanion.targetX = x;
+    this.echoCompanion.targetY = y;
+  }
+
+  despawnEchoCompanion() {
+    if (!this.echoCompanion) {
+      return;
+    }
+    const sprite = this.echoCompanion;
+    this.echoCompanion = null;
+    this.tweens.add({
+      targets: sprite, alpha: 0, duration: 300, onComplete: () => sprite.destroy(),
+    });
   }
 }

@@ -176,7 +176,9 @@ function pickWeightedByHeading(candidates, preferredDir) {
  * immediately.
  */
 export default class Room {
-  constructor(id, io, members, { mode, stage, startingScore, gameMode, onFinished }) {
+  constructor(id, io, members, {
+    mode, stage, startingScore, gameMode, onFinished, onPlayerMove,
+  }) {
     this.id = id;
     this.io = io;
     this.mode = mode || 'SURVIVAL';
@@ -204,6 +206,15 @@ export default class Room {
     // room score.
     this.gameMode = gameMode || 'TEAM';
     this.onFinished = onFinished;
+    // Optional hook, fired every time broadcastPlayerMoved() below actually
+    // emits a position update (same throttle, no extra chatter) -- lets
+    // server.js relay a specific player's live position across room
+    // boundaries (see the lonely-last-teammate buddy-echo feature in
+    // server.js) without this room needing any awareness of other rooms,
+    // or of the feature, at all. No-op default so an ordinary room (i.e.
+    // every room nobody has picked as somebody else's echo companion)
+    // pays nothing extra for this.
+    this.onPlayerMove = onPlayerMove || (() => {});
     this.score = startingScore || 0;
     // BOSS mode has been removed -- stage 2 is now a second SURVIVAL round
     // (see server.js's startStage()), same duration as stage 1. 개인전 is
@@ -293,9 +304,8 @@ export default class Room {
     // Tracked as four independent edge values (not one shared inset per
     // axis) so an axis's two sides can cap out at different rings (needed to
     // land on SAFE_ZONE_MIN_ROWS/COLS exactly on an even-sized map) and so
-    // the column axis can close in over many steps while the row axis stays
-    // untouched until a single final squeeze -- see shrinkBoundary()'s own
-    // comment for why.
+    // shrinkBoundary() can choose which axis to close in on each individual
+    // step (row vs column) -- see that method's own comment for why.
     this.rowInsetTop = 0;
     this.rowInsetBottom = 0;
     this.colInsetLeft = 0;
@@ -1365,15 +1375,24 @@ export default class Room {
       this.finalWinnerDeadline = Date.now() + FINAL_LAST_SURVIVOR_EXTRA_MS;
     }
 
-    // Excludes SOLO below (see the big comment just under allHumansGone) --
-    // a 개인전 room tested solo with no bots added trivially satisfies this
-    // the instant the one and only player dies (1 player, 1 eliminated),
-    // which used to end the round immediately even with plenty of time left
-    // on the clock (operator: "개인전 하는데, 죽으니까 아직 시간이 남았는데
-    // 도 대기실로 튕김"). The earlier SOLO fix below only covered "all real
-    // humans gone but bots remain" -- this covers the equally real "no bots
-    // at all, so eliminated is trivially universal" case the same way.
-    const allEliminated = this.gameMode !== 'SOLO'
+    // SOLO only skips this for the degenerate single-player case (a solo
+    // tester with no bots added) -- that alone used to trivially satisfy
+    // "every player eliminated" the instant they personally died, ending the
+    // round immediately even with plenty of time left on the clock (operator:
+    // "개인전 하는데, 죽으니까 아직 시간이 남았는데도 대기실로 튕김"). A real
+    // multi-player/multi-bot 개인전 round (2+ players) still ends the instant
+    // every one of them is actually eliminated, exactly like TEAM -- with no
+    // ghost-revival mechanic at all in SOLO (see reviveTile()'s own guard),
+    // "everyone eliminated" is permanent and decisive there, not a state that
+    // might still resolve itself. This matters a lot more now that 개인전's
+    // safe zone shrinks to full closure (see this.maxRowInsetTop/Bottom's own
+    // comment): full closure makes "every player dies before the buzzer" the
+    // normal outcome there, not a rare fluke, and skipping this check
+    // unconditionally for SOLO used to leave the round just sitting there
+    // with everyone dead for however much of the clock was still left
+    // (operator: "모든 사람이 죽었는데 게임이 안끝나네").
+    const totalPlayers = Object.keys(this.players).length;
+    const allEliminated = (this.gameMode !== 'SOLO' || totalPlayers > 1)
       && Object.values(this.players).every((p) => p.eliminated);
     // TEAM mode ends the room once every real human has *disconnected* --
     // bots only exist for admin testing there, so there's no one left to
@@ -1383,24 +1402,26 @@ export default class Room {
     // TEAM mode's whole point -- ending the room here the instant they die
     // (this used to check `eliminated`) meant a room with one human and
     // some bots never reached the ghost-revival phase at all, since the
-    // room finished the moment that one human went down.
+    // room finished the moment that one human went down. Still unconditionally
+    // excluded for SOLO (unlike allEliminated above) -- SOLO has no
+    // ghost/proxy mechanic to wait for, so this particular disconnect-based
+    // check has nothing meaningful to test there; allEliminated above is the
+    // one that actually matters for SOLO.
     const allHumansGone = this.gameMode !== 'SOLO' && this.hasHumans
       && Object.values(this.players).filter((p) => !p.isBot).every((p) => p.disconnected);
 
-    // 개인전 deliberately does *not* end the room the instant every real
-    // human is gone (only bots left), literally everyone including bots is
-    // gone (a solo test with no bots at all), or only one player is left
-    // alive --
-    // an earlier version ended on both of those triggers (nothing left to
-    // threaten/watch, so why keep ticking), but that cut a solo tester's own
-    // spectating short: an eliminated SOLO player already just becomes a
-    // silent spectator client-side (see GameScene's handleOwnElimination),
-    // exactly so they can keep watching the rest of the round play out --
-    // ending the room out from under them the instant they died defeated
-    // that entirely (operator: "개인전에서 죽으니까 게임이 바로 끝나버리다").
-    // Same reasoning already applied to the decisive-winner case: every
-    // room now just keeps playing (boundary shrink, hazards, bots, all)
-    // until the natural Date.now() >= roundEndTime timeout below.
+    // 개인전 still deliberately does *not* end the room just because every
+    // real human is gone (only bots left) or only one player is left alive
+    // -- an earlier version ended on both of those triggers too, but that
+    // cut a solo tester's own spectating short: an eliminated SOLO player
+    // already just becomes a silent spectator client-side (see GameScene's
+    // handleOwnElimination), exactly so they can keep watching the rest of
+    // the round play out -- ending the room out from under them the instant
+    // they died defeated that entirely (operator: "개인전에서 죽으니까
+    // 게임이 바로 끝나버리다"). Only "every single player is now eliminated"
+    // (allEliminated above) short-circuits that and ends the round anyway --
+    // once there's truly nobody left to watch or play, waiting out the rest
+    // of the clock serves nobody.
     if (allEliminated || allHumansGone) {
       this.finishRoom('all-eliminated');
     }
@@ -1483,6 +1504,7 @@ export default class Room {
     if (now - state.last >= MOVE_BROADCAST_MIN_INTERVAL_MS) {
       state.last = now;
       this.emitExcludingSender(id, 'playerMoved', { playerId: id, x: player.x, y: player.y });
+      this.onPlayerMove(id, player.x, player.y);
       return;
     }
 
@@ -1494,6 +1516,7 @@ export default class Room {
         }
         state.last = Date.now();
         this.emitExcludingSender(id, 'playerMoved', { playerId: id, x: player.x, y: player.y });
+        this.onPlayerMove(id, player.x, player.y);
       }, MOVE_BROADCAST_MIN_INTERVAL_MS - (now - state.last));
     }
   }
@@ -1734,29 +1757,44 @@ export default class Room {
   // no special "safe zone" tile state or color; isSafeTile() alone
   // decides what still counts as inside the shrinking boundary.
   //
-  // The column axis closes in by one ring per call, same as before, but
-  // the row axis stays untouched until the column axis has fully closed —
-  // only then does it take its own single, one-time squeeze. A landscape
-  // map is far wider than it is tall, so the row axis's total trim ends up
-  // tiny next to the column axis's; narrowing both axes in lockstep every
-  // step (the original design) meant the already-short vertical space took
-  // its one possible squeeze on literally the very first step and stayed
-  // that cramped for the rest of the round — every remaining step then had
-  // to be dodged on both a tight vertical band and a still-closing
-  // horizontal one simultaneously, which read as considerably harder than
-  // intended. Deferring the row squeeze to one single event right at the
-  // end keeps the full vertical space available for nearly the whole round,
-  // with only the horizontal edges actually closing in step by step until
-  // that final moment.
+  // Each call closes in on whichever axis is currently the *larger* of the
+  // two (comparing current width vs height), so the rectangle keeps
+  // trending toward a square as it shrinks instead of exhausting one axis
+  // completely before the other ever moves. A landscape map (MAP_COLS >>
+  // MAP_ROWS) means the column axis still ends up doing the great majority
+  // of the work early on regardless -- width starts far bigger than height,
+  // so this picks the column axis every step until width drops to roughly
+  // match height -- but once they're close, steps start alternating between
+  // axes rather than the row axis being saved for one single squeeze at the
+  // very end. That old one-shot-at-the-end design (see git history) made
+  // the safe zone read as a long, thin "1자" vertical strip for most of a
+  // 개인전 full-closure round (row target 0 there, see this.maxRowInsetTop/
+  // Bottom's own comment) — height stayed pinned at the map's full 7 the
+  // entire time the columns did all 9 of their ring-closes, snapping to 0
+  // only in the last instant. Operator: "안전지대가 너무 세로로 좁아지자나...
+  // 정사각형으로 최대한 좁아지게 해줘. 마지막에 그냥 1자로 좁아지니까 웃겨."
+  // TEAM/FINAL's own much smaller row trim (7 -> 5, one ring either way) is
+  // functionally unaffected by this — it still happens in a single ring-close
+  // once width has narrowed enough to trigger it, just no longer necessarily
+  // deferred to the literal last step, which already reads more evenly.
   //
-  // Each axis's own two edges (left/right, top/bottom) advance together,
-  // each clamped to its own max — since MAX_COL_INSET_LEFT/RIGHT (and
+  // Each axis's own two edges (left/right, top/bottom) still advance
+  // together, each clamped to its own max — since maxColInsetLeft/Right (and
   // likewise the row pair) can differ by one ring when the total trim is
-  // odd, the smaller-capped side simply stops advancing a step or two
-  // before the larger one via Math.min, rather than needing separate
-  // branches per edge.
+  // odd, the smaller-capped side simply stops advancing a step or two before
+  // the larger one via Math.min, rather than needing separate branches per
+  // edge.
   shrinkBoundary() {
-    if (this.colInsetLeft < this.maxColInsetLeft || this.colInsetRight < this.maxColInsetRight) {
+    const colDone = this.colInsetLeft >= this.maxColInsetLeft && this.colInsetRight >= this.maxColInsetRight;
+    const rowDone = this.rowInsetTop >= this.maxRowInsetTop && this.rowInsetBottom >= this.maxRowInsetBottom;
+    if (colDone && rowDone) {
+      return;
+    }
+
+    const width = MAP_COLS - this.colInsetLeft - this.colInsetRight;
+    const height = MAP_ROWS - this.rowInsetTop - this.rowInsetBottom;
+
+    if (!colDone && (rowDone || width >= height)) {
       const oldLeft = this.colInsetLeft;
       const oldRight = this.colInsetRight;
       this.colInsetLeft = Math.min(this.maxColInsetLeft, this.colInsetLeft + 1);
@@ -1765,13 +1803,11 @@ export default class Room {
       return;
     }
 
-    if (this.rowInsetTop < this.maxRowInsetTop || this.rowInsetBottom < this.maxRowInsetBottom) {
-      const oldTop = this.rowInsetTop;
-      const oldBottom = this.rowInsetBottom;
-      this.rowInsetTop = this.maxRowInsetTop;
-      this.rowInsetBottom = this.maxRowInsetBottom;
-      this.collapseTilesLeavingSafeZone(this.insetBounds(oldTop, oldBottom, this.colInsetLeft, this.colInsetRight));
-    }
+    const oldTop = this.rowInsetTop;
+    const oldBottom = this.rowInsetBottom;
+    this.rowInsetTop = Math.min(this.maxRowInsetTop, this.rowInsetTop + 1);
+    this.rowInsetBottom = Math.min(this.maxRowInsetBottom, this.rowInsetBottom + 1);
+    this.collapseTilesLeavingSafeZone(this.insetBounds(oldTop, oldBottom, this.colInsetLeft, this.colInsetRight));
   }
 
   // The interval before the Nth boundary-shrink step (1-indexed) — mode-

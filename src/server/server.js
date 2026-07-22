@@ -160,6 +160,124 @@ function tickAllRooms() {
     }
   });
   broadcastDashboard();
+  try {
+    updateEchoCompanions();
+  } catch (error) {
+    console.error('updateEchoCompanions failed:', error);
+  }
+}
+
+// 팀전(TEAM) SURVIVAL is played in per-lineage rooms, so the moment a
+// player's whole team is down to just them, the room they're in goes
+// completely quiet for the rest of the round (operator: "혼자만 조에서
+// 남았을 경우에... 플레이하는 게 좀 고독한것 같아"). This mirrors one other
+// still-alive player from a sibling 팀전 room in this same stage into that
+// lonely room as a translucent, non-interactive "echo" -- position only, no
+// tile/collision/elimination effects, so it can't be mistaken for a real
+// threat or teammate. `rooms` only ever holds the current stage's live
+// rooms (see broadcastDashboard()'s own comment), so no extra stage
+// filtering is needed here either.
+function updateEchoCompanions() {
+  const teamSurvivalRooms = [];
+  rooms.forEach((room) => {
+    if (!room.finished && room.mode === 'SURVIVAL' && room.gameMode === 'TEAM') {
+      teamSurvivalRooms.push(room);
+    }
+  });
+
+  teamSurvivalRooms.forEach((room) => {
+    const alive = Object.values(room.players).filter((p) => !p.eliminated);
+    // Only mirror a companion in for an actual human playing solo -- a
+    // room whose last-standing player happens to be a bot (every real
+    // human already gone, just not yet cleaned up) has nobody to show this
+    // to, and 2+ still alive isn't lonely yet.
+    const lonely = alive.length === 1 && !alive[0].isBot ? alive[0] : null;
+
+    if (!lonely) {
+      if (echoAssignments.has(room.id)) {
+        echoAssignments.delete(room.id);
+        io.to(room.id).emit('echoCompanionCleared');
+      }
+      return;
+    }
+
+    const current = echoAssignments.get(room.id);
+    const companionRoom = current && rooms.get(current.roomId);
+    const companionPlayer = companionRoom && companionRoom.players[current.playerId];
+    const stillValid = companionRoom && !companionRoom.finished
+      && companionPlayer && !companionPlayer.eliminated;
+    if (stillValid) {
+      return;
+    }
+
+    // (Re)assign: every other 팀전 SURVIVAL room's still-alive players
+    // (bots included -- operator: someone to see is better than nobody,
+    // even if it's a bot wandering around) are fair game.
+    const candidates = [];
+    teamSurvivalRooms.forEach((otherRoom) => {
+      if (otherRoom.id === room.id) {
+        return;
+      }
+      Object.values(otherRoom.players).forEach((p) => {
+        if (!p.eliminated) {
+          candidates.push({
+            roomId: otherRoom.id, playerId: p.playerId, x: p.x, y: p.y, animalIndex: p.animalIndex,
+          });
+        }
+      });
+    });
+
+    if (candidates.length === 0) {
+      if (echoAssignments.has(room.id)) {
+        echoAssignments.delete(room.id);
+        io.to(room.id).emit('echoCompanionCleared');
+      }
+      return;
+    }
+
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    echoAssignments.set(room.id, { roomId: pick.roomId, playerId: pick.playerId });
+    io.to(room.id).emit('echoCompanionAssigned', { x: pick.x, y: pick.y, animalIndex: pick.animalIndex });
+  });
+
+  // Prune assignments left behind by a lonely room that has since finished
+  // and been deleted from `rooms` -- nothing left to emit to.
+  echoAssignments.forEach((_, lonelyRoomId) => {
+    if (!rooms.has(lonelyRoomId)) {
+      echoAssignments.delete(lonelyRoomId);
+    }
+  });
+}
+
+// A room's own 'gameStarting' broadcast (startStage()) always fires before
+// anyone could possibly be lonely yet, so it never needs this -- but a late
+// spectator join via adminSpectateRoom can land well after an assignment
+// already happened, and would otherwise see an empty board until the next
+// 1s updateEchoCompanions() tick happens to reassign. Used to seed that
+// snapshot with whatever's already assigned, if anything.
+function getEchoCompanionSnapshot(roomId) {
+  const companion = echoAssignments.get(roomId);
+  if (!companion) {
+    return null;
+  }
+  const companionRoom = rooms.get(companion.roomId);
+  const companionPlayer = companionRoom && companionRoom.players[companion.playerId];
+  if (!companionPlayer) {
+    return null;
+  }
+  return { x: companionPlayer.x, y: companionPlayer.y, animalIndex: companionPlayer.animalIndex };
+}
+
+// Fired from every Room's onPlayerMove hook (see Room.js's
+// broadcastPlayerMoved) regardless of whether that player currently matters
+// to this feature -- cheap no-op scan through however many rooms are
+// currently lonely (almost always zero or one) when they don't.
+function relayEchoCompanionMove(roomId, playerId, x, y) {
+  echoAssignments.forEach((companion, lonelyRoomId) => {
+    if (companion.roomId === roomId && companion.playerId === playerId) {
+      io.to(lonelyRoomId).emit('echoCompanionMoved', { x, y });
+    }
+  });
 }
 
 // Feeds the admin's multi-room dashboard (stage 1/2 only — see
@@ -245,6 +363,14 @@ let lobbyPlayers = {}; // socketId -> { nickname, isBot }
 
 const rooms = new Map(); // roomId -> Room
 const socketRoomMap = new Map(); // socketId -> roomId
+
+// lonelyRoomId -> { roomId, playerId } of the "echo companion" currently
+// mirrored into that room -- purely cosmetic (see updateEchoCompanions()),
+// so this only ever holds entries for a 팀전 SURVIVAL room whose whole team
+// has been reduced to its last living (non-bot) member. Keyed by the lonely
+// room rather than the companion, since a single companion can validly be
+// mirrored into several simultaneously-lonely rooms at once.
+const echoAssignments = new Map();
 
 let roomCounter = 0;
 // Reset to 0 by both clearLobby and resetServerState -- otherwise bot
@@ -615,6 +741,7 @@ function startStage(lineages, stage, gameMode = 'TEAM') {
         gameMode,
         onFinished: (advancing, finalScore, reason, playerResults) =>
           handleRoomFinished(index, roomId, advancing, finalScore, gameMode, playerResults),
+        onPlayerMove: (playerId, x, y) => relayEchoCompanionMove(roomId, playerId, x, y),
       });
       rooms.set(roomId, room);
 
@@ -927,6 +1054,7 @@ function resetServerState() {
   });
   rooms.clear();
   socketRoomMap.clear();
+  echoAssignments.clear();
 
   // Same force-disconnect treatment clearLobby already gives lobby-only
   // players, just extended to anyone currently seated in a room too —
@@ -1307,7 +1435,11 @@ function setServerHandlers() {
       socket.leave(DASHBOARD_ROOM);
       socket.join(roomId);
       socket.emit('gameStarting', {
-        ...room.getSnapshot(), isSpectator: true, fromDashboard: true, isAdmin: true,
+        ...room.getSnapshot(),
+        isSpectator: true,
+        fromDashboard: true,
+        isAdmin: true,
+        echoCompanion: getEchoCompanionSnapshot(roomId),
       });
     });
 
